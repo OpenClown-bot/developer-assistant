@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS project_bindings (
 
 _CREATE_SCHEDULED_PROGRESS = """
 CREATE TABLE IF NOT EXISTS scheduled_progress (
-    project_key TEXT PRIMARY KEY,
+    project_key TEXT PRIMARY KEY REFERENCES project_bindings(chat_key),
     last_report_at TEXT,
     next_report_at TEXT,
     interval_minutes INTEGER,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS scheduled_progress (
 _CREATE_HERMES_RUNS = """
 CREATE TABLE IF NOT EXISTS hermes_runs (
     run_id TEXT PRIMARY KEY,
-    project_key TEXT NOT NULL,
+    project_key TEXT NOT NULL REFERENCES project_bindings(chat_key),
     role TEXT,
     task_type TEXT,
     status TEXT NOT NULL,
@@ -110,6 +110,7 @@ def open_store(db_path: str) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     init_schema(conn)
     return conn
 
@@ -131,9 +132,9 @@ def upsert_project_binding(
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(chat_key) DO UPDATE SET
                repo_url = excluded.repo_url,
-               repo_owner_name = excluded.repo_owner_name,
-               workspace_path = excluded.workspace_path,
-               phase = excluded.phase,
+               repo_owner_name = COALESCE(excluded.repo_owner_name, project_bindings.repo_owner_name),
+               workspace_path = COALESCE(excluded.workspace_path, project_bindings.workspace_path),
+               phase = COALESCE(excluded.phase, project_bindings.phase),
                updated_at = excluded.updated_at
         """,
         (chat_key, repo_url, repo_owner_name, workspace_path, phase, now),
