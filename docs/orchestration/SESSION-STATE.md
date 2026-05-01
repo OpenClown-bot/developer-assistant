@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, and TKT-001 validator baseline are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, and Hermes-aligned role prompts are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 is complete and TKT-002 is satisfied by the existing CI baseline; preparing the next ready implementation ticket.
+TKT-001, TKT-002, and TKT-003 are complete; preparing TKT-004.
 
 ## Process Variant
 
@@ -30,7 +30,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 - `TKT-001`: done in PR #4.
 - `TKT-002`: done; satisfied by existing Docs CI baseline.
-- `TKT-003`: ready in PR #1.
+- `TKT-003`: done in PR #8.
 - `TKT-004`: ready in PR #1.
 
 ## Current Blockers
@@ -74,4 +74,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Start `TKT-003`.
+Start `TKT-004`.
