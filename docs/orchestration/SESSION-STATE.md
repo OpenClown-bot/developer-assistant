@@ -16,7 +16,7 @@ updated: 2026-05-01
 
 ## Current Phase
 
-TKT-001 is complete; preparing the next ready implementation ticket.
+TKT-001 is complete and TKT-002 is satisfied by the existing CI baseline; preparing the next ready implementation ticket.
 
 ## Process Variant
 
@@ -29,7 +29,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 ## Current Active Tickets
 
 - `TKT-001`: done in PR #4.
-- `TKT-002`: ready; unblocked by completed TKT-001 validator baseline.
+- `TKT-002`: done; satisfied by existing Docs CI baseline.
 - `TKT-003`: ready in PR #1.
 - `TKT-004`: ready in PR #1.
 
@@ -74,4 +74,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Start `TKT-002` unless the user chooses to skip it because the CI baseline already exists from bootstrap work.
+Start `TKT-003`.
