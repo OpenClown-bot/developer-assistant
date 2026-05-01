@@ -108,7 +108,7 @@ PR #3 safely and correctly configures the core Qodo PR-Agent → OmniRoute → Q
 
 1. **Pin `the-pr-agent/pr-agent`** to a specific release tag or immutable commit SHA (ADR-003 requirement).
 2. **Remove `contents: write`** from the workflow permissions; retain only `pull-requests: write` and `issues: write` to enforce the advisory-only posture.
-3. **Rename `OPENAI.API_BASE` / `OPENAI.API_TYPE`** to `OPENAI_API_BASE` / `OPENAI_API_TYPE` for POSIX-compliant environment variable naming.
+3. **Rename `OPENAI.API_BASE` / `OPENAI.API_TYPE`** to a POSIX-compliant form. The implementation uses PR-Agent's documented double-underscore mapping: `OPENAI__API_BASE` / `OPENAI__API_TYPE`.
 
 **Follow-up recommendations** (non-blocking):
 
