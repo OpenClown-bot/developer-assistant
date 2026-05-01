@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, and PR/review templates are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, and Hermes runtime integration contract are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-004 are complete; TKT-005 is prepared as the next implementation ticket.
+TKT-001 through TKT-005 are complete; the next implementation batch needs Architect preparation based on the Hermes runtime integration contract.
 
 ## Process Variant
 
@@ -32,7 +32,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-002`: done; satisfied by existing Docs CI baseline.
 - `TKT-003`: done in PR #8.
 - `TKT-004`: done in PR #10.
-- `TKT-005`: ready; next recommended Executor ticket.
+- `TKT-005`: done in PR #13.
 
 ## Current Blockers
 
@@ -75,4 +75,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Open Executor work for `TKT-005` to define the Hermes runtime integration contract. Keep `TKT-006` through `TKT-011` in `draft` until TKT-005 outputs clarify the runtime boundary, state responsibilities, skill/plugin allowlist needs, and end-to-end trial prerequisites.
+Open Architect work to prepare the next implementation batch after `TKT-005`. Reassess `TKT-006` through `TKT-011` against `docs/architecture/HERMES-RUNTIME-CONTRACT.md`; likely next ready candidates are the Hermes skill/plugin allowlist (`TKT-009`) and/or operational state store (`TKT-007`) before credential-bearing Telegram and GitHub automation.
