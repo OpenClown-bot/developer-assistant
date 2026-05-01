@@ -1,6 +1,6 @@
 ---
 id: OPERATIONAL-STATE-STORE
-version: 0.1.0
+version: 0.2.0
 status: active
 ---
 
@@ -46,24 +46,28 @@ Three operational tables plus one internal metadata table:
 
 | Column | Type | Purpose |
 | --- | --- | --- |
-| project_key | TEXT PK | References chat_key from project_bindings |
+| project_key | TEXT PK | References chat_key from project_bindings (FOREIGN KEY) |
 | last_report_at | TEXT | ISO 8601 timestamp of last progress report sent |
 | next_report_at | TEXT | ISO 8601 timestamp of next scheduled report |
 | interval_minutes | INTEGER | Report interval in minutes (30-60 per ARCH-001) |
 | updated_at | TEXT NOT NULL | ISO 8601 UTC timestamp of last upsert |
+
+Foreign key: `project_key REFERENCES project_bindings(chat_key)`.
 
 ### 3.3 hermes_runs
 
 | Column | Type | Purpose |
 | --- | --- | --- |
 | run_id | TEXT PK | Hermes agent run identifier |
-| project_key | TEXT NOT NULL | References chat_key from project_bindings |
+| project_key | TEXT NOT NULL | References chat_key from project_bindings (FOREIGN KEY) |
 | role | TEXT | Assigned role (orchestrator, business_planner, architect, executor, reviewer) |
 | task_type | TEXT | Task classification |
 | status | TEXT NOT NULL | Run status (pending, in_progress, completed, blocked, failed) |
 | idempotency_key | TEXT UNIQUE | Retry/idempotency key for deduplication |
 | in_flight_meta | TEXT | JSON-serialized in-flight task metadata |
 | updated_at | TEXT NOT NULL | ISO 8601 UTC timestamp of last upsert |
+
+Foreign key: `project_key REFERENCES project_bindings(chat_key)`.
 
 Index: `idx_hermes_runs_idempotency` on `idempotency_key`.
 
@@ -102,6 +106,22 @@ The implementation module (`src/developer_assistant/state_store.py`) provides:
 | `reset_store(db)` | Delete all operational data rows, preserving schema |
 
 All functions are stdlib-only (sqlite3, json, datetime). No third-party dependencies.
+
+### 5.1 Foreign Key Enforcement
+
+`open_store` executes `PRAGMA foreign_keys = ON` on every connection. This means:
+
+- Inserting a `scheduled_progress` or `hermes_runs` row with a `project_key` that does not exist in `project_bindings.chat_key` raises `sqlite3.IntegrityError`.
+- Deleting a `project_bindings` row that is referenced by child rows raises `sqlite3.IntegrityError` unless the child rows are deleted first.
+- `reset_store` already deletes child tables before the parent table, so it works correctly under FK enforcement.
+
+### 5.2 Upsert Semantics
+
+All upsert functions use **partial-update** semantics: omitted optional fields (passed as `None`) are preserved from the existing row using `COALESCE`. To explicitly clear an optional field, the caller must pass a non-`None` value (e.g., an empty string for text fields). This applies to:
+
+- `upsert_project_binding`: `repo_owner_name`, `workspace_path`, `phase` are preserved on conflict when `None`.
+- `upsert_scheduled_progress`: `last_report_at`, `next_report_at`, `interval_minutes` are preserved on conflict when `None`.
+- `upsert_hermes_run`: `idempotency_key` is preserved on conflict when `None` (to prevent accidental clearing of a deduplication key). Other fields (`role`, `task_type`, `status`, `in_flight_meta`, `project_key`) are full-replacement on conflict.
 
 ## 6. Backup and Reset Behavior (v0.1)
 
@@ -173,7 +193,19 @@ Tests use `:memory:` for transient in-process databases or `tempfile` for file-b
 
 If operational state contradicts repository artifacts, repository artifacts take precedence per `HERMES-RUNTIME-CONTRACT.md` Section 3.
 
-## 9. Future Considerations
+## 9. Concurrency and WAL Guidance
+
+The v0.1 operational store assumes **single-threaded, single-process access** to the SQLite database. The Hermes runtime adapter should use the connection from a single thread or serialize access through a single worker.
+
+If the adapter later shares the connection across threads or async workers:
+
+- Enable WAL mode (`PRAGMA journal_mode = WAL`) to allow concurrent readers while a writer holds the lock. This avoids "database is locked" errors under read-heavy workloads.
+- Use `sqlite3.connect(..., check_same_thread=False)` only if the calling code serializes all database access.
+- Consider moving to a connection pool or async SQLite driver for high-concurrency scenarios beyond v0.1.
+
+For v0.1 deployments, the default rollback journal mode is acceptable because the expected workload is single-writer with infrequent reads.
+
+## 10. Future Considerations
 
 - Schema versioning and migration: the `_schema_meta` table tracks `schema_version` for future migration support. No migration framework is implemented in v0.1.
 - Hermes native persistence may be evaluated for conversation context in a follow-up ticket, but structured operational queries remain in SQLite.

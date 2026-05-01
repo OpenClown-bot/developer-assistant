@@ -116,6 +116,25 @@ class TestProjectBinding(unittest.TestCase):
         self.assertEqual(row["repo_url"], "https://github.com/example/proj-beta-v2")
         self.assertEqual(row["phase"], "review")
 
+    def test_upsert_preserves_omitted_optional_fields(self) -> None:
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-delta",
+            repo_url="https://github.com/example/proj-delta",
+            repo_owner_name="example/proj-delta",
+            workspace_path="/workspaces/proj-delta",
+            phase="implementation",
+        )
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-delta",
+            repo_url="https://github.com/example/proj-delta",
+        )
+        row = read_project_binding(self.conn, "chat:proj-delta")
+        self.assertEqual(row["repo_owner_name"], "example/proj-delta")
+        self.assertEqual(row["workspace_path"], "/workspaces/proj-delta")
+        self.assertEqual(row["phase"], "implementation")
+
     def test_list_bindings(self) -> None:
         upsert_project_binding(
             self.conn, chat_key="chat:a", repo_url="https://github.com/example/a"
@@ -131,6 +150,16 @@ class TestProjectBinding(unittest.TestCase):
 class TestScheduledProgress(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = open_store(":memory:")
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-alpha",
+            repo_url="https://github.com/example/proj-alpha",
+        )
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-gamma",
+            repo_url="https://github.com/example/proj-gamma",
+        )
 
     def tearDown(self) -> None:
         self.conn.close()
@@ -174,6 +203,26 @@ class TestScheduledProgress(unittest.TestCase):
 class TestHermesRun(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = open_store(":memory:")
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-alpha",
+            repo_url="https://github.com/example/proj-alpha",
+        )
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-beta",
+            repo_url="https://github.com/example/proj-beta",
+        )
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-gamma",
+            repo_url="https://github.com/example/proj-gamma",
+        )
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-delta",
+            repo_url="https://github.com/example/proj-delta",
+        )
 
     def tearDown(self) -> None:
         self.conn.close()
@@ -241,19 +290,96 @@ class TestHermesRun(unittest.TestCase):
         self.assertIsNone(row["in_flight_meta"])
 
 
-class TestResetStore(unittest.TestCase):
+class TestForeignKeyEnforcement(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = open_store(":memory:")
 
     def tearDown(self) -> None:
         self.conn.close()
 
-    def test_reset_clears_all_data(self) -> None:
+    def test_foreign_keys_pragma_enabled(self) -> None:
+        cur = self.conn.execute("PRAGMA foreign_keys")
+        self.assertEqual(cur.fetchone()["foreign_keys"], 1)
+
+    def test_scheduled_progress_fk_blocks_orphan(self) -> None:
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "INSERT INTO scheduled_progress (project_key, updated_at) VALUES (?, ?)",
+                ("chat:orphan", "2026-05-01T00:00:00+00:00"),
+            )
+
+    def test_hermes_runs_fk_blocks_orphan(self) -> None:
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "INSERT INTO hermes_runs (run_id, project_key, status, updated_at) VALUES (?, ?, ?, ?)",
+                ("run-orphan", "chat:orphan", "pending", "2026-05-01T00:00:00+00:00"),
+            )
+
+    def test_delete_binding_blocked_by_scheduled_progress(self) -> None:
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-fk",
+            repo_url="https://github.com/example/proj-fk",
+        )
+        upsert_scheduled_progress(
+            self.conn,
+            project_key="chat:proj-fk",
+            interval_minutes=30,
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("DELETE FROM project_bindings WHERE chat_key = ?", ("chat:proj-fk",))
+
+    def test_delete_binding_blocked_by_hermes_runs(self) -> None:
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-fk2",
+            repo_url="https://github.com/example/proj-fk2",
+        )
+        upsert_hermes_run(
+            self.conn,
+            run_id="run-fk",
+            project_key="chat:proj-fk2",
+            status="pending",
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("DELETE FROM project_bindings WHERE chat_key = ?", ("chat:proj-fk2",))
+
+    def test_delete_cascade_order_works(self) -> None:
+        upsert_project_binding(
+            self.conn,
+            chat_key="chat:proj-fk3",
+            repo_url="https://github.com/example/proj-fk3",
+        )
+        upsert_scheduled_progress(
+            self.conn,
+            project_key="chat:proj-fk3",
+            interval_minutes=30,
+        )
+        upsert_hermes_run(
+            self.conn,
+            run_id="run-fk3",
+            project_key="chat:proj-fk3",
+            status="pending",
+        )
+        self.conn.execute("DELETE FROM hermes_runs WHERE run_id = ?", ("run-fk3",))
+        self.conn.execute("DELETE FROM scheduled_progress WHERE project_key = ?", ("chat:proj-fk3",))
+        self.conn.execute("DELETE FROM project_bindings WHERE chat_key = ?", ("chat:proj-fk3",))
+        self.assertIsNone(read_project_binding(self.conn, "chat:proj-fk3"))
+
+
+class TestResetStore(unittest.TestCase):
+    def setUp(self) -> None:
+        self.conn = open_store(":memory:")
         upsert_project_binding(
             self.conn,
             chat_key="chat:proj-a",
             repo_url="https://github.com/example/a",
         )
+
+    def tearDown(self) -> None:
+        self.conn.close()
+
+    def test_reset_clears_all_data(self) -> None:
         upsert_scheduled_progress(
             self.conn,
             project_key="chat:proj-a",
