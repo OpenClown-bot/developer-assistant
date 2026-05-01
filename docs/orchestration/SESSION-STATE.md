@@ -16,7 +16,7 @@ updated: 2026-05-01
 
 ## Current Phase
 
-TKT-001 through TKT-005, TKT-007, and TKT-009 are complete; the next implementation batch needs Architect preparation.
+TKT-001 through TKT-005, TKT-007, and TKT-009 are complete; source review and state-store hardening are prepared before credential-bearing runtime work.
 
 ## Process Variant
 
@@ -35,6 +35,9 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-005`: done in PR #13.
 - `TKT-009`: done in PR #16.
 - `TKT-007`: done in PR #18.
+- `TKT-012`: ready; source-review gate for credential-bearing Hermes Telegram and GitHub capabilities.
+- `TKT-013`: ready; state-store hardening follow-up from RV-CODE-010.
+- `TKT-010`: ready; orthogonal generated-project deployment contract.
 
 ## Current Blockers
 
@@ -77,4 +80,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Open Architect work to prepare the next implementation batch after TKT-007 and TKT-009. Reassess whether TKT-006 (Telegram founder interaction), TKT-008 (GitHub integration), TKT-010 (deployment contract), or follow-up hardening tickets should become ready, accounting for the source-review caveats in `docs/architecture/HERMES-SKILL-ALLOWLIST.md` and low-severity state-store review findings in `docs/reviews/RV-CODE-010.md`.
+Open Executor work for `TKT-012` first to clear or document the source-review gate for production credential-bearing Hermes Telegram and GitHub capabilities. `TKT-013` should follow before runtime work depends heavily on project-binding updates or scheduled progress persistence. `TKT-010` is ready as an orthogonal docs-only deployment contract and can run in parallel if desired. Keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until source-review and runtime prerequisites are satisfied.
