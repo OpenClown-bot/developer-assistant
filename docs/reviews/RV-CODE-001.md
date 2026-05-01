@@ -9,7 +9,7 @@ verdict: pass_with_changes
 
 ## 1. PR Reviewed
 
-- **PR:** [#1](https://github.com/OpenClown-bot/assistant-developer/pull/1)  
+- **PR:** [#1](https://github.com/OpenClown-bot/developer-assistant/pull/1)  
   `chore/mark-initial-tickets-ready` → `main`
 - **Author:** OpenClown-bot
 - **Commits:** 2
@@ -46,7 +46,7 @@ Tickets correctly **left as `draft`**:
 - **Result:** Passed
 - **Workflow:** `.github/workflows/docs-ci.yml`
 - **Job:** `validate-docs` – succeeded in ~7 s (total run ~12 s)
-- **Logs:** [Run #25214379050](https://github.com/OpenClown-bot/assistant-developer/actions/runs/25214379050)
+- **Logs:** [Run #25214379050](https://github.com/OpenClown-bot/developer-assistant/actions/runs/25214379050)
 - **Warning:** Node.js 20 deprecation notice for `actions/checkout@v4` and `actions/setup-python@v5` (1 annotation). This does not block merge but should be upgraded before the forced Node.js 24 default date.
 
 ## 4. Findings Ordered by Severity
