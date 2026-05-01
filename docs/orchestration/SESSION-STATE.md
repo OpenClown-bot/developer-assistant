@@ -65,6 +65,9 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - GitHub repository: `https://github.com/OpenClown-bot/developer-assistant`.
 - Local git identity observed: `OpenClown-bot <yourmomsenpai@yandex.ru>`.
 - Preferred review stack: GitHub Actions, docs validation, relevant tests/lint/typecheck, `pr-agent`, and separate Reviewer LLM.
+- PR-Agent configuration is being added as an advisory automated review layer using Qodo PR-Agent on Qwen 3.6 Plus through OmniRoute.
+- Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
+- PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
 - Available LLMs: Codex GPT-5.5 High/XHigh, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
 - Planned role-model mapping: Business Planner = Codex GPT-5.5 High; Architect = Codex GPT-5.5 XHigh; Executor = GLM 5.1; Reviewer = Kimi 2.6.
 - Token budget: no strict limit for listed models.
@@ -75,7 +78,8 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Explicit user merge approval for PR #1 after required review changes are satisfied.
 - `pr-agent` is not configured yet and needs an architecture/ticket follow-up before the process grows.
 - Whether to install GitHub CLI `gh` or proceed with plain `git` plus GitHub REST API for PR operations.
-- Add a dedicated `pr-agent` setup ticket and implementation PR.
+- Review and merge PR #3 after PR-Agent workflow and Reviewer LLM required changes pass.
+- Create a retroactive ticket for PR-Agent setup if required before future automation changes.
 
 ## Next Recommended Action
 

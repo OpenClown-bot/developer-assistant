@@ -1,0 +1,33 @@
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+  workflow_dispatch:
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    name: Run PR Agent on every pull request
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: the-pr-agent/pr-agent@0e37fc84fcc8207561e64eef8f7f634fb57e8447
+        env:
+          OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
+          OPENAI__API_BASE: "https://omniroute.infinitycore.space:8443/v1"
+          OPENAI__API_TYPE: "openai"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          config.model: "openai/accounts/fireworks/models/qwen3p6-plus"
+          config.custom_model_max_tokens: "131072"
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
