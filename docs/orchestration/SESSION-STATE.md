@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, and Hermes runtime integration contract are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, and Hermes skill/plugin security allowlist are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-005 are complete; TKT-009 and TKT-007 are prepared as the next implementation batch.
+TKT-001 through TKT-005 and TKT-009 are complete; TKT-007 remains ready as the next implementation ticket.
 
 ## Process Variant
 
@@ -33,8 +33,8 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-003`: done in PR #8.
 - `TKT-004`: done in PR #10.
 - `TKT-005`: done in PR #13.
-- `TKT-009`: ready; next recommended Executor ticket for Hermes skill/plugin security allowlist.
-- `TKT-007`: ready; can follow or proceed in parallel if the Orchestrator chooses a non-credential-bearing operational state task.
+- `TKT-009`: done in PR #16.
+- `TKT-007`: ready; next recommended Executor ticket for operational state store.
 
 ## Current Blockers
 
@@ -77,4 +77,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Open Executor work for `TKT-009` first to define the Hermes skill/plugin security allowlist required before credential-bearing Telegram and GitHub automation. `TKT-007` is also ready and may run next or in parallel if capacity allows; keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until the allowlist and required runtime/state foundations are complete.
+Open Executor work for `TKT-007` to implement the non-credential-bearing operational state store for Telegram/Hermes run metadata. Keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until the operational state foundation is complete and credential-bearing runtime work is explicitly prepared.
