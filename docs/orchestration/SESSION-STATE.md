@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: bootstrap scaffold created; PRD draft and approved architecture baseline exist. Local folder is not yet initialized as a git repository at the time of approval.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, and TKT-001 validator baseline are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-Architecture baseline approved; preparing first implementation ticket readiness and GitHub repository setup.
+TKT-001 is complete; preparing the next ready implementation ticket.
 
 ## Process Variant
 
@@ -24,17 +24,12 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Active PRs
 
-- PR #1: `https://github.com/OpenClown-bot/developer-assistant/pull/1`
-  - Branch: `chore/mark-initial-tickets-ready`
-  - Purpose: mark TKT-001 through TKT-004 as ready after architecture approval.
-  - CI: Docs CI passed.
-  - Reviewer verdict: `pass_with_changes` in `docs/reviews/RV-CODE-001.md`.
-  - Pending: Architect status sync for approved `ARCH-001`/ADRs, then explicit user merge approval.
+- None.
 
 ## Current Active Tickets
 
-- `TKT-001`: ready in PR #1.
-- `TKT-002`: ready in PR #1, but must not move to `in_progress` until `TKT-001` is `done` or its validator baseline is otherwise confirmed available.
+- `TKT-001`: done in PR #4.
+- `TKT-002`: ready; unblocked by completed TKT-001 validator baseline.
 - `TKT-003`: ready in PR #1.
 - `TKT-004`: ready in PR #1.
 
@@ -65,7 +60,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - GitHub repository: `https://github.com/OpenClown-bot/developer-assistant`.
 - Local git identity observed: `OpenClown-bot <yourmomsenpai@yandex.ru>`.
 - Preferred review stack: GitHub Actions, docs validation, relevant tests/lint/typecheck, `pr-agent`, and separate Reviewer LLM.
-- PR-Agent configuration is being added as an advisory automated review layer using Qodo PR-Agent on Qwen 3.6 Plus through OmniRoute.
+- PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on Qwen 3.6 Plus through OmniRoute.
 - Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
 - PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
 - Available LLMs: Codex GPT-5.5 High/XHigh, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
@@ -74,13 +69,9 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Pending User Decisions
 
-- Architect must update approved architecture/ADR frontmatter statuses from `draft` to an approved status before PR #1 is merged or immediately before Executor work starts.
-- Explicit user merge approval for PR #1 after required review changes are satisfied.
-- `pr-agent` is not configured yet and needs an architecture/ticket follow-up before the process grows.
-- Whether to install GitHub CLI `gh` or proceed with plain `git` plus GitHub REST API for PR operations.
-- Review and merge PR #3 after PR-Agent workflow and Reviewer LLM required changes pass.
-- Create a retroactive ticket for PR-Agent setup if required before future automation changes.
+- Whether to install GitHub CLI `gh` or continue with plain `git` plus GitHub REST API for PR operations.
+- Whether to create a retroactive ticket for PR-Agent setup/configuration history.
 
 ## Next Recommended Action
 
-Run Reviewer LLM review for PR #1, then request explicit user merge approval. In parallel, ask Architect to add a `pr-agent` setup ticket because automated PR review was selected but is not configured yet.
+Start `TKT-002` unless the user chooses to skip it because the CI baseline already exists from bootstrap work.
