@@ -98,6 +98,8 @@ author's description.
 """
 
 [pr_code_suggestions]
+# Run suggestions manually with `/improve` when needed. Automatic improve calls are
+# disabled in the workflow because they add several slow LLM calls per push.
 # Inline suggestions become committable directly from the GitHub UI.
 commitable_code_suggestions = true
 focus_only_on_problems = true
