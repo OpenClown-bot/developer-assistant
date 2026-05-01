@@ -1,7 +1,7 @@
 ---
 id: ADR-003
 version: 0.2.0
-status: draft
+status: approved
 ---
 
 # ADR-003: Allow Reviewed Hermes Skills and Plugins with Strict Supply-Chain Controls

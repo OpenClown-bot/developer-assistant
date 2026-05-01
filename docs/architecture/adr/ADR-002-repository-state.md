@@ -1,7 +1,7 @@
 ---
 id: ADR-002
 version: 0.2.0
-status: draft
+status: approved
 ---
 
 # ADR-002: Use Repository Artifacts for Governance and External Store for Operational Runtime State
