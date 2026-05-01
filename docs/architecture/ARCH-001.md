@@ -1,7 +1,7 @@
 ---
 id: ARCH-001
 version: 0.2.0
-status: draft
+status: approved
 ---
 
 # ARCH-001: Telegram-First Hermes-Centered v0.1 Architecture

@@ -1,7 +1,7 @@
 ---
 id: ADR-001
 version: 0.2.0
-status: draft
+status: approved
 ---
 
 # ADR-001: Use a Hermes-First Hybrid Foundation for v0.1
