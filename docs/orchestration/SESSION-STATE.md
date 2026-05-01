@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, and Hermes skill/plugin security allowlist are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, and operational state store are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-005 and TKT-009 are complete; TKT-007 remains ready as the next implementation ticket.
+TKT-001 through TKT-005, TKT-007, and TKT-009 are complete; the next implementation batch needs Architect preparation.
 
 ## Process Variant
 
@@ -34,7 +34,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-004`: done in PR #10.
 - `TKT-005`: done in PR #13.
 - `TKT-009`: done in PR #16.
-- `TKT-007`: ready; next recommended Executor ticket for operational state store.
+- `TKT-007`: done in PR #18.
 
 ## Current Blockers
 
@@ -77,4 +77,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Open Executor work for `TKT-007` to implement the non-credential-bearing operational state store for Telegram/Hermes run metadata. Keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until the operational state foundation is complete and credential-bearing runtime work is explicitly prepared.
+Open Architect work to prepare the next implementation batch after TKT-007 and TKT-009. Reassess whether TKT-006 (Telegram founder interaction), TKT-008 (GitHub integration), TKT-010 (deployment contract), or follow-up hardening tickets should become ready, accounting for the source-review caveats in `docs/architecture/HERMES-SKILL-ALLOWLIST.md` and low-severity state-store review findings in `docs/reviews/RV-CODE-010.md`.
