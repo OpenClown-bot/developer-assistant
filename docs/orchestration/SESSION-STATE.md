@@ -24,7 +24,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Active PRs
 
-- PR #1: `https://github.com/OpenClown-bot/assistant-developer/pull/1`
+- PR #1: `https://github.com/OpenClown-bot/developer-assistant/pull/1`
   - Branch: `chore/mark-initial-tickets-ready`
   - Purpose: mark TKT-001 through TKT-004 as ready after architecture approval.
   - CI: Docs CI passed.
@@ -40,10 +40,10 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Blockers
 
-- Local folder is not yet initialized as a git repository.
 - GitHub CLI `gh` is not available in PATH in this environment.
-- GitHub repository exists at `https://github.com/OpenClown-bot/assistant-developer`, but no remote is configured locally yet.
-- Temporary GitHub PAT is not configured in this session.
+- GitHub repository was renamed from `OpenClown-bot/assistant-developer` to `OpenClown-bot/developer-assistant`.
+- Local git remote `origin` points to `https://github.com/OpenClown-bot/developer-assistant.git`.
+- Temporary GitHub PAT is configured in the current environment for this session.
 
 ## Current Architectural Decisions
 
@@ -62,7 +62,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 ## Current Tooling Decisions
 
 - Git host: GitHub.
-- GitHub repository: `https://github.com/OpenClown-bot/assistant-developer`.
+- GitHub repository: `https://github.com/OpenClown-bot/developer-assistant`.
 - Local git identity observed: `OpenClown-bot <yourmomsenpai@yandex.ru>`.
 - Preferred review stack: GitHub Actions, docs validation, relevant tests/lint/typecheck, `pr-agent`, and separate Reviewer LLM.
 - Available LLMs: Codex GPT-5.5 High/XHigh, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
@@ -75,6 +75,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Explicit user merge approval for PR #1 after required review changes are satisfied.
 - `pr-agent` is not configured yet and needs an architecture/ticket follow-up before the process grows.
 - Whether to install GitHub CLI `gh` or proceed with plain `git` plus GitHub REST API for PR operations.
+- Add a dedicated `pr-agent` setup ticket and implementation PR.
 
 ## Next Recommended Action
 
