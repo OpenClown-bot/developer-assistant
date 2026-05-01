@@ -16,7 +16,7 @@ updated: 2026-05-01
 
 ## Current Phase
 
-TKT-001 through TKT-004 are complete; preparing the next implementation batch.
+TKT-001 through TKT-004 are complete; TKT-005 is prepared as the next implementation ticket.
 
 ## Process Variant
 
@@ -32,6 +32,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-002`: done; satisfied by existing Docs CI baseline.
 - `TKT-003`: done in PR #8.
 - `TKT-004`: done in PR #10.
+- `TKT-005`: ready; next recommended Executor ticket.
 
 ## Current Blockers
 
@@ -74,4 +75,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Select and prepare the next ticket after TKT-004.
+Open Executor work for `TKT-005` to define the Hermes runtime integration contract. Keep `TKT-006` through `TKT-011` in `draft` until TKT-005 outputs clarify the runtime boundary, state responsibilities, skill/plugin allowlist needs, and end-to-end trial prerequisites.
