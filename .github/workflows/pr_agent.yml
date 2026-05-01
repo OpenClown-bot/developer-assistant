@@ -22,8 +22,8 @@ jobs:
         uses: the-pr-agent/pr-agent@0e37fc84fcc8207561e64eef8f7f634fb57e8447
         env:
           OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
-          OPENAI_API_BASE: "https://omniroute.infinitycore.space:8443/v1"
-          OPENAI_API_TYPE: "openai"
+          OPENAI__API_BASE: "https://omniroute.infinitycore.space:8443/v1"
+          OPENAI__API_TYPE: "openai"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           config.model: "openai/accounts/fireworks/models/qwen3p6-plus"
           config.custom_model_max_tokens: "131072"
