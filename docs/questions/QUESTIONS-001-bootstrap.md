@@ -38,6 +38,6 @@ status: open
 
 ## Open
 
-1. Which first tickets should be marked `ready` for Executor work after architecture approval?
-2. Should this local folder be initialized as a git repository and connected to `https://github.com/OpenClown-bot/assistant-developer`?
-3. Should GitHub CLI `gh` be installed for PR operations, or should v0.1 proceed with plain `git` plus GitHub UI/API until `gh` is available?
+1. Should GitHub CLI `gh` be installed for PR operations, or should v0.1 proceed with plain `git` plus GitHub REST API until `gh` is available?
+2. Which `pr-agent` integration mode should be used first: GitHub App, GitHub Action, or self-hosted bot on the VPS?
+3. Which secrets and permissions should `pr-agent` receive under the least-privilege policy?

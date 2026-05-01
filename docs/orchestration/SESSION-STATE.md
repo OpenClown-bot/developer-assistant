@@ -24,7 +24,11 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Active PRs
 
-None.
+- PR #1: `https://github.com/OpenClown-bot/assistant-developer/pull/1`
+  - Branch: `chore/mark-initial-tickets-ready`
+  - Purpose: mark TKT-001 through TKT-004 as ready after architecture approval.
+  - CI: Docs CI passed.
+  - Pending: Reviewer LLM artifact and explicit user merge approval.
 
 ## Current Active Tickets
 
@@ -63,11 +67,11 @@ None.
 
 ## Pending User Decisions
 
-- Whether to initialize this local folder as a git repository and connect it to `OpenClown-bot/assistant-developer`.
-- How the user wants to provide the temporary fine-grained GitHub PAT securely for git operations.
-- Whether to install GitHub CLI `gh` or proceed with plain `git` plus browser/API for PR operations.
-- Which first tickets should be marked `ready` after architecture approval, given write-zone discipline.
+- Reviewer LLM review for PR #1.
+- Explicit user merge approval for PR #1 after review.
+- `pr-agent` is not configured yet and needs an architecture/ticket follow-up before the process grows.
+- Whether to install GitHub CLI `gh` or proceed with plain `git` plus GitHub REST API for PR operations.
 
 ## Next Recommended Action
 
-Initialize git/remote if approved, configure temporary GitHub authentication securely, then prepare the first implementation tickets for Executor work without bypassing PR/review gates.
+Run Reviewer LLM review for PR #1, then request explicit user merge approval. In parallel, ask Architect to add a `pr-agent` setup ticket because automated PR review was selected but is not configured yet.
