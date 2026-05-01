@@ -16,7 +16,7 @@ updated: 2026-05-01
 
 ## Current Phase
 
-TKT-001 through TKT-005 are complete; the next implementation batch needs Architect preparation based on the Hermes runtime integration contract.
+TKT-001 through TKT-005 are complete; TKT-009 and TKT-007 are prepared as the next implementation batch.
 
 ## Process Variant
 
@@ -33,6 +33,8 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-003`: done in PR #8.
 - `TKT-004`: done in PR #10.
 - `TKT-005`: done in PR #13.
+- `TKT-009`: ready; next recommended Executor ticket for Hermes skill/plugin security allowlist.
+- `TKT-007`: ready; can follow or proceed in parallel if the Orchestrator chooses a non-credential-bearing operational state task.
 
 ## Current Blockers
 
@@ -75,4 +77,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Open Architect work to prepare the next implementation batch after `TKT-005`. Reassess `TKT-006` through `TKT-011` against `docs/architecture/HERMES-RUNTIME-CONTRACT.md`; likely next ready candidates are the Hermes skill/plugin allowlist (`TKT-009`) and/or operational state store (`TKT-007`) before credential-bearing Telegram and GitHub automation.
+Open Executor work for `TKT-009` first to define the Hermes skill/plugin security allowlist required before credential-bearing Telegram and GitHub automation. `TKT-007` is also ready and may run next or in parallel if capacity allows; keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until the allowlist and required runtime/state foundations are complete.
