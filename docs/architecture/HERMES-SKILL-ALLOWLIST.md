@@ -213,7 +213,7 @@ Project-local plugins under `.hermes/plugins/` are **disabled** by default in He
 
 ### Plugin Opt-In Requirement
 
-Per Hermes v0.12.0, all plugins are opt-in: discovered but not enabled by default. Every enabled plugin must be listed in `plugins.enabled` in `config.yaml`. This allowlist is the governance document that justifies each entry.
+Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by default. Every enabled plugin must be listed in `plugins.enabled` in `config.yaml`. This allowlist is the governance document that justifies each entry.
 
 ## 7. Credential Scope Requirements
 
