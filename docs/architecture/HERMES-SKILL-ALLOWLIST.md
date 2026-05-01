@@ -30,7 +30,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 
 | Assumption | Detail |
 | --- | --- |
-| Hermes Agent version | v0.12.0 (latest stable release as of 2026-04-30); pinned at deployment time |
+| Hermes Agent version | `v2026.4.30` tag, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`; pinned at deployment time |
 | Source URL | `https://github.com/NousResearch/hermes-agent` |
 | Deployment target | User-owned VPS |
 | Terminal backend | `docker` (sandboxed) for production; `local` allowed only during development |
@@ -49,12 +49,12 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `telegram-gateway` |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (built-in gateway module) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Receive and send Telegram messages; authenticate founder via allowlist or DM pairing; route commands and free-form input to Orchestrator |
 | Maintenance category | built-in |
 | Required credentials | `TELEGRAM_BOT_TOKEN` (Telegram bot token from @BotFather) |
 | Permission scope | Send and receive messages in chats where the bot is a member; no admin rights required; scoped to single bot identity |
-| Source review result | not reviewed — Hermes is a large runtime; full source review not completed. **Blocked for credential-bearing production use until source review confirms no credential exfiltration vectors in the Telegram adapter.** Development/testing with a dedicated bot token is acceptable. |
+| Source review result | passed with constraints — reviewed by Executor for TKT-012 on 2026-05-02 against Hermes tag `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. The review covered `gateway/config.py`, `gateway/platforms/telegram.py`, `gateway/platforms/telegram_network.py`, `gateway/run.py`, `gateway/status.py`, and Telegram setup docs. `TELEGRAM_BOT_TOKEN` may be used in production only with `TELEGRAM_ALLOWED_USERS` or DM pairing configured, `GATEWAY_ALLOW_ALL_USERS` and `TELEGRAM_ALLOW_ALL_USERS` unset/false, polling mode preferred for v0.1, webhook mode only with `TELEGRAM_WEBHOOK_SECRET`, and no token value written to config tracked by git. |
 | Sandbox mode | Not sandboxed; runs as part of the Hermes gateway process |
 | Dangerous operations | Can send messages to any chat the bot has access to; can receive message content including potential prompt injection |
 | Rollback procedure | (1) Stop Hermes gateway service (`hermes gateway stop`); (2) Revoke Telegram bot token via @BotFather; (3) Remove `TELEGRAM_BOT_TOKEN` from `~/.hermes/.env`; (4) Restore last known-good `config.yaml` from backup; (5) Restart gateway after remediation |
@@ -65,12 +65,12 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `github-pr-workflow` |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (bundled skill: `skills/github/github-pr-workflow/`) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Branch creation, commit, PR open/update, CI status observation, PR merge (founder-approved only) |
 | Maintenance category | built-in (bundled skill) |
 | Required credentials | `GITHUB_TOKEN` or `GH_TOKEN` — GitHub PAT or GitHub App token |
 | Permission scope | Repository-scoped: `contents:write`, `pull_requests:write`, `checks:read`, `statuses:write`, `actions:read` on `OpenClown-bot/developer-assistant` only; no org-wide or user-wide permissions |
-| Source review result | not reviewed — bundled skill source not yet audited. **Blocked for credential-bearing production use until source review confirms no credential exfiltration or unauthorized repository access.** Development/testing with a scoped PAT on a test repository is acceptable. |
+| Source review result | failed for production credential-bearing use — reviewed by Executor for TKT-012 on 2026-05-02 against Hermes tag `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. The reviewed `skills/github/github-pr-workflow/SKILL.md` is instruction-only, but its fallback workflow reads tokens from `~/.hermes/.env` and `~/.git-credentials`, encourages broad PAT-style setup through the related auth skill, and includes merge/push guidance that does not encode this repository's founder-acknowledgement policy. Keep blocked for production `GITHUB_TOKEN`/`GH_TOKEN` use. Safe fallback: use this repository's reviewed REST API + `git` orchestration wrapper with least-privilege token handling, or create a follow-up ticket to author a project-specific GitHub workflow capability. |
 | Sandbox mode | Terminal commands execute in Docker backend sandbox when configured; skill instructions run in the LLM context, not as executable code |
 | Dangerous operations | Repository write access; branch creation; PR creation; merge operations (founder approval required in v0.1); force push (prohibited by policy) |
 | Rollback procedure | (1) Disable the `github-pr-workflow` skill via `hermes config set agent.disabled_toolsets` or skill disable; (2) Revoke the scoped GitHub PAT or rotate the GitHub App token; (3) Stop Hermes service; (4) Restore last known-good `config.yaml`; (5) Resume from repository state — git history is authoritative |
@@ -81,12 +81,12 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `github-issues` |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (bundled skill: `skills/github/github-issues/`) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Create, label, assign, and triage GitHub issues linked to tickets |
 | Maintenance category | built-in (bundled skill) |
 | Required credentials | `GITHUB_TOKEN` or `GH_TOKEN` — same token as github-pr-workflow |
 | Permission scope | Repository-scoped: `issues:write` on `OpenClown-bot/developer-assistant` only |
-| Source review result | not reviewed — same status as github-pr-workflow. **Blocked for credential-bearing production use until reviewed.** |
+| Source review result | failed for production credential-bearing use — reviewed by Executor for TKT-012 on 2026-05-02 against Hermes tag `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. Same token-handling concern as `github-pr-workflow`; keep blocked until a project-specific GitHub capability or hardened upstream workflow is reviewed. |
 | Sandbox mode | Same as github-pr-workflow |
 | Dangerous operations | Issue creation and modification; no code write access through this skill alone |
 | Rollback procedure | Same as github-pr-workflow |
@@ -97,12 +97,12 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `github-auth` |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (bundled skill: `skills/github/github-auth/`) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Set up GitHub authentication (HTTPS token, SSH key, or `gh` CLI login) during initial Hermes configuration |
 | Maintenance category | built-in (bundled skill) |
 | Required credentials | None at skill-load time; guides the user to configure `GITHUB_TOKEN` |
 | Permission scope | Configuration guidance only; does not perform API operations |
-| Source review result | not reviewed. **Not credential-bearing at skill level; low risk.** |
+| Source review result | failed for production credential setup — reviewed by Executor for TKT-012 on 2026-05-02 against Hermes tag `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. `skills/github/github-auth/SKILL.md` includes guidance for classic PAT `repo` scope, plaintext `credential.helper store`, token embedding in remote URLs, and extracting tokens from `~/.git-credentials`. Do not use it to provision production credentials for `developer-assistant`; use least-privilege GitHub App or fine-grained PAT procedures documented by this repository instead. |
 | Sandbox mode | Not applicable (configuration guidance only) |
 | Dangerous operations | May guide credential entry; no direct API calls |
 | Rollback procedure | Remove stored GitHub credentials from `~/.hermes/.env`; revoke PAT if compromised |
@@ -113,7 +113,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `delegate_task` (Hermes built-in tool) |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (core agent tool) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Spawn isolated subagents for parallel or specialized workstreams (Executor, Reviewer roles); delegates coding tasks to subagents using the same model or a different provider |
 | Maintenance category | built-in |
 | Required credentials | LLM provider API key (same as main agent or auxiliary model key) |
@@ -129,7 +129,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `terminal` (Hermes built-in tool, Docker backend) |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (core tool) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Execute shell commands, scripts, and build/test workflows inside an isolated Docker container with security hardening |
 | Maintenance category | built-in |
 | Required credentials | None directly; Docker backend may receive forwarded env vars via `docker_forward_env` |
@@ -145,7 +145,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `cronjob` (Hermes built-in tool) |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (core tool) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Schedule periodic progress reports, health checks, and maintenance tasks; deliver scheduled output to Telegram |
 | Maintenance category | built-in |
 | Required credentials | No dedicated credentials; inherits gateway and LLM provider credentials from the Hermes session |
@@ -161,7 +161,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | --- | --- |
 | Name | `memory` + `session_search` (Hermes built-in tools) |
 | Source URL | `https://github.com/NousResearch/hermes-agent` (core tools) |
-| Version/commit | v0.12.0; pinned at deployment |
+| Version/commit | `v2026.4.30`, commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` |
 | Purpose in v0.1 | Persistent operational memory across sessions; cross-session recall for conversation continuity; not authoritative for product/architecture decisions |
 | Maintenance category | built-in |
 | Required credentials | None; LLM provider key used for session search summarization |
@@ -213,7 +213,7 @@ Project-local plugins under `.hermes/plugins/` are **disabled** by default in He
 
 ### Plugin Opt-In Requirement
 
-Per Hermes v0.12.0, all plugins are opt-in: discovered but not enabled by default. Every enabled plugin must be listed in `plugins.enabled` in `config.yaml`. This allowlist is the governance document that justifies each entry.
+Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by default. Every enabled plugin must be listed in `plugins.enabled` in `config.yaml`. This allowlist is the governance document that justifies each entry.
 
 ## 7. Credential Scope Requirements
 
@@ -353,10 +353,10 @@ Rollback steps are documented above but not yet tested in a live Hermes deployme
 
 | Entry | Source Review Status | Notes |
 | --- | --- | --- |
-| telegram-gateway | Not reviewed | Hermes is a large Python/TypeScript codebase (~6,900 commits). Full source review has not been completed. The Telegram adapter code has not been audited for credential exfiltration vectors. |
-| github-pr-workflow | Not reviewed | Bundled skill; markdown-based instructions for LLM, not executable code. However, the skill guides the agent to use `gh` CLI and git commands that access credentials. |
-| github-issues | Not reviewed | Same status as github-pr-workflow |
-| github-auth | Not reviewed | Configuration guidance only; lower risk |
+| telegram-gateway | Passed with constraints | Minimal credential-bearing review completed for TKT-012 on 2026-05-02 against `v2026.4.30` commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. No obvious token exfiltration path was found in reviewed Telegram gateway code. Production use requires founder allowlisting or pairing, no allow-all flags, and webhook secret if webhook mode is used. |
+| github-pr-workflow | Failed for production credential-bearing use | Bundled skill is markdown instructions, not executable code, but it instructs agents to read tokens from `~/.hermes/.env` and `~/.git-credentials` and includes broad PR/merge operations that do not encode this repository's gates. Use project-specific REST API + `git` orchestration instead. |
+| github-issues | Failed for production credential-bearing use | Same token-handling concern as github-pr-workflow. Not needed to unblock TKT-008 PR workflow; keep blocked until separately hardened/reviewed. |
+| github-auth | Failed for production credential setup | Configuration guidance includes classic PAT broad scopes, plaintext credential-store persistence, token-in-remote examples, and token extraction from `~/.git-credentials`. Do not use for production credential provisioning. |
 | delegate_task | Not reviewed | Core Hermes tool; subagent isolation depends on Hermes implementation. Docker container sharing between parent and subagent is a known concurrency risk. |
 | terminal (Docker) | Not reviewed | Core Hermes tool; Docker security flags match documented best practices. Container isolation provides a meaningful security boundary. |
 | cronjob | Not reviewed | Core Hermes tool; unattended execution risk mitigated by `approvals.mode: manual` |
@@ -364,13 +364,13 @@ Rollback steps are documented above but not yet tested in a live Hermes deployme
 
 ### Review Priorities for Follow-Up
 
-1. **High priority**: Telegram adapter and GitHub skill instructions — these handle credentials
+1. **High priority**: project-specific GitHub workflow capability — upstream GitHub skill instructions remain blocked for production credentials
 2. **Medium priority**: `delegate_task` isolation model — subagent credential access needs verification
 3. **Low priority**: Memory and cron tools — operational state only, lower risk profile
 
 ### Important Caveat
 
-Source review has not been completed for any entry. This allowlist documents what is intended for v0.1, but **no credential-bearing skill or plugin should be used in production until its source review is completed and the result in Section 4 is updated to `passed`**. Development and testing with dedicated, scoped, non-sensitive credentials is acceptable.
+Minimal source review has cleared only the Telegram gateway for credential-bearing production use, and only under the constraints documented in Section 4.1. GitHub credential-bearing bundled skills remain blocked; production GitHub automation must use a project-specific reviewed path until a later source-review ticket clears a hardened upstream or custom capability. Development and testing with dedicated, scoped, non-sensitive credentials remains acceptable.
 
 ## 11. Validation
 
