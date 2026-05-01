@@ -1,0 +1,135 @@
+[config]
+# Model: Qwen 3.6 Plus through OmniRoute (Fireworks endpoint).
+# Plus is the latest flagship; matches our GLM/Kimi tier and is OmniRoute-billed.
+# `openai/` prefix is required by LiteLLM (PR-Agent's underlying client) to route
+# this call through the OpenAI-compatible custom endpoint defined by `OPENAI.API_BASE`
+# (set in .github/workflows/pr_agent.yml). Without `openai/`, LiteLLM tries to
+# parse the first path segment as a provider (e.g. `fireworks` -> fails as "LLM Provider
+# NOT provided" because the canonical Fireworks provider in LiteLLM is `fireworks_ai`,
+# and even that bypasses our OmniRoute proxy). Ref:
+# https://litellm.vercel.app/docs/providers/openai_compatible
+model = "openai/accounts/fireworks/models/qwen3p6-plus"
+# 128k context window - Qwen Plus's native limit.
+custom_model_max_tokens = 131072
+# 3 minutes - Qwen on OmniRoute can be slower than gpt-5.4 family.
+ai_timeout = 180
+# More patch context lets Qwen reason about callers/callees per chunk.
+patch_extra_lines_before = 8
+patch_extra_lines_after = 3
+allow_dynamic_context = true
+# Skip low-signal clerical or bot-maintained PRs.
+ignore_pr_title = ["^\\[Auto\\]", "^Auto", "^session-log:", "^clerical:", "^chore/", "^docs-only:"]
+# English review output to match the repo convention (Russian for PO chat only).
+response_language = "en-US"
+
+[pr_reviewer]
+# Mandate the most useful checks for our threat model + scope discipline.
+require_security_review = true
+require_tests_review = true
+require_estimate_effort_to_review = true
+require_can_be_split_review = true
+require_ticket_analysis_review = true
+# Up from default 3 - we want PR-Agent to surface more as the supplementary reviewer.
+num_max_findings = 6
+publish_output_no_suggestions = true
+final_update_message = true
+enable_review_labels_security = true
+enable_review_labels_effort = true
+extra_instructions = """\
+This repo is `developer-assistant`: a docs-as-code AI developer assistant that \
+orchestrates real software delivery through Telegram-first Hermes Agent runtime, \
+role-separated LLM agents, GitHub PRs, CI, tickets, ADRs, and review gates.
+
+You are the supplementary automated reviewer alongside the mandatory Reviewer \
+LLM (Kimi 2.6 unless changed). Focus on high-signal issues the human/LLM process \
+must not miss:
+
+1. Security focus: watch for secret leakage, unsafe GitHub token handling, \
+   over-broad workflow permissions, unsafe plugin/skill enablement, sandbox \
+   bypasses, prompt-injection exposure, and accidental persistence of Telegram, \
+   VPS, LLM, or repository credentials.
+2. AC traceability: every implementation PR should link the ticket and explain \
+   acceptance criteria status, tests run, known limitations, and risk notes. \
+   Flag weak or missing proof for ticket acceptance criteria.
+3. Scope discipline: Executor PRs must touch only files allowed by the ticket. \
+   Flag edits to PRD, architecture, ADRs, orchestration state, prompts, or other \
+   tickets unless the assigned ticket explicitly allows them.
+4. Docs-as-code integrity: core artifacts under docs/prd/, docs/architecture/, \
+   docs/tickets/, docs/reviews/, docs/questions/, and docs/orchestration/ need \
+   valid YAML frontmatter and must not contradict SESSION-STATE or approved ADRs.
+5. Runtime/concurrency risk: for Hermes/Telegram/GitHub orchestration code, flag \
+   idempotency gaps, retry hazards, duplicate PR/comment creation, race-prone \
+   state updates, and long-running task resume issues.
+6. Test quality: flag missing tests for validation scripts, state transitions, \
+   GitHub/Telegram adapters, security allowlists, and failure paths. Prefer \
+   deterministic tests over brittle live-service assumptions.
+7. Review-pipeline discipline: pr-agent findings are advisory, but Reviewer LLM \
+   verdict and explicit founder approval remain mandatory before merge unless a \
+   documented bootstrap waiver is present.
+
+Do NOT flag:
+- Markdown formatting nits or stylistic preferences without behavioral impact.
+- Generic refactor suggestions unrelated to ticket scope, security, correctness, \
+  tests, or maintainability.
+- Requests to bypass the docs-as-code process for speed.
+"""
+
+[pr_description]
+# Honor the repo's PR template; do NOT overwrite human-authored content.
+publish_labels = true
+add_original_user_description = true
+generate_ai_title = false
+use_bullet_points = true
+enable_pr_type = true
+enable_pr_diagram = true
+enable_large_pr_handling = true
+collapsible_file_list = "adaptive"
+collapsible_file_list_threshold = 6
+use_description_markers = true
+extra_instructions = """\
+PR descriptions in this repo must preserve the human-authored PR contract: \
+linked ticket, summary, acceptance criteria status, tests run, known limitations, \
+risk notes, and founder approval state when relevant.
+
+Do NOT overwrite existing description content. Add AI walkthrough only inside \
+description markers when present, and keep it collapsed by default. If a PR lacks \
+required contract sections, point that out instead of silently replacing the \
+author's description.
+"""
+
+[pr_code_suggestions]
+# Inline suggestions become committable directly from the GitHub UI.
+commitable_code_suggestions = true
+focus_only_on_problems = true
+num_code_suggestions_per_chunk = 4
+max_number_of_calls = 4
+parallel_calls = true
+new_score_mechanism = true
+new_score_mechanism_th_high = 9
+new_score_mechanism_th_medium = 7
+suggestions_score_threshold = 7
+extra_instructions = """\
+Suggest improvements that are:
+- Security-focused: input validation, output sanitization, prompt-injection \
+  defenses (Russian/Cyrillic patterns), secret-leak prevention.
+- Concurrency-safe: atomic reads/writes around shared state, mutex/queue \
+  serialization for read-modify-write across awaits.
+- TypeScript-idiomatic: strict types, no `any`, no `as any`, no `// @ts-ignore`.
+- Test-aware: suggest test additions for new code paths, prefer real objects \
+  over mocks, use `vi.useFakeTimers()` for time-based assertions.
+
+Do NOT suggest:
+- Cosmetic refactors (renaming, splitting functions for size only).
+- Library swaps - we're locked to current deps for v0.1.
+- Documentation comments - repo convention is terse code, no narrative \
+  comments unless explaining non-obvious invariants.
+"""
+
+[pr_questions]
+use_conversation_history = true
+
+[pr_help]
+num_retrieved_snippets = 8
+
+[pr_help_docs]
+docs_path = "docs"
