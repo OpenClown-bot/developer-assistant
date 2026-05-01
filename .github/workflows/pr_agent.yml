@@ -15,16 +15,15 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
-      contents: write
     name: Run PR Agent on every pull request
     steps:
       - name: PR Agent action step
         id: pragent
-        uses: the-pr-agent/pr-agent@main
+        uses: the-pr-agent/pr-agent@0e37fc84fcc8207561e64eef8f7f634fb57e8447
         env:
           OPENAI_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
-          OPENAI.API_BASE: "https://omniroute.infinitycore.space:8443/v1"
-          OPENAI.API_TYPE: "openai"
+          OPENAI_API_BASE: "https://omniroute.infinitycore.space:8443/v1"
+          OPENAI_API_TYPE: "openai"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           config.model: "openai/accounts/fireworks/models/qwen3p6-plus"
           config.custom_model_max_tokens: "131072"
