@@ -29,5 +29,7 @@ jobs:
           config.custom_model_max_tokens: "131072"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
-          github_action_config.auto_improve: "true"
+          # `/improve` is intentionally manual: on small PRs it dominated runtime
+          # while often publishing no suggestions after PR-Agent self-scoring.
+          github_action_config.auto_improve: "false"
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
