@@ -4,16 +4,25 @@ This repository is managed through role-separated LLM delivery. The rules below 
 
 ## Roles
 
-| Role | Purpose | Allowed Write Zone |
-| --- | --- | --- |
-| Orchestrator | Coordinates process, state, handoffs, questions, and role prompts | `docs/orchestration/`, `docs/questions/`, coordination sections in docs |
-| Business Planner | Clarifies product intent and MVP scope | `docs/prd/` |
-| Architect | Defines system architecture, ADRs, and implementation tickets | `docs/architecture/`, `docs/tickets/` |
-| Executor | Implements one approved ticket at a time | `src/`, `tests/`, explicitly allowed config files, and ticket Section 10 Execution Log only |
-| Reviewer | Reviews PRs against ticket, architecture, ADRs, and CI | `docs/reviews/` |
-| CI/Automation | Produces deterministic validation output | generated reports or explicitly configured output paths |
+| Role | Default model | Runtime | Purpose | Allowed Write Zone |
+| --- | --- | --- | --- | --- |
+| Strategic Orchestrator | GPT-5.5 high | opencode (Founder's Windows PC) | Session-level conductor: ticket selection, TO delegation, ratification audit pass-2, merge-safe sign-off, founder-facing teaching | `docs/session-log/`, `docs/meta/`, `docs/orchestration/`, `docs/backlog/` (light edits / new entries), ticket frontmatter promotions (`status`, `arch_ref`, `version`, `updated`) + `§10 Execution Log` append-only fills, `docs/questions/` (light edits / new questions), `.github/workflows/`, `.pr_agent.toml`, `CONTRIBUTING.md`, `AGENTS.md`, `README.md`, `docs/prompts/` (when adapting role prompts) |
+| Ticket Orchestrator | GPT-5.5 thinking | opencode (Founder's Windows PC) | Per-TKT cycle runner: drafts Executor + Reviewer NUDGE files, runs cross-reviewer audit pass-1, hands back to Strategic Orchestrator | Per-ticket clerical sub-PRs scoped to one TKT, frontmatter promotion of own TKT, BACKLOG entries scoped to own TKT, NUDGE files (Founder-pasted, generally not committed) |
+| Runtime Hermes Orchestrator | runtime persona | Hermes Agent (deployed v0.1 product) | Live operator persona inside the deployed product (Telegram-facing, ContextBlock-driven, skill-allowlist-bound) | None in dev-time. Runtime-only. See `docs/prompts/runtime-hermes-orchestrator.md` |
+| Business Planner | GPT-5.5 thinking / Claude Opus 4.7 thinking | ChatGPT Plus (web) | Clarifies product intent and MVP scope | `docs/prd/` |
+| Architect | GPT-5.5 xhigh / GPT-5.5 thinking / Opus 4.6 thinking | Codex CLI / opencode CLI / Windsurf | Defines system architecture, ADRs, and implementation tickets | `docs/architecture/`, `docs/tickets/` |
+| Code Executor | GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist) | opencode + OmniRoute | Implements one approved ticket at a time | `src/`, `tests/`, explicitly allowed config files, and ticket Section 10 Execution Log only |
+| Reviewer | Kimi K2.6 | opencode + OmniRoute | Reviews PRs against ticket, architecture, ADRs, and CI | `docs/reviews/` |
+| CI/Automation (incl. Qodo PR-Agent) | Qwen 3.6 Plus (PR-Agent) | GitHub Actions | Produces deterministic validation output and supplementary reviewer findings | generated reports or explicitly configured output paths |
 
 If a role needs to modify files outside its write zone, it must stop and surface the rule violation instead of silently working around it.
+
+**On the three orchestrator rows.** "Orchestrator" is intentionally split:
+- **Strategic Orchestrator** is the dev-time session-level conductor (GPT-5.5 high in an opencode tab on the Founder's PC). It is the partner the Ticket Orchestrator hands back to.
+- **Ticket Orchestrator** is the dev-time per-TKT cycle runner (GPT-5.5 thinking in a separate opencode tab). One TO session per TKT, never reused.
+- **Runtime Hermes Orchestrator** is the in-product persona inside the deployed Hermes Agent runtime. It is NOT a dev-time pipeline role; it has no write-zone in this repo's dev-time process. Its prompt lives in `docs/prompts/runtime-hermes-orchestrator.md` to keep it next to the other prompts, but it is loaded by the runtime, not by dev-time agents.
+
+The full SO portable system prompt lives in `docs/meta/strategic-orchestrator.md`. The TO portable system prompt lives in `docs/prompts/ticket-orchestrator.md`. Session-handoff snapshots between SO sessions live in `docs/session-log/` (auto-cold rule fires after every closed TKT cycle).
 
 ## Ticket Lifecycle
 
