@@ -2,7 +2,7 @@
 id: SESSION-STATE
 version: 0.1.0
 status: active
-updated: 2026-05-01
+updated: 2026-05-02
 ---
 
 # Session State
@@ -11,12 +11,12 @@ updated: 2026-05-01
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, and operational state store are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, and generated-project VPS deployment contract are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-005, TKT-007, and TKT-009 are complete; source review and state-store hardening are prepared before credential-bearing runtime work.
+TKT-001 through TKT-005, TKT-007, TKT-009, TKT-010, TKT-012, and TKT-013 are complete. The next implementation phase is runtime work: Telegram founder interaction and GitHub repository/PR integration remain draft pending ticket promotion or architecture follow-up.
 
 ## Process Variant
 
@@ -35,16 +35,19 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-005`: done in PR #13.
 - `TKT-009`: done in PR #16.
 - `TKT-007`: done in PR #18.
-- `TKT-012`: ready; source-review gate for credential-bearing Hermes Telegram and GitHub capabilities.
-- `TKT-013`: ready; state-store hardening follow-up from RV-CODE-010.
-- `TKT-010`: ready; orthogonal generated-project deployment contract.
+- `TKT-012`: done in PR #22; source-review gate for credential-bearing Hermes Telegram and GitHub capabilities.
+- `TKT-013`: done in PR #23; state-store hardening follow-up from RV-CODE-010.
+- `TKT-010`: done in PR #26; reviewed in PR #27.
+- `TKT-006`: draft; Telegram founder interaction through Hermes.
+- `TKT-008`: draft; GitHub repository and PR integration.
+- `TKT-011`: draft; first Telegram-to-PR orchestration trial.
 
 ## Current Blockers
 
-- GitHub CLI `gh` is not available in PATH in this environment.
 - GitHub repository was renamed from `OpenClown-bot/assistant-developer` to `OpenClown-bot/developer-assistant`.
 - Local git remote `origin` points to `https://github.com/OpenClown-bot/developer-assistant.git`.
 - Temporary GitHub PAT is configured in the current environment for this session.
+- GitHub CLI `gh` is available and authenticated in the current SO environment, but future sessions must still verify `gh auth status`.
 
 ## Current Architectural Decisions
 
@@ -59,6 +62,9 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Lightweight web interface is deferred until Telegram works.
 - Merge policy for v0.1: always ask founder after CI and Reviewer pass.
 - Generated project VPS deployment contract: one-command `make deploy` or equivalent; final live execution requires founder approval.
+- Hermes Telegram gateway source review passed with constraints for production `TELEGRAM_BOT_TOKEN` use.
+- Hermes bundled GitHub credential-bearing skills reviewed in TKT-012 are not cleared for production `GITHUB_TOKEN` or `GH_TOKEN` use; use project-specific REST API plus `git` orchestration instead.
+- Operational state store hardening is complete: SQLite foreign keys are enforced, project binding upserts preserve omitted optional fields, and WAL/single-thread guidance is documented.
 
 ## Current Tooling Decisions
 
@@ -78,9 +84,9 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Pending User Decisions
 
-- Whether to install GitHub CLI `gh` or continue with plain `git` plus GitHub REST API for PR operations.
 - Whether to create a retroactive ticket for PR-Agent setup/configuration history.
+- Whether to promote `TKT-006` and/or `TKT-008` from draft to ready now that TKT-012 and TKT-013 are done, or route an Architect pass first to update their scope for the failed Hermes bundled GitHub skill review.
 
 ## Next Recommended Action
 
-Open Executor work for `TKT-012` first to clear or document the source-review gate for production credential-bearing Hermes Telegram and GitHub capabilities. `TKT-013` should follow before runtime work depends heavily on project-binding updates or scheduled progress persistence. `TKT-010` is ready as an orthogonal docs-only deployment contract and can run in parallel if desired. Keep `TKT-006`, `TKT-008`, and `TKT-011` in `draft` until source-review and runtime prerequisites are satisfied.
+Do not dispatch another Executor until ticket readiness is synchronized. Recommended next step: ask Architect to review whether `TKT-006` and `TKT-008` can be promoted from `draft` to `ready` after TKT-012 and TKT-013, especially because TKT-012 cleared Telegram gateway use with constraints but rejected Hermes bundled GitHub credential-bearing skills. `TKT-011` should remain `draft` until Telegram and GitHub integration tickets are complete or the Founder explicitly approves a narrower dry run.
