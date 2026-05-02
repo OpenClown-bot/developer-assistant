@@ -1,6 +1,6 @@
 ---
 id: HERMES-RUNTIME-CONTRACT
-version: 0.1.0
+version: 0.2.0
 status: draft
 ---
 
@@ -199,6 +199,7 @@ The runtime interacts with GitHub through least-privilege credentials and reposi
 - Autonomous merges are not the default for v0.1.
 - GitHub tokens must be scoped to required repositories and operations only.
 - LLM, GitHub, Telegram, and VPS credentials must be scoped separately; no shared all-purpose token.
+- Production GitHub automation must not use Hermes bundled `github-pr-workflow`, `github-issues`, or `github-auth` with `GITHUB_TOKEN` / `GH_TOKEN` unless a later source review clears a hardened version. TKT-012 rejected those bundled skills for production credential-bearing use. The v0.1 fallback is a project-specific GitHub workflow capability that uses reviewed REST API calls plus a constrained `git` orchestration wrapper, preserves founder acknowledgement before merge, and never reads tokens from plaintext credential stores or embeds tokens in remotes.
 
 ## 10. Validation and Reporting Contract
 
@@ -287,7 +288,8 @@ OpenClaw plugins run in-process and its large skill ecosystem remains a supply-c
 
 - This contract defines boundary specifications, not a runtime adapter implementation.
 - Concrete Hermes API calls, message formats, and configuration are implementation details for a follow-up ticket.
-- The operational state store choice (Hermes native persistence vs. SQLite) is not finalized in this document.
+- The operational state store is SQLite for v0.1, with detailed schema/API semantics documented in `OPERATIONAL-STATE-STORE.md`.
+- The GitHub integration path depends on a project-specific workflow capability because Hermes bundled GitHub skills are blocked for production credentials by the current allowlist.
 - The Telegram command set may evolve beyond the initial commands listed here.
 - Sandbox capabilities depend on Hermes runtime features not yet evaluated in practice.
 - The contract assumes one trusted founder/operator and does not address hostile multi-tenant scenarios.
@@ -295,7 +297,7 @@ OpenClaw plugins run in-process and its large skill ecosystem remains a supply-c
 ## 14. Follow-Up Tickets
 
 - TKT for Hermes runtime adapter implementation: binding this contract to actual Hermes Agent APIs and configuration.
-- TKT for operational state store selection: deciding between Hermes native persistence and SQLite, implementing the chosen store.
+- TKT for operational state store integration: binding the SQLite store documented in `OPERATIONAL-STATE-STORE.md` into the Hermes runtime adapter.
 - TKT for Hermes skill/plugin allowlist: defining the initial concrete allowlist entries per ADR-003.
 - TKT for Telegram command handler implementation: wiring the command set to Hermes gateway behavior.
 - TKT for end-to-end integration test: validating a complete Telegram-to-PR-to-review-to-merge cycle.
