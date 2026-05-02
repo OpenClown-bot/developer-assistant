@@ -17,6 +17,9 @@ REQUIRED_DIRS = [
     "docs/prompts",
     "docs/questions",
     "docs/orchestration",
+    "docs/meta",
+    "docs/session-log",
+    "docs/session-log/TEMPLATES",
 ]
 
 REQUIRED_FILES = [
@@ -36,6 +39,9 @@ FRONTMATTER_PATTERNS = {
     "docs/questions/*.md": ("id", "version", "status"),
     "docs/orchestration/*.md": ("id", "version", "status"),
     "docs/prompts/*.md": ("id", "version", "status"),
+    "docs/meta/*.md": ("id", "version", "status"),
+    "docs/session-log/*.md": ("id", "version", "status"),
+    "docs/session-log/TEMPLATES/*.md": ("id", "version", "status"),
 }
 
 TICKET_REQUIRED_SECTIONS = list(range(1, 11))

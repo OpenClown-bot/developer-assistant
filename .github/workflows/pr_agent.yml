@@ -8,10 +8,26 @@ on:
   issue_comment:
   workflow_dispatch:
 
+# Cancel stale runs when a new push lands on the same PR. PR-Agent's tail
+# latency through OmniRoute can be 15-25 minutes; without this, multiple
+# IN_PROGRESS runs pile up against successive HEADs and the cross-reviewer
+# audit Hard rule (TO must wait for PR-Agent settle on final HEAD) becomes
+# impossible to satisfy in reasonable time.
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pr_agent_job:
     if: ${{ github.event.sender.type != 'Bot' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    # Hard cap so a runaway run cannot block the pipeline indefinitely. If this
+    # cap fires regularly, that is a signal to investigate OmniRoute/Fireworks
+    # health rather than silently sit and wait. 18-min calibrated against
+    # observed workloads: typical 3-9 min, large docs PRs ~12-15 min, openclown
+    # TKT-010 iter-3 outlier 22 min. 18 covers the long tail without permitting
+    # truly runaway runs.
+    timeout-minutes: 18
     permissions:
       issues: write
       pull-requests: write
