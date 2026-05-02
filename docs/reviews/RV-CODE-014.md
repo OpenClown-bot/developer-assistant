@@ -160,12 +160,14 @@ All iter-1 findings were resolved in iter-2 (see Section 12). No blocking or non
 
 ### F-L1 — Credential Rejection API Is Fragmented → **RESOLVED**
 
-`load_credential()` now composes all credential-source rejection checks internally:
+`load_credential()` now enforces all required credential-source safety properties internally:
 - Checks `~/.git-credentials` existence via canonical `os.path.realpath()`.
 - Validates `remote_url` for embedded tokens when provided via `check_for_token_in_remote()`.
 - Rejects `GITHUB_TOKEN` as fallback when `PROJECT_GITHUB_PAT` is absent.
 - Docstring documents that committed config and CLI arguments are structurally impossible through this API.
-- Callers no longer need to manually invoke separate helpers.
+- Callers no longer need to manually invoke separate helpers to satisfy TKT-014 security requirements.
+
+`reject_credential_source` and `check_for_git_credentials_file` remain as tested public utility functions. TKT-008 (or any future caller) should use `load_credential()` as the **primary** credential entry point. Separate helper calls are only appropriate when there is an explicit lifecycle reason to inspect a source independently of token loading.
 
 ### F-L2 — Symlink Bypass in `check_for_git_credentials_file` → **RESOLVED**
 
@@ -180,7 +182,7 @@ Constant removed. Dangerous push variants remain blocked through `_BLOCKED_GIT_F
 PR-Agent posted two additional review comments on the iter-2 commits. These are recorded as INFO-level observations; they do not affect correctness or security.
 
 1. **Missing explicit `GH_TOKEN` collision check** — `load_credential()` docstring states it rejects both `GITHUB_TOKEN` and `GH_TOKEN`, but the code only explicitly checks `GITHUB_TOKEN`. `GH_TOKEN` alone still raises `CredentialSourceError` because `PROJECT_GITHUB_PAT` is missing; the security property is preserved. Adding an explicit `GH_TOKEN` check would improve message clarity but is not required.
-2. **Dead code: `reject_credential_source` / `check_for_git_credentials_file`** — These functions remain defined and tested but are not called by `load_credential()`. They are retained as documented public utilities for future callers (e.g., TKT-008 runtime adapter). No removal required.
+2. **Public utilities not invoked by `load_credential()`** — `reject_credential_source` and `check_for_git_credentials_file` remain defined and tested, but `load_credential()` performs equivalent checks inline rather than delegating to every helper. TKT-008 should use `load_credential()` as the primary entry point; separate helper calls are appropriate only when an explicit lifecycle reason exists. No removal required.
 
 ## 13. Recommended Next Steps
 
