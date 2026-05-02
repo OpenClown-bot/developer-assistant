@@ -18,7 +18,6 @@ Security constraints:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -43,10 +42,6 @@ _BLOCKED_GIT_FLAGS = frozenset([
     "--delete",
     "--force-with-lease",
 ])
-
-_BLOCKED_GIT_SUBCOMMANDS = frozenset([
-    "push",
-])  # push is allowed only through constrained builder
 
 _BLOCKED_PHRASES = frozenset([
     "force push",
@@ -142,22 +137,59 @@ class GitCommand:
 def load_credential(
     *,
     env_var: str = _CREDENTIAL_ENV_VAR,
+    remote_url: Optional[str] = None,
     _environ: Optional[dict[str, str]] = None,
+    _realpath: Any = None,
 ) -> str:
     """Load GitHub credential from the approved environment variable.
 
+    Composes credential-source rejection checks so callers have a single
+    safe entry point. If a caller only uses load_credential(), the stated
+    security constraints are enforced automatically.
+
+    Checks performed:
+    1. Rejects ~/.git-credentials if the file exists (canonical realpath).
+    2. Rejects token-in-remote URLs (if remote_url is provided).
+    3. Rejects GITHUB_TOKEN/GH_TOKEN being used as fallback when
+       PROJECT_GITHUB_PAT is absent (CI collision prevention).
+    4. Reads only from the specified env_var (default: PROJECT_GITHUB_PAT).
+       By design, this function cannot read from committed config files,
+       CLI arguments, or ~/.git-credentials — those sources are structurally
+       impossible through this API.
+
     Args:
         env_var: Name of the environment variable to read.
+        remote_url: Optional remote URL to validate for embedded tokens.
         _environ: Override for os.environ (for testing).
+        _realpath: Override for os.path.realpath (for testing).
 
     Returns:
         The token string.
 
     Raises:
-        CredentialSourceError: If the token is not found or an unapproved
-            source is detected.
+        CredentialSourceError: If the token is not found, an unapproved
+            source is detected, or ~/.git-credentials exists at the
+            canonical path.
     """
     environ = _environ if _environ is not None else dict(os.environ)
+    realpath_fn = _realpath if _realpath is not None else os.path.realpath
+
+    home = os.path.expanduser("~")
+    cred_path = realpath_fn(os.path.join(home, ".git-credentials"))
+    if os.path.exists(cred_path):
+        raise CredentialSourceError(
+            "Credential source rejected: ~/.git-credentials file exists"
+        )
+
+    if remote_url is not None:
+        check_for_token_in_remote(remote_url)
+
+    if environ.get("GITHUB_TOKEN", "").strip() and not environ.get(env_var, "").strip():
+        raise CredentialSourceError(
+            f"Credential source rejected: GITHUB_TOKEN is present but "
+            f"{env_var} is not. CI auto-injected tokens must not be used "
+            f"as the project credential source."
+        )
 
     token = environ.get(env_var, "").strip()
     if not token:
@@ -199,14 +231,18 @@ def reject_credential_source(source: str) -> None:
 
 
 def check_for_git_credentials_file(path: str) -> None:
-    """Check if ~/.git-credentials exists and reject it.
+    """Check if a path resolves to ~/.git-credentials and reject it.
+
+    Uses os.path.realpath for canonical resolution to prevent symlink
+    bypass attacks.
 
     Raises:
-        CredentialSourceError: If ~/.git-credentials is found.
+        CredentialSourceError: If the path resolves to ~/.git-credentials.
     """
     home = os.path.expanduser("~")
-    cred_path = os.path.join(home, ".git-credentials")
-    if os.path.normpath(os.path.abspath(path)) == os.path.normpath(cred_path):
+    cred_path = os.path.realpath(os.path.join(home, ".git-credentials"))
+    input_real = os.path.realpath(os.path.abspath(path))
+    if input_real == cred_path:
         raise CredentialSourceError(
             "Credential source rejected: ~/.git-credentials"
         )

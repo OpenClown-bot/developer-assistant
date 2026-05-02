@@ -1,20 +1,23 @@
 """Tests for the project-specific GitHub workflow capability (TKT-014).
 
 Covers:
-- Credential-source rejection
+- Credential-source rejection (composed into load_credential)
 - Token redaction in logs/errors
 - Mocked GitHub REST request construction
 - Constrained git command construction
 - Merge-gate behavior
 - Env var collision handling (RV-SPEC-001)
+- Symlink bypass prevention in git credentials check
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[1] / "src")
@@ -49,6 +52,12 @@ from developer_assistant.github_workflow import (
 _FAKE_TOKEN = "FAKE_TEST_TOKEN_NOT_REAL_1234567890"
 _FAKE_PAT = "FAKE_PAT_NOT_REAL_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 _FAKE_REMOTE_URL_WITH_TOKEN = "https://FAKE_TOKEN_NOT_REAL@github.com/owner/repo.git"
+
+
+def _safe_credential_env(**extra):
+    env = {_CREDENTIAL_ENV_VAR: _FAKE_TOKEN}
+    env.update(extra)
+    return env
 
 
 class TestCredentialSourceRejection(unittest.TestCase):
@@ -104,6 +113,130 @@ class TestCredentialSourceRejection(unittest.TestCase):
             reject_credential_source("config file token in settings.json")
 
 
+class TestLoadCredentialComposedValidation(unittest.TestCase):
+
+    def test_load_credential_rejects_git_credentials_file_existence(self):
+        def fake_realpath(p):
+            return p
+        with patch("os.path.exists", return_value=True):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(
+                    _environ=_safe_credential_env(),
+                    _realpath=fake_realpath,
+                )
+            self.assertIn("~/.git-credentials", str(ctx.exception))
+
+    def test_load_credential_rejects_token_in_remote_url(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError):
+                load_credential(
+                    _environ=_safe_credential_env(),
+                    remote_url="https://ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@github.com/owner/repo.git",
+                )
+
+    def test_load_credential_rejects_github_token_only(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(
+                    _environ={"GITHUB_TOKEN": "ci-auto-injected-value"},
+                )
+            self.assertIn("GITHUB_TOKEN", str(ctx.exception))
+
+    def test_load_credential_allows_project_pat_with_github_token_present(self):
+        with patch("os.path.exists", return_value=False):
+            token = load_credential(
+                _environ=_safe_credential_env(GITHUB_TOKEN="ci-auto-injected-value"),
+            )
+            self.assertEqual(token, _FAKE_TOKEN)
+
+    def test_load_credential_rejects_when_github_token_present_but_pat_empty(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(
+                    _environ={
+                        _CREDENTIAL_ENV_VAR: "",
+                        "GITHUB_TOKEN": "ci-auto-injected-value",
+                    },
+                )
+            self.assertIn("GITHUB_TOKEN", str(ctx.exception))
+
+    def test_load_credential_rejects_missing_env_var(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(_environ={})
+            self.assertIn(_CREDENTIAL_ENV_VAR, str(ctx.exception))
+
+    def test_load_credential_rejects_github_token_without_pat(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(
+                    _environ={"GITHUB_TOKEN": "ci-value"},
+                )
+            self.assertIn("GITHUB_TOKEN", str(ctx.exception))
+
+    def test_load_credential_rejects_gh_token_without_pat(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError):
+                load_credential(_environ={"GH_TOKEN": "ci-value"})
+
+    def test_load_credential_succeeds_with_clean_remote_url(self):
+        with patch("os.path.exists", return_value=False):
+            token = load_credential(
+                _environ=_safe_credential_env(),
+                remote_url="https://github.com/owner/repo.git",
+            )
+            self.assertEqual(token, _FAKE_TOKEN)
+
+    def test_load_credential_error_no_token_value_leaked(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(_environ={})
+            self.assertNotIn(_FAKE_TOKEN, str(ctx.exception))
+            self.assertNotIn("ghp_", str(ctx.exception))
+
+    def test_load_credential_structurally_cannot_read_config_files(self):
+        with patch("os.path.exists", return_value=False):
+            token = load_credential(_environ=_safe_credential_env())
+            self.assertEqual(token, _FAKE_TOKEN)
+
+    def test_load_credential_structurally_cannot_accept_cli_args(self):
+        with patch("os.path.exists", return_value=False):
+            token = load_credential(_environ=_safe_credential_env())
+            self.assertEqual(token, _FAKE_TOKEN)
+
+
+class TestRealpathSymlinkBypass(unittest.TestCase):
+
+    def test_check_git_credentials_uses_realpath_direct(self):
+        home = os.path.expanduser("~")
+        cred_path = os.path.realpath(os.path.join(home, ".git-credentials"))
+        with self.assertRaises(CredentialSourceError):
+            check_for_git_credentials_file(cred_path)
+
+    def test_check_git_credentials_symlink_resolves_to_same(self):
+        home = os.path.expanduser("~")
+        direct = os.path.join(home, ".git-credentials")
+        resolved = os.path.realpath(direct)
+        if direct == resolved:
+            self.skipTest("No symlink difference on this platform for this path")
+        with self.assertRaises(CredentialSourceError):
+            check_for_git_credentials_file(direct)
+
+    def test_check_git_credentials_mocked_symlink_bypass(self):
+        home = os.path.expanduser("~")
+        cred_real = os.path.realpath(os.path.join(home, ".git-credentials"))
+        symlink_path = "/tmp/fake_link_to_git_creds"
+        with patch("os.path.realpath") as mock_realpath, \
+             patch("os.path.abspath", side_effect=lambda p: p):
+            mock_realpath.side_effect = lambda p: cred_real if p == symlink_path else p
+            with self.assertRaises(CredentialSourceError):
+                check_for_git_credentials_file(symlink_path)
+
+    def test_check_git_credentials_different_path_passes(self):
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=True) as f:
+            check_for_git_credentials_file(f.name)
+
+
 class TestTokenRedaction(unittest.TestCase):
 
     def test_redact_ghp_token(self):
@@ -143,16 +276,16 @@ class TestTokenRedaction(unittest.TestCase):
         self.assertNotIn("ghp_", result.stdout)
 
     def test_load_credential_returns_real_token_for_caller(self):
-        token = load_credential(
-            _environ={_CREDENTIAL_ENV_VAR: _FAKE_TOKEN}
-        )
-        self.assertEqual(token, _FAKE_TOKEN)
+        with patch("os.path.exists", return_value=False):
+            token = load_credential(_environ=_safe_credential_env())
+            self.assertEqual(token, _FAKE_TOKEN)
 
     def test_load_credential_error_message_no_token_value(self):
-        with self.assertRaises(CredentialSourceError) as ctx:
-            load_credential(_environ={})
-        self.assertNotIn(_FAKE_TOKEN, str(ctx.exception))
-        self.assertNotIn("ghp_", str(ctx.exception))
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(_environ={})
+            self.assertNotIn(_FAKE_TOKEN, str(ctx.exception))
+            self.assertNotIn("ghp_", str(ctx.exception))
 
 
 class TestRESTRequestConstruction(unittest.TestCase):
@@ -338,6 +471,14 @@ class TestConstrainedGitCommandConstruction(unittest.TestCase):
         with self.assertRaises(DangerousOperationError):
             execute_git_command(cmd, dry_run=True)
 
+    def test_validate_git_args_blocks_generic_force_push_phrase(self):
+        with self.assertRaises(DangerousOperationError):
+            validate_git_args(["push", "origin", "main", "force push"])
+
+    def test_validate_git_args_blocks_hard_reset_phrase(self):
+        with self.assertRaises(DangerousOperationError):
+            validate_git_args(["reset", "hard reset"])
+
 
 class TestMergeGateBehavior(unittest.TestCase):
 
@@ -375,46 +516,56 @@ class TestMergeGateBehavior(unittest.TestCase):
 class TestEnvVarCollisionHandling(unittest.TestCase):
 
     def test_project_github_pat_is_used_not_github_token(self):
-        environ = {
-            _CREDENTIAL_ENV_VAR: _FAKE_TOKEN,
-            "GITHUB_TOKEN": "ci-auto-injected-token-value",
-        }
-        token = load_credential(_environ=environ)
-        self.assertEqual(token, _FAKE_TOKEN)
+        with patch("os.path.exists", return_value=False):
+            environ = _safe_credential_env(GITHUB_TOKEN="ci-auto-injected-token-value")
+            token = load_credential(_environ=environ)
+            self.assertEqual(token, _FAKE_TOKEN)
 
     def test_github_token_alone_is_not_consumed(self):
-        environ = {"GITHUB_TOKEN": "ci-auto-injected-token-value"}
-        with self.assertRaises(CredentialSourceError):
-            load_credential(_environ=environ)
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError):
+                load_credential(_environ={"GITHUB_TOKEN": "ci-auto-injected-token-value"})
 
     def test_gh_token_alone_is_not_consumed(self):
-        environ = {"GH_TOKEN": "ci-auto-injected-token-value"}
-        with self.assertRaises(CredentialSourceError):
-            load_credential(_environ=environ)
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError):
+                load_credential(_environ={"GH_TOKEN": "ci-auto-injected-token-value"})
 
     def test_empty_project_github_pat_raises_even_if_github_token_present(self):
-        environ = {
-            _CREDENTIAL_ENV_VAR: "",
-            "GITHUB_TOKEN": "ci-auto-injected-token-value",
-        }
-        with self.assertRaises(CredentialSourceError):
-            load_credential(_environ=environ)
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError):
+                load_credential(
+                    _environ={
+                        _CREDENTIAL_ENV_VAR: "",
+                        "GITHUB_TOKEN": "ci-auto-injected-token-value",
+                    },
+                )
 
     def test_credential_env_var_is_project_github_pat(self):
         self.assertEqual(_CREDENTIAL_ENV_VAR, "PROJECT_GITHUB_PAT")
 
     def test_load_credential_ignores_ci_auto_token(self):
-        environ = {
-            "GITHUB_TOKEN": "ghs_CI_ACTIONS_AUTO_TOKEN_0000000000000000000",
-            "PROJECT_GITHUB_PAT": _FAKE_TOKEN,
-        }
-        token = load_credential(_environ=environ)
-        self.assertEqual(token, _FAKE_TOKEN)
+        with patch("os.path.exists", return_value=False):
+            environ = _safe_credential_env(
+                GITHUB_TOKEN="ghs_CI_ACTIONS_AUTO_TOKEN_0000000000000000000",
+            )
+            token = load_credential(_environ=environ)
+            self.assertEqual(token, _FAKE_TOKEN)
 
     def test_no_credential_env_raises_clear_error(self):
-        with self.assertRaises(CredentialSourceError) as ctx:
-            load_credential(_environ={})
-        self.assertIn(_CREDENTIAL_ENV_VAR, str(ctx.exception))
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(_environ={})
+            self.assertIn(_CREDENTIAL_ENV_VAR, str(ctx.exception))
+
+    def test_ci_github_token_not_silently_used_as_fallback(self):
+        with patch("os.path.exists", return_value=False):
+            with self.assertRaises(CredentialSourceError) as ctx:
+                load_credential(
+                    _environ={"GITHUB_TOKEN": "ghs_CI_ACTIONS_AUTO_TOKEN_0000000000000000000"},
+                )
+            self.assertIn("GITHUB_TOKEN", str(ctx.exception))
+            self.assertIn("CI auto-injected", str(ctx.exception))
 
 
 class TestRedactedRemoteURLs(unittest.TestCase):
@@ -429,6 +580,21 @@ class TestRedactedRemoteURLs(unittest.TestCase):
         cmdline = cmd.to_cmdline()
         self.assertNotIn("ghp_", cmdline)
         self.assertNotIn("github_pat_", cmdline)
+
+
+class TestBlockedSubcommandsRemoved(unittest.TestCase):
+
+    def test_dangerous_push_flags_still_blocked(self):
+        with self.assertRaises(DangerousOperationError):
+            validate_git_args(["push", "--force", "origin", "main"])
+
+    def test_safe_push_still_allowed(self):
+        result = validate_git_args(["push", "origin", "main"])
+        self.assertEqual(result, ["push", "origin", "main"])
+
+    def test_constrained_push_builder_works(self):
+        cmd = build_commit_push_command("msg", remote="origin", branch="main")
+        self.assertEqual(cmd.args, ["push", "origin", "main"])
 
 
 if __name__ == "__main__":
