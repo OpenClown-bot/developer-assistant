@@ -9,8 +9,15 @@
 # and even that bypasses our OmniRoute proxy). Ref:
 # https://litellm.vercel.app/docs/providers/openai_compatible
 model = "openai/accounts/fireworks/models/qwen3p6-plus"
-# 128k context window - Qwen Plus's native limit.
-custom_model_max_tokens = 131072
+# 64k effective context. Qwen Plus's native limit is 128k but in practice we
+# never need more than ~30-40k for review/describe even on large diffs, and
+# halving the budget here forces PR-Agent to either fit content into a single
+# call or chunk into smaller pieces that the LLM responds to faster (autoregressive
+# output time grows roughly with context, not just with output tokens). On
+# observed runs of openclown TKT-010 iter-3 (22 min outlier) and developer-assistant
+# PR #24 (>18 min, hit timeout twice), the bottleneck was call latency on huge
+# context, not output length.
+custom_model_max_tokens = 65536
 # 3 minutes - Qwen on OmniRoute can be slower than gpt-5.4 family.
 ai_timeout = 180
 # More patch context lets Qwen reason about callers/callees per chunk.
@@ -24,11 +31,21 @@ response_language = "en-US"
 
 [pr_reviewer]
 # Mandate the most useful checks for our threat model + scope discipline.
+# Security and tests are LOAD-BEARING and stay on (they catch the highest-impact
+# misses our human/LLM process must not let through).
+#
+# can_be_split, estimate_effort, and ticket_analysis are advisory analyses that
+# each cost an additional LLM call but rarely produce actionable output for
+# this repo's PR style (small ticket-scoped diffs, ticket already linked,
+# effort already pre-estimated by the Architect at ticket creation time).
+# Disabled to cut typical PR-Agent run latency by ~30-50%. If a future PR is
+# big enough that any of these would actually help, the founder can manually
+# trigger via /review with the appropriate flag.
 require_security_review = true
 require_tests_review = true
-require_estimate_effort_to_review = true
-require_can_be_split_review = true
-require_ticket_analysis_review = true
+require_estimate_effort_to_review = false
+require_can_be_split_review = false
+require_ticket_analysis_review = false
 # Up from default 3 - we want PR-Agent to surface more as the supplementary reviewer.
 num_max_findings = 6
 publish_output_no_suggestions = true
@@ -81,7 +98,11 @@ add_original_user_description = true
 generate_ai_title = false
 use_bullet_points = true
 enable_pr_type = true
-enable_pr_diagram = true
+# Diagram generation is an additional slow LLM call that produces mermaid
+# diagrams. On PRs that are mostly text/docs (most of our governance work) the
+# resulting diagrams are uninformative. Disabled to cut another ~1-2 min per
+# run. Enable per-PR via /describe --diagram if a specific PR would benefit.
+enable_pr_diagram = false
 enable_large_pr_handling = true
 collapsible_file_list = "adaptive"
 collapsible_file_list_threshold = 6
