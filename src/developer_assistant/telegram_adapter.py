@@ -396,12 +396,10 @@ class TelegramFounderAdapter:
         category = classify_message(event.text, pending_question=has_pending)
         durable = _is_durable_decision(event.text)
         artifact_target = None
-        if durable and category in (MessageCategory.APPROVAL, MessageCategory.REJECTION, MessageCategory.ANSWER):
-            artifact_target = "docs/questions/"
-        elif durable:
+        if durable:
             artifact_target = "docs/questions/"
 
-        if category == MessageCategory.APPROVAL and durable and artifact_target:
+        if durable and category in (MessageCategory.APPROVAL, MessageCategory.REJECTION, MessageCategory.ANSWER):
             self._artifact_writer.write(
                 artifact_target,
                 f"Decision from {event.chat_key}: {event.text}",
@@ -421,6 +419,8 @@ class TelegramFounderAdapter:
     def route_specialist_question(
         self, chat_key: str, question: SpecialistQuestion
     ) -> str:
+        if chat_key in self._pending_questions:
+            raise ValueError(f"Unresolved pending question already exists for {chat_key}; resolve it before routing a new one")
         self._pending_questions[chat_key] = question
         text = question.to_russian_text()
         self._telegram_sender.send(chat_key, text)

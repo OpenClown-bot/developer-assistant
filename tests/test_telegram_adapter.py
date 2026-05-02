@@ -322,6 +322,21 @@ class TestSpecialistQuestionFormatting(unittest.TestCase):
         assert isinstance(result, CommandResult)
         self.assertEqual(result.status, "pending")
 
+    def test_pending_question_overwrite_guard(self):
+        sender = _RecordingTelegramSender()
+        adapter = _make_adapter(sender=sender)
+        q1 = SpecialistQuestion(
+            context="first question", options=["a"], recommendation="a",
+            impact="none", urgency="low",
+        )
+        q2 = SpecialistQuestion(
+            context="second question", options=["b"], recommendation="b",
+            impact="none", urgency="medium",
+        )
+        adapter.route_specialist_question("chat:founder", q1)
+        with self.assertRaises(ValueError):
+            adapter.route_specialist_question("chat:founder", q2)
+
 
 class TestDurableDecisionCapture(unittest.TestCase):
     def test_durable_approval_writes_artifact(self):
@@ -384,6 +399,51 @@ class TestDurableDecisionCapture(unittest.TestCase):
         adapter.handle_event(_make_event(text="Одобряю архитектуру деплоя"))
         self.assertIn("chat:founder", writer.writes[0].content)
         self.assertIn("архитектуру деплоя", writer.writes[0].content)
+
+    def test_durable_answer_writes_artifact(self):
+        writer = _RecordingArtifactWriter()
+        sender = _RecordingTelegramSender()
+        adapter = _make_adapter(writer=writer, sender=sender)
+        q = SpecialistQuestion(
+            context="Architecture choice", options=["Monolith", "Microservices"],
+            recommendation="Monolith", impact="Core architecture",
+            urgency="high",
+        )
+        adapter.route_specialist_question("chat:founder", q)
+        result = adapter.handle_event(_make_event(text="Use monolith for the deployment architecture"))
+        self.assertIsInstance(result, ClassificationResult)
+        assert isinstance(result, ClassificationResult)
+        self.assertTrue(result.durable_decision)
+        self.assertTrue(len(writer.writes) > 0)
+        self.assertEqual(writer.writes[0].path, "docs/questions/")
+
+    def test_durable_rejection_artifact_content(self):
+        writer = _RecordingArtifactWriter()
+        adapter = _make_adapter(writer=writer)
+        adapter.handle_event(_make_event(text="Отклоняю change в продакшн"))
+        self.assertTrue(len(writer.writes) > 0)
+        self.assertIn("chat:founder", writer.writes[0].content)
+        self.assertIn("продакшн", writer.writes[0].content)
+
+    def test_durable_clarification_has_target_but_no_write(self):
+        writer = _RecordingArtifactWriter()
+        adapter = _make_adapter(writer=writer)
+        result = adapter.handle_event(_make_event(text="Уточни архитектуру деплоя"))
+        self.assertIsInstance(result, ClassificationResult)
+        assert isinstance(result, ClassificationResult)
+        self.assertTrue(result.durable_decision)
+        self.assertIsNotNone(result.artifact_target)
+        self.assertEqual(len(writer.writes), 0)
+
+    def test_durable_general_question_has_target_but_no_write(self):
+        writer = _RecordingArtifactWriter()
+        adapter = _make_adapter(writer=writer)
+        result = adapter.handle_event(_make_event(text="Как будет работать деплой?"))
+        self.assertIsInstance(result, ClassificationResult)
+        assert isinstance(result, ClassificationResult)
+        self.assertTrue(result.durable_decision)
+        self.assertIsNotNone(result.artifact_target)
+        self.assertEqual(len(writer.writes), 0)
 
 
 class TestProgressReportScheduling(unittest.TestCase):
