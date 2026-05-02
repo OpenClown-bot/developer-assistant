@@ -19,7 +19,29 @@ concurrency:
 
 jobs:
   pr_agent_job:
-    if: ${{ github.event.sender.type != 'Bot' || github.event_name == 'workflow_dispatch' }}
+    # Skip PR-Agent entirely for docs-only / clerical / session-log PRs. They
+    # are by-construction low-risk (no code paths, no behavioural changes) and
+    # PR-Agent's primary value (security / correctness / tests / scope drift)
+    # does not apply. validate-docs + Reviewer LLM (Kimi) cover discipline for
+    # these PR classes. This skip avoids burning ~12-18 min of OmniRoute time
+    # on Qwen Plus reviewing Markdown that nobody needs reviewed.
+    #
+    # The skip applies to pull_request events only. Manual triggers
+    # (issue_comment with /review, workflow_dispatch, pull_request_review_comment)
+    # always run so the founder can force a review on a clerical PR if needed.
+    if: >-
+      (github.event.sender.type != 'Bot' || github.event_name == 'workflow_dispatch')
+      && (
+        github.event_name != 'pull_request'
+        || (
+          !startsWith(github.event.pull_request.title, 'clerical:')
+          && !startsWith(github.event.pull_request.title, 'session-log:')
+          && !startsWith(github.event.pull_request.title, 'docs-only:')
+          && !startsWith(github.event.pull_request.title, '[Auto]')
+          && !startsWith(github.event.pull_request.title, 'Auto')
+          && !startsWith(github.event.pull_request.title, 'chore/')
+        )
+      )
     runs-on: ubuntu-latest
     # Hard cap so a runaway run cannot block the pipeline indefinitely. If this
     # cap fires regularly, that is a signal to investigate OmniRoute/Fireworks
