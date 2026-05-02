@@ -103,8 +103,13 @@ author's description.
 # Inline suggestions become committable directly from the GitHub UI.
 commitable_code_suggestions = true
 focus_only_on_problems = true
-num_code_suggestions_per_chunk = 4
-max_number_of_calls = 4
+# Tuned down from 4/4 to 2/2 to cut PR-Agent tail latency. With
+# `focus_only_on_problems = true` the suggestions step is almost always empty
+# anyway, so spending ~3-4 minutes generating four chunks across four calls is
+# pure overhead. Persistent review (auto_review) remains the load-bearing
+# PR-Agent output; suggestions are belt-and-suspenders only.
+num_code_suggestions_per_chunk = 2
+max_number_of_calls = 2
 parallel_calls = true
 new_score_mechanism = true
 new_score_mechanism_th_high = 9
