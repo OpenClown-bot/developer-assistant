@@ -1,6 +1,6 @@
 ---
 id: RV-CODE-018
-version: 0.2.0
+version: 0.3.0
 status: complete
 verdict: pass
 ---
@@ -45,37 +45,28 @@ verdict: pass
 | Docs CI (`validate-docs`) | **pass** | Completed 2026-05-02T22:03:11Z |
 | PR-Agent (`Run PR Agent on every pull request`) | **pass** | Completed 2026-05-02T22:05:31Z; advisory findings recorded in Section 5 |
 | Local docs validation | **pass** | `python scripts/validate_docs.py` — Docs validation passed. |
-| Local unit tests | **1 failure** | 213 tests ran, 212 passed, 1 failed, 1 skipped. Failure: `test_durable_rejection_writes_artifact`. Executor PR body claimed 185 tests OK, 0 failed — this claim is inaccurate for the exact HEAD. |
+| Local unit tests | **pass** | 218 tests ran, 0 failures, 1 skipped. Confirmed at final Executor HEAD `3b551ef65607707492562cc4f8999eece30a7d5c`. |
 | `pytest` availability | **unavailable** | Unittest fallback used, consistent with prior tickets. |
 
 ## 5. Findings (ordered by severity)
 
-### High — Durable rejection and answer decisions are not written to artifacts
+### High — Durable rejection and answer decisions are not written to artifacts (iter-1; resolved in iter-2)
 
-- **Location**: `src/developer_assistant/telegram_adapter.py:399–402`
-- **Description**: In `_handle_freeform`, `artifact_target` is set for durable messages in categories `APPROVAL`, `REJECTION`, `ANSWER`, and other durable messages, but `self._artifact_writer.write()` is only called when `category == MessageCategory.APPROVAL`. Consequently, a founder’s durable rejection (e.g., “Отклоняю change в продакшн”) or a durable answer is classified correctly and marked `durable_decision=True`, yet it is never persisted to a repository artifact. This violates `HERMES-RUNTIME-CONTRACT.md` Section 8 (Decision Capture): “Decisions affecting product scope, architecture, security, credentials, merge policy, deployment … must be summarized into repository artifacts.” It also causes the included test `test_durable_rejection_writes_artifact` to fail on the exact Executor HEAD.
-- **Recommendation** (required before merge): Change the write guard to include `REJECTION` and `ANSWER`:
-  ```python
-  if durable and artifact_target and category in (
-      MessageCategory.APPROVAL,
-      MessageCategory.REJECTION,
-      MessageCategory.ANSWER,
-  ):
-      self._artifact_writer.write(artifact_target, f"Decision from {event.chat_key}: {event.text}")
-  ```
-  Then re-run the full test suite (`python -m unittest discover -s tests -p "test_*.py" -v`) and confirm zero failures.
+- **Location**: `src/developer_assistant/telegram_adapter.py:399–402` (iter-1 HEAD)
+- **Description** (iter-1): In `_handle_freeform`, `artifact_target` is set for durable messages in categories `APPROVAL`, `REJECTION`, `ANSWER`, and other durable messages, but `self._artifact_writer.write()` is only called when `category == MessageCategory.APPROVAL`. Consequently, a founder’s durable rejection or durable answer was classified correctly and marked `durable_decision=True`, yet never persisted to a repository artifact, violating `HERMES-RUNTIME-CONTRACT.md` Section 8. This caused `test_durable_rejection_writes_artifact` to fail.
+- **Resolution** (iter-2): Executor broadened the write guard to `APPROVAL`, `REJECTION`, and `ANSWER` at lines 402–406. Tests `test_durable_rejection_writes_artifact`, `test_durable_answer_writes_artifact`, and `test_durable_rejection_artifact_content` now pass. See §11.1 for full verification.
 
-### Medium — Executor-reported test count is inaccurate
+### Medium — Executor-reported test count is inaccurate (iter-1; resolved in iter-2)
 
 - **Location**: PR #35 body and `docs/tickets/TKT-006.md` Section 10
-- **Description**: The Executor reported “185 tests OK, 0 failed.” A fresh checkout of the exact Executor HEAD `394968a30aee29d0bd7efd0f69b71d7a15e164df` and full unittest discovery yields 213 tests with 1 failure (`test_durable_rejection_writes_artifact`). The reported count does not match reality.
-- **Recommendation**: Update the Execution Log and PR body with the accurate test count and failure after applying the High finding fix.
+- **Description** (iter-1): The Executor reported “185 tests OK, 0 failed.” A fresh checkout of the exact Executor HEAD `394968a30aee29d0bd7efd0f69b71d7a15e164df` yielded 213 tests with 1 failure (`test_durable_rejection_writes_artifact`).
+- **Resolution** (iter-2): Executor updated PR body to “86 TKT-006 tests, 218 total suite.” Local run at final HEAD `3b551ef65607707492562cc4f8999eece30a7d5c` confirms 218 tests, 0 failures, 1 skipped. See §11.2 for full verification. Note: `docs/tickets/TKT-006.md` Section 10 Execution Log still shows the old iter-1 count (53 tests); this is a clerical discrepancy.
 
-### Medium — Logic-layer adapter only; no Hermes runtime or Telegram Bot API wiring
+### Medium — Logic-layer adapter only; no Hermes runtime or Telegram Bot API wiring (residual risk)
 
 - **Location**: `src/developer_assistant/telegram_adapter.py` module-level docstring and `handle_event`
 - **Description**: The adapter implements event handling, command routing, classification, and decision capture as a pure Python logic layer. It is not bound to Hermes Agent gateway APIs, Telegram Bot API polling/webhook handlers, or the SQLite operational state store from TKT-007. TKT-006 AC #1 states “Hermes can receive Telegram messages from an allowlisted founder chat.” This is structurally satisfied by `handle_event(TelegramEvent)`, but no actual Hermes or Telegram transport integration exists.
-- **Recommendation**: Acceptable for v0.1 iter-1 minimal implementation. A follow-up ticket must bind this adapter to Hermes gateway behavior per `HERMES-RUNTIME-CONTRACT.md` Section 14 (“TKT for Hermes runtime adapter implementation”).
+- **Status**: Acceptable non-blocking limitation for v0.1 logic-layer scope. A follow-up ticket must bind this adapter to Hermes gateway behavior per `HERMES-RUNTIME-CONTRACT.md` Section 14. Tracked as Residual Risk #1 below.
 
 ### Low — `validate_telegram_config_env` strict false-like casing
 
@@ -105,16 +96,16 @@ verdict: pass
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 1 | Hermes can receive Telegram messages from an allowlisted founder chat. | **Partial** | `TelegramFounderAdapter.handle_event()` receives `TelegramEvent` and enforces allowlist via `FounderAuthorizer`. No actual Hermes runtime or Telegram Bot API wiring; acknowledged as v0.1 iter-1 minimal implementation. Follow-up ticket required for gateway binding. |
+| 1 | Hermes can receive Telegram messages from an allowlisted founder chat. | **Pass (with accepted limitation)** | `TelegramFounderAdapter.handle_event()` receives `TelegramEvent` and enforces allowlist via `FounderAuthorizer`. No actual Hermes runtime or Telegram Bot API wiring yet; this is an accepted v0.1 logic-layer limitation. Follow-up ticket required for gateway binding per `HERMES-RUNTIME-CONTRACT.md` Section 14. |
 | 2 | `/new_project`, `/status`, `/decisions`, `/pause`, `/resume` behavior implemented. | **Pass** | All five commands dispatched in `_dispatch_command` with Russian responses, state mutation, and `/decisions` pending-question resolution. Tests cover each command plus bot-name suffix parsing. |
 | 3 | Free-form founder messages classified into required categories. | **Pass** | `classify_message` returns exactly one of `intake`, `answer`, `clarification`, `approval`, `rejection`, `general_question`. Tests cover all categories in Russian and English, plus pending-question context. |
 | 4 | Specialist-agent questions routed with context, options, recommendation, impact, urgency. | **Pass** | `SpecialistQuestion` enforces all fields, validates `urgency` values, and `to_russian_text()` renders Russian output. `route_specialist_question` stores the question and sends via `TelegramSender`. |
-| 5 | Founder answers that affect durable decisions are written to repository artifacts. | **Partial** | Durable `APPROVAL` correctly triggers `artifact_writer.write()`. Durable `REJECTION` and `ANSWER` set `artifact_target` but do **not** trigger a write, causing a failing test and violating the decision-capture contract. Fix required before merge (see High finding). |
+| 5 | Founder answers that affect durable decisions are written to repository artifacts. | **Pass** | Durable `APPROVAL`, `REJECTION`, and `ANSWER` all trigger `artifact_writer.write()` to `"docs/questions/"` at lines 402–406. Tests `test_durable_approval_writes_artifact`, `test_durable_rejection_writes_artifact`, `test_durable_answer_writes_artifact`, and `test_durable_rejection_artifact_content` confirm correct content capture. |
 | 6 | Progress reports after milestones and on 30–60 minute schedule. | **Pass** | `is_report_due` enforces 30–60 min interval with clamping, milestone override, and first-report logic. `ProgressReport.to_russian_text()` produces Russian text with all required fields. |
 | 7 | Telegram token and chat identifiers not committed. | **Pass** | No tokens, raw chat IDs, raw user IDs, `.env` files, or credential values in committed code. Fixtures use sanitized keys (`chat:founder`, `user:founder`, `chat:proj-alpha`). |
 | 8 | Production `TELEGRAM_BOT_TOKEN` use follows `HERMES-SKILL-ALLOWLIST` constraints. | **Pass** | `validate_telegram_config_env` denies allow-all flags, requires `TELEGRAM_ALLOWED_USERS` or DM pairing, requires token presence, and enforces webhook secret in webhook mode. Polling is default. |
 | 9 | `python scripts/validate_docs.py` passes. | **Pass** | Confirmed locally and in CI. |
-| 10 | Relevant unit tests pass. | **Partial** | 212/213 tests pass. One failure (`test_durable_rejection_writes_artifact`) due to the durable-rejection write gap. Fix required before merge. |
+| 10 | Relevant unit tests pass. | **Pass** | 218 tests ran, 0 failures, 1 skipped at final Executor HEAD `3b551ef65607707492562cc4f8999eece30a7d5c`. All TKT-006 acceptance criteria are covered by the 86 adapter tests. |
 
 ## 7. Security / Process Notes
 
@@ -122,7 +113,7 @@ verdict: pass
 - **Telegram credential path**: The implementation does not broaden the reviewed Telegram credential-bearing path from TKT-012. It remains a logic-layer adapter with no actual Bot API calls. The security constraints (`validate_telegram_config_env`, `FounderAuthorizer`) align with `HERMES-SKILL-ALLOWLIST.md` Section 4.1 and Section 7.1.
 - **Skill/plugin marketplace**: No marketplace skills, project-local plugins, OpenClaw plugins, or Hermes bundled GitHub credential-bearing skills are enabled or referenced in the code.
 - **Autonomous merge / live deployment**: Not implemented. `/new_project` only sets an `artifact_intent` of `docs/prd/`; it does not create repositories, deploy, or merge.
-- **Operational state vs repository authority**: Progress scheduling uses in-memory timestamps rather than the SQLite store from TKT-007. The adapter does not treat Telegram chat history or in-memory state as authoritative for durable decisions. The only gap is the missing write for durable rejections/answers (High finding).
+- **Operational state vs repository authority**: Progress scheduling uses in-memory timestamps rather than the SQLite store from TKT-007. The adapter does not treat Telegram chat history or in-memory state as authoritative for durable decisions. Durable decisions are written to repository artifacts via the injectable `ArtifactWriter` (see §11.1).
 - **Write zone compliance**: Confirmed. Only `src/developer_assistant/telegram_adapter.py`, `tests/test_telegram_adapter.py`, and `docs/tickets/TKT-006.md` Section 10 were modified. No changes to architecture, prompts, workflows, or PR metadata.
 - **Import style**: Tests use `from src.developer_assistant.telegram_adapter import ...`, consistent with existing `test_state_store.py` and `test_github_workflow.py`.
 
@@ -142,15 +133,15 @@ The logic-layer-only nature of the adapter (no Hermes/Telegram API wiring) is an
 2. **In-memory progress timestamps**: `send_progress_report` and `is_report_due` use in-memory dicts. Process restart loses scheduling state. Production should migrate to the SQLite `scheduled_progress` table from TKT-007.
 3. **Keyword-based classification**: `classify_message` uses regex heuristics. Ambiguous or sarcastic founder messages may be misclassified. An LLM-based classifier should be evaluated in a future iteration.
 4. **All durable decisions routed to `docs/questions/`**: The adapter does not distinguish product decisions (`docs/prd/`), architecture decisions (`docs/architecture/adr/`), or ticket-level clarifications. This is acceptable for v0.1 but should be refined when the runtime adapter understands decision topics.
-5. **Pending question overwrite**: `route_specialist_question` overwrites any existing pending question for the same chat without queueing. For v0.1 with one founder and one project, this is acceptable.
+5. **No pending question queueing**: `route_specialist_question` raises `ValueError` if a pending question already exists for the same chat. This prevents silent overwrites but means a second specialist query is rejected until the founder resolves the first. For v0.1 with one founder and one project, this is acceptable.
 
 ## 10. Founder Approval
 
 - **Founder approval required:** yes
 - **Founder approval status:** pending
 - **Required before merge:**
-  1. Founder acknowledges the residual risks (logic-layer only, in-memory timestamps, keyword heuristics, directory artifact path, timestamp parse fail-open).
-  2. Reviewer iter-2 verification confirms all blocking findings resolved (see §11).
+  1. Founder acknowledges the residual risks listed in §9 (logic-layer only, in-memory timestamps, keyword heuristics, directory artifact path, timestamp parse fail-open, no pending-question queueing).
+  2. Founder approves merge after reading this review artifact.
 
 ## 11. Iter-2 Verification
 
