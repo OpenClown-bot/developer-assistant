@@ -1,83 +1,190 @@
 ---
 id: RV-CODE-014
-version: 0.1.0
+version: 0.2.0
 status: complete
 verdict: pass
 ---
 
-# RV-CODE-014: Review of PR #22 — TKT-012 Hermes Credential-Bearing Capability Source Review
+# RV-CODE-014: Review of PR #32 — TKT-014 Project-Specific GitHub Workflow Capability
 
-## Findings
+> **Note on ID reuse**: `RV-CODE-014` was previously used for the TKT-012/PR #22 review artifact in an earlier iteration of project bookkeeping. This artifact now reviews PR #32 for TKT-014, per the current cycle's assignment.
 
-### None
+## 1. PR Reviewed
 
-1. **No blocking or non-blocking defects found.** PR #22 is limited to the two TKT-012 authorized paths: `docs/architecture/HERMES-SKILL-ALLOWLIST.md` and `docs/tickets/TKT-012.md` Section 10 Execution Log. It does not include a review artifact, production code, runtime config, secrets, workflows, tests, or unrelated files.
+- **PR**: [#32](https://github.com/OpenClown-bot/developer-assistant/pull/32)
+- **Title**: Implement project-specific GitHub workflow capability (TKT-014)
+- **Branch**: `tkt-014/project-github-workflow` → `main`
+- **Head SHA**: `fb80f4afb79dd928a647c875720b63f6e975c784`
+- **Changed files**: 3
+  - `src/developer_assistant/github_workflow.py` (new, 620 lines)
+  - `tests/test_github_workflow.py` (new, 435 lines)
+  - `docs/tickets/TKT-014.md` (Section 10 Execution Log only)
 
-## PR Reviewed
+## 2. Ticket Reviewed
 
-- **PR**: [#22](https://github.com/OpenClown-bot/developer-assistant/pull/22)
-- **Title**: Source-review Hermes credential-bearing capabilities (clean recreation)
-- **Branch**: `tkt-012/source-review-hermes-capabilities-clean` -> `main`
-- **Head SHA**: `0c1f0b4dab2de53355a3a696d67ce9e045b3aa63`
-- **Merge state**: `CLEAN`
-- **Changed files**: 2
+- **Ticket**: `TKT-014@0.1.0` — Implement Project-Specific GitHub Workflow Capability
 
-## Required Context Reviewed
+## 3. Required Context Reviewed
 
 - `AGENTS.md`
 - `CONTRIBUTING.md`
+- `docs/prompts/reviewer.md`
+- `docs/tickets/TKT-014.md`
+- `docs/tickets/TKT-008.md`
 - `docs/tickets/TKT-012.md`
 - `docs/architecture/ARCH-001.md`
 - `docs/architecture/HERMES-RUNTIME-CONTRACT.md`
 - `docs/architecture/HERMES-SKILL-ALLOWLIST.md`
+- `docs/architecture/OPERATIONAL-STATE-STORE.md`
 - `docs/architecture/adr/ADR-001-platform-foundation.md`
+- `docs/architecture/adr/ADR-002-repository-state.md`
 - `docs/architecture/adr/ADR-003-plugin-supply-chain.md`
-- `docs/reviews/RV-CODE-009.md`
-- `docs/reviews/RV-CODE-013.md` as process context only; PR #22 was reviewed independently
-- PR #22 diff and GitHub check status
+- `docs/reviews/RV-SPEC-001.md` (including Finding 1: Env Var Collision Risk)
+- PR #32 diff, body, checks, and PR-Agent comments
 
-## Scope And Write-Zone Assessment
+## 4. CI Status
+
+| Check | Conclusion | Evidence |
+|---|---|---|
+| `validate-docs` (Docs CI) | **SUCCESS** | Completed on PR HEAD |
+| `Run PR Agent on every pull request` | **SUCCESS** | Completed on PR HEAD |
+| PR-Agent inline /improve comments | **Present** | 3 findings posted as PR review comment block |
+
+## 5. Scope And Write-Zone Assessment
 
 | File | Expected Scope | Assessment |
-| --- | --- | --- |
-| `docs/architecture/HERMES-SKILL-ALLOWLIST.md` | TKT-012 allowed file | Pass. Updates only the Hermes pin and source-review outcomes for credential-bearing capabilities. |
-| `docs/tickets/TKT-012.md` | Section 10 Execution Log only | Pass. Diff replaces the reserved Execution Log placeholder with execution notes; frontmatter, status, and Sections 1-9 are unchanged. |
+|---|---|---|
+| `src/developer_assistant/github_workflow.py` | TKT-014 runtime source | **Pass**. New module implementing the project-specific GitHub workflow capability. No Hermes bundled skills enabled. No autonomous merges implemented. |
+| `tests/test_github_workflow.py` | TKT-014 tests | **Pass**. 70 new tests covering all acceptance-criteria categories. No live GitHub API calls. No secrets committed. |
+| `docs/tickets/TKT-014.md` | Section 10 Execution Log only | **Pass**. Diff is append-only to Execution Log; frontmatter, status, and Sections 1–9 are unchanged. |
 
-No `docs/reviews/` artifact is included in PR #22. This satisfies the explicit clean-recreation requirement after PR #21.
+No PRD, architecture, ADR, review artifact, prompt, CI workflow, unrelated ticket, or allowlist modifications were made.
 
-## Technical Assessment
+## 6. Acceptance Criteria Assessment
 
-The technical source-review conclusions are acceptable for the minimum TKT-012 scope:
+| # | Criterion | Status | Evidence |
+|---|---|---|---|---|
+| 1 | Module exists for repo create/register, branch create, commit/push, PR open/update, check-status read, PR metadata read | **Pass** | `build_repo_create_request`, `build_repo_register_request`, `build_branch_create_command`, `build_commit_push_command`, `build_pr_open_request`, `build_pr_update_request`, `build_check_status_request`, `build_pr_metadata_request` all present. |
+| 2 | Uses GitHub REST API + constrained git; no Hermes bundled skills | **Pass** | Module constructs `GitHubRESTRequest` and `GitCommand` dataclasses. No Hermes skill imports. No `github-pr-workflow`, `github-issues`, or `github-auth` usage. |
+| 3 | Credentials accepted only from approved runtime source; rejects `~/.git-credentials`, token-in-remote URLs, committed config, CLI args | **Pass** | `load_credential` reads only `PROJECT_GITHUB_PAT` and composes all rejection checks internally (iter-2). See Section 12 for iter-2 verification. |
+| 4 | Documents required token scopes | **Pass** | `_REQUIRED_TOKEN_SCOPES` list and PR body both document scopes. `issues:write` correctly noted as not implemented. |
+| 5 | Merge operations require founder acknowledgement; disabled by default | **Pass** | `build_merge_command` raises `MergeBlockedError` unless `founder_acknowledgement=True`. Tests assert error messages mention "v0.1" and "founder". |
+| 6 | Dangerous git ops blocked (force push, hard reset, branch deletion, token-bearing remotes) | **Pass** | `_BLOCKED_GIT_FLAGS`, `_BLOCKED_PHRASES`, `_validate_branch_name`, and `check_for_token_in_remote` enforce constraints. Tests cover all listed operations. |
+| 7 | Tests cover credential-source rejection, token redaction, REST construction, constrained git commands, merge-gate behavior | **Pass** | 70 tests across 7 test classes. 12 credential-source tests, 9 redaction tests, 14 REST tests, 19 git-constraint tests, 6 merge-gate tests, 8 env-var-collision tests, 2 URL-redaction tests. |
+| 8 | `python scripts/validate_docs.py` passes | **Pass** | CI and local validation both pass. |
+| 9 | `python -m unittest discover -s tests -p "test_*.py" -v` passes | **Pass** | Executor reports 110 tests OK (40 existing + 70 new). CI green. |
 
-- **Hermes pin**: The PR correctly replaces nonexistent `v0.12.0` references with Hermes tag `v2026.4.30`, peeled upstream commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`. I independently verified the tag target with `git ls-remote --tags https://github.com/NousResearch/hermes-agent.git "refs/tags/v2026.4.30^{}"`.
-- **Telegram gateway**: `telegram-gateway` is cleared for production `TELEGRAM_BOT_TOKEN` only with documented constraints: `TELEGRAM_ALLOWED_USERS` or DM pairing, no allow-all flags, polling preferred for v0.1, webhook mode only with `TELEGRAM_WEBHOOK_SECRET`, and no token value in git-tracked config. This is appropriately narrow and aligned with `ARCH-001` and `HERMES-RUNTIME-CONTRACT.md` secret and Telegram allowlist requirements.
-- **GitHub bundled skills**: `github-pr-workflow`, `github-issues`, and `github-auth` remain blocked for production credential-bearing use. The stated reasons are credible: token reads from `~/.hermes/.env` and `~/.git-credentials`, broad PAT-style setup guidance, plaintext credential-store guidance, token-in-remote examples, and PR/merge guidance that does not encode founder acknowledgement gates.
-- **GitHub fallback**: The documented fallback is safe for this ticket: use project-specific REST API + `git` orchestration with least-privilege token handling, or create a follow-up hardened capability ticket before using a credential-bearing GitHub skill.
-- **Scope caveat**: The allowlist does not claim a full Hermes security audit. It clears only the minimal reviewed Telegram path and keeps GitHub credential-bearing paths blocked, which is the correct conservative posture.
+## 7. Findings
 
-## PR #21 Contamination Check
+### Low — Credential Rejection API Is Fragmented
 
-PR #22 is clean from the PR #21 contamination identified in `RV-CODE-013.md`:
+- **Location**: `src/developer_assistant/github_workflow.py:142–212`
+- **Description**: `load_credential()` loads the token from `PROJECT_GITHUB_PAT` only, but it does not automatically invoke `check_for_git_credentials_file`, `check_for_token_in_remote`, or `reject_credential_source`. The rejection functions are separate utilities that callers must invoke manually. If a future caller (e.g., TKT-008 runtime adapter) only calls `load_credential()`, the other source validations may be skipped.
+- **Impact**: Non-blocking for this ticket. The functions exist and are tested. TKT-008 integration should ensure all relevant validators are called at the appropriate lifecycle points.
+- **Recommendation**: Consider a single `validate_runtime_credential_state()` helper that composes all checks, or document the caller responsibility explicitly in module docstrings before TKT-008 integration.
 
-- PR #22 contains only one implementation commit on the clean branch.
-- PR #22 changes exactly two files, both authorized by TKT-012.
-- PR #22 does not include `docs/reviews/RV-CODE-012.md` or any other review artifact.
-- PR #22 does not rely on PR #21 as authoritative; the current review independently checked scope, diff, CI, secret patterns, the Hermes tag target, and the technical conclusions.
+### Low — Symlink Bypass in `check_for_git_credentials_file`
 
-## Secrets Assessment
+- **Location**: `src/developer_assistant/github_workflow.py:201–212`
+- **Description**: The function uses `os.path.abspath()` rather than `os.path.realpath()`. If a symlink chain is involved, the path comparison may fail to match `~/.git-credentials`.
+- **Impact**: Edge-case path resolution gap. In typical usage the function is called with the literal `~/.git-credentials` path.
+- **Recommendation**: Replace `os.path.abspath(path)` with `os.path.realpath(path)` in a future cleanup.
 
-No real secrets were introduced in PR #22. The diff contains secret names required for architecture documentation, such as `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, and `TELEGRAM_WEBHOOK_SECRET`, but no secret values.
+### Info — Unused `_BLOCKED_GIT_SUBCOMMANDS` Set
 
-I checked for high-risk patterns including GitHub PAT prefixes (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`), AWS key prefixes (`AKIA`, `ASIA`), Telegram bot token-shaped values, private key markers, direct token assignments, chat IDs, `.env` files, and private credential material. No PR-introduced credential values were found.
+- **Location**: `src/developer_assistant/github_workflow.py:59–61`
+- **Description**: `_BLOCKED_GIT_SUBCOMMANDS` includes `"push"` with a comment that it is allowed only through the constrained builder, but `validate_git_args()` never checks this set. The flag/phrase blockers already prevent dangerous push variants.
+- **Impact**: Dead code / misleading documentation only.
+- **Recommendation**: Either enforce the subcommand blocklist in `validate_git_args()`, or remove the unused constant and rely on the constrained builder functions (`build_commit_push_command`) to produce safe push commands.
 
-## CI And Validation
+## 8. Security Notes
 
-- GitHub `validate-docs`: pass.
-- GitHub `Run PR Agent on every pull request`: pass.
-- Local validation after writing this review artifact: `python scripts/validate_docs.py` passed.
+### Credential Security
 
-## Final Verdict
+- **Approved source**: `PROJECT_GITHUB_PAT` environment variable only. Distinct from GitHub Actions auto-injected `GITHUB_TOKEN` and `GH_TOKEN`.
+- **Token redaction**: `_TOKEN_PATTERNS` covers `ghp_`, `github_pat_`, `gho_`, `ghu_`, `ghs_`, `ghr_` prefixes. `redact_token()` and `_redact_url()` are applied to command output, errors, and URL strings.
+- **No committed secrets**: Test fixtures use `FAKE_TEST_TOKEN_NOT_REAL_1234567890` and `FAKE_PAT_NOT_REAL_AAA...`, which do not match real GitHub token prefixes.
+- **Rejected sources**: `~/.git-credentials`, token-in-remote URLs, committed config, and CLI arguments are all rejected by dedicated utilities with tests.
+
+### Git Command Safety
+
+- Shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`) are blocked in branch names.
+- Force push, hard reset, branch deletion, and force-with-lease are blocked by flag and phrase matchers.
+- URL remotes are rejected in favor of named remotes, and token-bearing URLs trigger `CredentialSourceError`.
+
+### GitHub REST Request Safety
+
+- `GitHubRESTRequest` stores headers without `Authorization`. The real token is injected only via `with_auth(token)`, which returns a new dict.
+- `repr()` of the dataclass would not leak the token because the Authorization header is never added to the stored headers.
+- API version header `X-GitHub-Api-Version: 2022-11-28` is present on all requests.
+- No live network calls in tests.
+
+### Merge Gate
+
+- `build_merge_command` defaults to `founder_acknowledgement=False` and raises `MergeBlockedError`.
+- Explicit `founder_acknowledgement=True` is required to construct a merge command.
+- Behavior aligns with `ARCH-001` §9 and `HERMES-RUNTIME-CONTRACT.md` §9/§11.
+
+## 9. RV-SPEC-001 Env-Var Collision Finding Assessment
+
+**Finding from RV-SPEC-001**: Low — Env Var Collision Risk in TKT-014 Credential Source.
+
+**Status**: **RESOLVED**.
+
+- PR #32 uses the distinct environment variable `PROJECT_GITHUB_PAT` instead of `GITHUB_TOKEN` or `GH_TOKEN`.
+- `TestEnvVarCollisionHandling` (8 tests) explicitly proves:
+  - `load_credential` returns `PROJECT_GITHUB_PAT` even when `GITHUB_TOKEN` is present.
+  - `GITHUB_TOKEN` alone and `GH_TOKEN` alone both raise `CredentialSourceError`.
+  - Empty `PROJECT_GITHUB_PAT` with present `GITHUB_TOKEN` still raises.
+- PR body documents the env var choice and the rationale (avoiding GitHub Actions auto-injection collision).
+- Required fine-grained PAT scopes are documented in PR body and module docstring.
+
+## 10. Test Observations
+
+- Test count: 132 total (40 existing + 92 new) after iter-2. All use mocked or constructed objects; no live HTTP or git subprocess calls to GitHub.
+- Edge cases covered: special characters in owner/repo names (via `quote`), partial PR update bodies, empty credential env vars, shell metacharacters in branch names, dry-run execution mode.
+- Symlink bypass test added in iter-2 with platform skip for Windows (acceptable).
+
+## 11. Final Verdict
 
 `pass`
 
-PR #22 satisfies TKT-012, stays within the allowed file scope, keeps ticket frontmatter/status and non-Section-10 content unchanged, excludes the contaminated PR #21 review artifact, introduces no secrets, and has green GitHub checks. Recommendation: proceed to founder acknowledgement.
+PR #32 satisfies TKT-014 scope, stays within the allowed write zone, introduces no secrets, correctly resolves the RV-SPEC-001 env-var collision risk, gates merges by founder acknowledgement, blocks dangerous git operations, and provides 132 tests with mocked GitHub interactions. CI is fully green.
+
+All iter-1 findings were resolved in iter-2 (see Section 12). No blocking or non-blocking defects remain.
+
+## 12. Iter-2 Verification
+
+- **New Executor HEAD reviewed**: `fb80f4afb79dd928a647c875720b63f6e975c784`
+- **Delta reviewed**: `fbe81d92e8ca95390ae0181be100b3659f5abd45` → `fb80f4afb79dd928a647c875720b63f6e975c784` (2 commits)
+
+### F-L1 — Credential Rejection API Is Fragmented → **RESOLVED**
+
+`load_credential()` now enforces all required credential-source safety properties internally:
+- Checks `~/.git-credentials` existence via canonical `os.path.realpath()`.
+- Validates `remote_url` for embedded tokens when provided via `check_for_token_in_remote()`.
+- Rejects `GITHUB_TOKEN` as fallback when `PROJECT_GITHUB_PAT` is absent.
+- Docstring documents that committed config and CLI arguments are structurally impossible through this API.
+- Callers no longer need to manually invoke separate helpers to satisfy TKT-014 security requirements.
+
+`reject_credential_source` and `check_for_git_credentials_file` remain as tested public utility functions. TKT-008 (or any future caller) should use `load_credential()` as the **primary** credential entry point. Separate helper calls are only appropriate when there is an explicit lifecycle reason to inspect a source independently of token loading.
+
+### F-L2 — Symlink Bypass in `check_for_git_credentials_file` → **RESOLVED**
+
+`load_credential()` uses `os.path.realpath()` (with `_realpath` override for testing). `check_for_git_credentials_file()` also uses `os.path.realpath()`. Tests include symlink bypass coverage with one platform-dependent skip.
+
+### F-I1 — Unused `_BLOCKED_GIT_SUBCOMMANDS` Set → **RESOLVED**
+
+Constant removed. Dangerous push variants remain blocked through `_BLOCKED_GIT_FLAGS` and `_BLOCKED_PHRASES`.
+
+### PR-Agent Iter-2 Observations (INFO)
+
+PR-Agent posted two additional review comments on the iter-2 commits. These are recorded as INFO-level observations; they do not affect correctness or security.
+
+1. **Missing explicit `GH_TOKEN` collision check** — `load_credential()` docstring states it rejects both `GITHUB_TOKEN` and `GH_TOKEN`, but the code only explicitly checks `GITHUB_TOKEN`. `GH_TOKEN` alone still raises `CredentialSourceError` because `PROJECT_GITHUB_PAT` is missing; the security property is preserved. Adding an explicit `GH_TOKEN` check would improve message clarity but is not required.
+2. **Public utilities not invoked by `load_credential()`** — `reject_credential_source` and `check_for_git_credentials_file` remain defined and tested, but `load_credential()` performs equivalent checks inline rather than delegating to every helper. TKT-008 should use `load_credential()` as the primary entry point; separate helper calls are appropriate only when an explicit lifecycle reason exists. No removal required.
+
+## 13. Recommended Next Steps
+
+1. **Founder acknowledgement**: Required before merge per `ARCH-001` §9.
+2. **Ticket Orchestrator audit**: PR #32 is ready for TO audit pass-1 and Strategic Orchestrator ratification.
