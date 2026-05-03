@@ -1,6 +1,7 @@
 [config]
-# Model: Qwen 3.6 Plus through OmniRoute (Fireworks endpoint).
-# Plus is the latest flagship; matches our GLM/Kimi tier and is OmniRoute-billed.
+# Model: DeepSeek V4 Pro through OmniRoute.
+# The Fireworks model id is routed by OmniRoute through the OpenAI-compatible API
+# base configured in .github/workflows/pr_agent.yml.
 # `openai/` prefix is required by LiteLLM (PR-Agent's underlying client) to route
 # this call through the OpenAI-compatible custom endpoint defined by `OPENAI.API_BASE`
 # (set in .github/workflows/pr_agent.yml). Without `openai/`, LiteLLM tries to
@@ -8,19 +9,15 @@
 # NOT provided" because the canonical Fireworks provider in LiteLLM is `fireworks_ai`,
 # and even that bypasses our OmniRoute proxy). Ref:
 # https://litellm.vercel.app/docs/providers/openai_compatible
-model = "openai/accounts/fireworks/models/qwen3p6-plus"
-# 64k effective context. Qwen Plus's native limit is 128k but in practice we
-# never need more than ~30-40k for review/describe even on large diffs, and
-# halving the budget here forces PR-Agent to either fit content into a single
-# call or chunk into smaller pieces that the LLM responds to faster (autoregressive
-# output time grows roughly with context, not just with output tokens). On
-# observed runs of openclown TKT-010 iter-3 (22 min outlier) and developer-assistant
-# PR #24 (>18 min, hit timeout twice), the bottleneck was call latency on huge
-# context, not output length.
+model = "openai/fireworks/accounts/fireworks/models/deepseek-v4-pro"
+# 64k effective context. In practice we rarely need more than ~30-40k for
+# review/describe even on large diffs, and this keeps PR-Agent calls smaller
+# and more predictable while still leaving room for ticket context.
 custom_model_max_tokens = 65536
-# 3 minutes - Qwen on OmniRoute can be slower than gpt-5.4 family.
+# 3 minutes - enough for normal PR-Agent calls while still failing fast on
+# upstream routing stalls.
 ai_timeout = 180
-# More patch context lets Qwen reason about callers/callees per chunk.
+# More patch context lets the reviewer model reason about callers/callees per chunk.
 patch_extra_lines_before = 8
 patch_extra_lines_after = 3
 allow_dynamic_context = true
@@ -28,6 +25,10 @@ allow_dynamic_context = true
 ignore_pr_title = ["^\\[Auto\\]", "^Auto", "^session-log:", "^clerical:", "^chore/", "^docs-only:"]
 # English review output to match the repo convention (Russian for PO chat only).
 response_language = "en-US"
+
+[litellm]
+# Drop provider-unsupported OpenAI params instead of failing the PR-Agent run.
+drop_params = true
 
 [pr_reviewer]
 # Mandate the most useful checks for our threat model + scope discipline.

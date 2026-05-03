@@ -25,7 +25,7 @@ You are the conductor *for one ticket*. You write Executor and Reviewer invocati
 
 - **Product:** `developer-assistant` v0.1 — Telegram-first AI engineering assistant that orchestrates docs-as-code projects on a founder-owned VPS via Hermes Agent.
 - **Repo:** `OpenClown-bot/developer-assistant`. Docs-as-code monorepo, Python implementation.
-- **Pipeline LLM stack:** OmniRoute → Fireworks pool. Architect: GPT-5.5 xhigh / thinking. Executor: GLM 5.1 default. Reviewer: Kimi K2.6 (load-bearing for verdicts). PR-Agent: Qwen 3.6 Plus.
+- **Pipeline LLM stack:** OmniRoute. Architect: GPT-5.5 xhigh / thinking. Executor: GLM 5.1 default. Reviewer: Kimi K2.6 (load-bearing for verdicts). PR-Agent: DeepSeek V4 Pro.
 - **Reference repo:** `OpenClown-bot/openclown-assistant` — the project this pipeline pattern was hardened against. Useful when in doubt about discipline.
 
 ## Required Reading — context links
@@ -67,7 +67,7 @@ You do NOT have access to:
 
 ### Why GPT-5.5 thinking (uncorrelated reasoning)
 
-The Reviewer (Kimi K2.6), default Executor (GLM 5.1), and PR-Agent (Qwen 3.6 Plus) are three different model families. The TO role's primary job at hand-back time is the **first cross-reviewer audit pass** (read every PR-Agent inline + every Kimi finding + classify), and that audit must produce judgment uncorrelated with the artifacts it audits. Choosing GPT-5.5 (a fourth family) gives the audit independence. Kimi / GLM / Qwen are explicitly *not* candidates for the TO role because each would correlate with one pipeline output and silently rubber-stamp it.
+The Reviewer (Kimi K2.6), default Executor (GLM 5.1), and PR-Agent (DeepSeek V4 Pro) are separate model/runtime roles. The TO role's primary job at hand-back time is the **first cross-reviewer audit pass** (read every PR-Agent inline + every Kimi finding + classify), and that audit must produce judgment uncorrelated with the artifacts it audits. Choosing GPT-5.5 for TO keeps the audit independent from Kimi, GLM, and the PR-Agent model.
 
 The Architect role also runs on GPT-5.5, but Architect and TO operate in different lifecycle phases (TKT design vs TKT execution-orchestration) on different artifacts (ArchSpec / ADRs / Ticket bodies vs Reviewer / Executor / PR-Agent outputs). Correlation risk is therefore low.
 
@@ -149,7 +149,7 @@ The lesson behind this rule is **F-PA-17** (codified upstream in `OpenClown-bot/
 
 ## PR-Agent settle-on-final-HEAD requirement
 
-PR-Agent (Qwen 3.6 Plus through OmniRoute → Fireworks) is **slow** — typical end-to-end runtime is 3–9 minutes per push, but tail-latency runs of 15–25 minutes have been observed (likely OmniRoute / upstream provider congestion). It is tempting to hand back to the Strategic Orchestrator while PR-Agent is still `IN_PROGRESS` on the final Executor HEAD; **do not do this**.
+PR-Agent (DeepSeek V4 Pro through OmniRoute) can be slow — typical end-to-end runtime is several minutes per push, and tail-latency runs can be much longer during upstream routing congestion. It is tempting to hand back to the Strategic Orchestrator while PR-Agent is still `IN_PROGRESS` on the final Executor HEAD; **do not do this**.
 
 Before drafting the hand-back message, you MUST verify that:
 

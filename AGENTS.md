@@ -14,7 +14,7 @@ This repository is managed by a **multi-LLM pipeline** with strict role separati
 | Code Executor | `docs/prompts/executor.md` | GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist) | opencode + OmniRoute |
 | Reviewer | `docs/prompts/reviewer.md` | Kimi K2.6 | opencode + OmniRoute |
 
-**Qodo PR-Agent** (Qwen 3.6 Plus through OmniRoute) auto-reviews every PR; it is a **second** reviewer alongside Kimi, not a replacement. See `.pr_agent.toml` and `.github/workflows/pr_agent.yml` for its configuration.
+**Qodo PR-Agent** (DeepSeek V4 Pro through OmniRoute) auto-reviews every PR; it is a **second** reviewer alongside Kimi, not a replacement. See `.pr_agent.toml` and `.github/workflows/pr_agent.yml` for its configuration.
 
 The **three orchestrator roles** are intentionally separate, despite sharing the word "Orchestrator":
 - **Strategic Orchestrator** is the dev-time *session-level* conductor (one role across the lifetime of the project, many sessions stitched together via `docs/session-log/`).
