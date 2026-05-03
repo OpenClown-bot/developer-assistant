@@ -9,7 +9,7 @@
 # NOT provided" because the canonical Fireworks provider in LiteLLM is `fireworks_ai`,
 # and even that bypasses our OmniRoute proxy). Ref:
 # https://litellm.vercel.app/docs/providers/openai_compatible
-model = "openai/accounts/fireworks/models/deepseek-v4-pro"
+model = "openai/fireworks/accounts/fireworks/models/deepseek-v4-pro"
 # 64k effective context. In practice we rarely need more than ~30-40k for
 # review/describe even on large diffs, and this keeps PR-Agent calls smaller
 # and more predictable while still leaving room for ticket context.
