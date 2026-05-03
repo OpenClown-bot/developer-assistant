@@ -10,6 +10,8 @@
 # and even that bypasses our OmniRoute proxy). Ref:
 # https://litellm.vercel.app/docs/providers/openai_compatible
 model = "openai/cx/gpt-5.3-codex"
+# GPT-5/Codex-class models reject PR-Agent's default temperature=0.2.
+temperature = 1
 # 64k effective context. In practice we rarely need more than ~30-40k for
 # review/describe even on large diffs, and this keeps PR-Agent calls smaller
 # and more predictable while still leaving room for ticket context.
@@ -25,6 +27,11 @@ allow_dynamic_context = true
 ignore_pr_title = ["^\\[Auto\\]", "^Auto", "^session-log:", "^clerical:", "^chore/", "^docs-only:"]
 # English review output to match the repo convention (Russian for PO chat only).
 response_language = "en-US"
+
+[litellm]
+# GPT-5/Codex-class models can reject provider-unsupported OpenAI params; drop
+# them instead of failing the PR-Agent run.
+drop_params = true
 
 [pr_reviewer]
 # Mandate the most useful checks for our threat model + scope discipline.
