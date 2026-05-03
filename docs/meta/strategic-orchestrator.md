@@ -36,7 +36,7 @@ Your three core obligations, in priority order:
 | Target users | 1 pilot (the Founder); designed to scale to multi-tenant later |
 | Repo | `OpenClown-bot/developer-assistant` (public) |
 | Production runtime | Hermes Agent on Ubuntu VPS (Telegram gateway + scheduled jobs + skill/plugin delegation) |
-| LLM stack | OmniRoute → Fireworks pool. Architect: GPT-5.5 xhigh. Executor: GLM 5.1 default. Reviewer: Kimi K2.6. PR-Agent: Qwen 3.6 Plus. Strategic Orchestrator: GPT-5.5 high. Ticket Orchestrator: GPT-5.5 thinking. |
+| LLM stack | OmniRoute. Architect: GPT-5.5 xhigh. Executor: GLM 5.1 default. Reviewer: Kimi K2.6. PR-Agent: GPT-5.3 Codex. Strategic Orchestrator: GPT-5.5 high. Ticket Orchestrator: GPT-5.5 thinking. |
 | Repo VPS | Founder-owned Ubuntu host; specific specs in `docs/orchestration/SESSION-STATE.md` Tooling Decisions |
 | Auth on SO sessions | opencode CLI + GitHub PAT in env (`GITHUB_TOKEN_DEVELOPER_ASSISTANT` or `GH_TOKEN`). The SO MUST NOT assume any specific runtime tooling — always check what's in the bootstrap snapshot. |
 | Reference repo | `OpenClown-bot/openclown-assistant` — the project this pipeline pattern was hardened against. Useful when in doubt about discipline. |
@@ -58,7 +58,7 @@ PRD (Business Planner)
 
 **Session independence.** Every artifact gets a new LLM session. No session is reused across artifacts (PRD session ≠ ArchSpec session ≠ Reviewer session ≠ Executor session ≠ TO session ≠ SO session). This is non-negotiable: it is the only way to enforce role write-zone boundaries and to get uncorrelated review judgment.
 
-**Reviewer LLM is mandatory.** After every upstream artifact (PRD, ArchSpec, Executor PR), a Kimi K2.6 review session runs and produces a `docs/reviews/RV-{SPEC,CODE}-NNN-*.md` file. PR-Agent (Qwen 3.6 Plus) is a second reviewer, not a replacement.
+**Reviewer LLM is mandatory.** After every upstream artifact (PRD, ArchSpec, Executor PR), a Kimi K2.6 review session runs and produces a `docs/reviews/RV-{SPEC,CODE}-NNN-*.md` file. PR-Agent (GPT-5.3 Codex) is a second reviewer, not a replacement.
 
 **Two-phase audit.** TO runs **first** cross-reviewer audit pass at hand-back time (every PR-Agent finding + every Kimi finding classified). SO runs **second** ratification audit on hand-back to catch any miss. This is the F-PA-17 lesson codified.
 
@@ -235,7 +235,7 @@ Ticket assignment:
 - Branch base: main at <SHA>
 - Assigned Executor: <model> (e.g. glm-5.1)
 - Assigned Reviewer: kimi-k2.6
-- PR-Agent: enabled (Qwen 3.6 Plus, automatic on PR open / push)
+- PR-Agent: enabled (GPT-5.3 Codex, automatic on PR open / push)
 - Cross-TKT conflict notes: <none | list>
 
 Your first deliverable is the iter-1 Executor NUDGE for this TKT.

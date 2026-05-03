@@ -13,7 +13,7 @@ This repository is managed through role-separated LLM delivery. The rules below 
 | Architect | GPT-5.5 xhigh / GPT-5.5 thinking / Opus 4.6 thinking | Codex CLI / opencode CLI / Windsurf | Defines system architecture, ADRs, and implementation tickets | `docs/architecture/`, `docs/tickets/` |
 | Code Executor | GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist) | opencode + OmniRoute | Implements one approved ticket at a time | `src/`, `tests/`, explicitly allowed config files, and ticket Section 10 Execution Log only |
 | Reviewer | Kimi K2.6 | opencode + OmniRoute | Reviews PRs against ticket, architecture, ADRs, and CI | `docs/reviews/` |
-| CI/Automation (incl. Qodo PR-Agent) | Qwen 3.6 Plus (PR-Agent) | GitHub Actions | Produces deterministic validation output and supplementary reviewer findings | generated reports or explicitly configured output paths |
+| CI/Automation (incl. Qodo PR-Agent) | GPT-5.3 Codex (PR-Agent) | GitHub Actions | Produces deterministic validation output and supplementary reviewer findings | generated reports or explicitly configured output paths |
 
 If a role needs to modify files outside its write zone, it must stop and surface the rule violation instead of silently working around it.
 
