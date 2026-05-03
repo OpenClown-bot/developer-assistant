@@ -62,6 +62,23 @@ def _redact_url(url: str) -> str:
     return redact_token(redacted)
 
 
+def _redact_value(value: Any) -> Any:
+    """Recursively redact token and credential-bearing strings in a value.
+
+    Preserves container shapes (dict, list, tuple) and non-string scalars.
+    Returns a sanitized copy; the original object is not mutated.
+    """
+    if isinstance(value, str):
+        return _redact_url(value)
+    if isinstance(value, dict):
+        return {k: _redact_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    return value
+
+
 class RESTExecutor(Protocol):
     """Protocol for executing constructed REST requests."""
 
@@ -439,7 +456,7 @@ class GitHubPRIntegration:
             ) from exc
 
         state.active_pr_state = result.get("state", state.active_pr_state)
-        return result
+        return _redact_value(result)
 
     def attach_review_artifact(
         self,

@@ -5,6 +5,7 @@ Covers:
 - Repository create/register request construction through integration path
 - Branch creation and PR open linked to one ticket
 - Check-status read / PR metadata read through integration path
+- read_pr_metadata recursive redaction of token strings and credential URLs
 - Reviewer artifact reference validation or attachment semantics
 - Founder acknowledgement merge gate through integration path
 - Telegram status/progress composition containing repo, PR, CI/check, ticket,
@@ -24,6 +25,8 @@ from src.developer_assistant.github_pr_integration import (
     ProjectGitHubState,
     ReviewGateState,
     compose_github_aware_progress_report,
+    _redact_value,
+    _redact_url,
 )
 from src.developer_assistant.github_workflow import (
     CredentialSourceError,
@@ -432,6 +435,153 @@ class TestCheckStatusRead(unittest.TestCase):
         integ = GitHubPRIntegration(_environ=_make_env())
         with self.assertRaises(IntegrationError):
             integ.read_pr_metadata("proj:1", 42)
+
+
+class TestReadPRMetadataRedaction(unittest.TestCase):
+    """read_pr_metadata must redact token strings and credential-bearing URLs
+    in returned dict values before returning them to callers."""
+
+    _TOKEN_IN_FIELD = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    _PAT_IN_FIELD = "github_pat_1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7Q8R9S0"
+    _TOKEN_URL = "https://ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ01@github.com/owner/repo"
+
+    def _make_integration_with_token_metadata(self, meta: Dict[str, Any]):
+        responses = {
+            **_REPO_REGISTER_RESPONSE,
+            "GET https://api.github.com/repos/testowner/testrepo/pulls/42": meta,
+        }
+        rest = _RecordingRESTExecutor(responses)
+        integ = GitHubPRIntegration(rest_executor=rest, _environ=_make_env())
+        integ.register_repository("proj:1", "testowner", "testrepo")
+        rest.requests.clear()
+        return integ, rest
+
+    def test_redacts_ghp_token_in_string_field(self):
+        meta = {"number": 42, "state": "open", "note": f"token={self._TOKEN_IN_FIELD}"}
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        self.assertNotIn(self._TOKEN_IN_FIELD, result.get("note", ""))
+        self.assertIn("***REDACTED***", result.get("note", ""))
+
+    def test_redacts_github_pat_in_string_field(self):
+        meta = {"number": 42, "state": "open", "note": f"pat={self._PAT_IN_FIELD}"}
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        self.assertNotIn(self._PAT_IN_FIELD, result.get("note", ""))
+        self.assertIn("***REDACTED***", result.get("note", ""))
+
+    def test_redacts_token_bearing_url(self):
+        meta = {"number": 42, "state": "open", "clone_url": self._TOKEN_URL}
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        clone_url = result.get("clone_url", "")
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ01", clone_url)
+        self.assertIn("***REDACTED***", clone_url)
+
+    def test_redacts_nested_dict_fields(self):
+        meta = {
+            "number": 42,
+            "state": "open",
+            "user": {
+                "login": "testuser",
+                "token": self._TOKEN_IN_FIELD,
+                "profile_url": self._TOKEN_URL,
+            },
+        }
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        user = result.get("user", {})
+        self.assertNotIn(self._TOKEN_IN_FIELD, user.get("token", ""))
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ01", user.get("profile_url", ""))
+        self.assertEqual(user.get("login"), "testuser")
+
+    def test_redacts_nested_list_fields(self):
+        meta = {
+            "number": 42,
+            "state": "open",
+            "labels": [
+                {"name": "bug", "url": self._TOKEN_URL},
+                {"name": "security", "token": self._TOKEN_IN_FIELD},
+            ],
+        }
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        labels = result.get("labels", [])
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ01", labels[0].get("url", ""))
+        self.assertNotIn(self._TOKEN_IN_FIELD, labels[1].get("token", ""))
+        self.assertEqual(labels[0].get("name"), "bug")
+
+    def test_preserves_non_string_values(self):
+        meta = {
+            "number": 42,
+            "state": "open",
+            "draft": False,
+            "additions": 150,
+            "deletions": 30,
+            "closed_at": None,
+        }
+        integ, _ = self._make_integration_with_token_metadata(meta)
+        result = integ.read_pr_metadata("proj:1", 42)
+        self.assertEqual(result.get("number"), 42)
+        self.assertEqual(result.get("draft"), False)
+        self.assertEqual(result.get("additions"), 150)
+        self.assertEqual(result.get("deletions"), 30)
+        self.assertIsNone(result.get("closed_at"))
+
+    def test_does_not_mutate_raw_response(self):
+        raw_meta = {
+            "number": 42,
+            "state": "open",
+            "secret_field": self._TOKEN_IN_FIELD,
+            "nested": {"token": self._TOKEN_IN_FIELD},
+        }
+        responses = {
+            **_REPO_REGISTER_RESPONSE,
+            "GET https://api.github.com/repos/testowner/testrepo/pulls/42": raw_meta,
+        }
+        rest = _RecordingRESTExecutor(responses)
+        integ = GitHubPRIntegration(rest_executor=rest, _environ=_make_env())
+        integ.register_repository("proj:1", "testowner", "testrepo")
+
+        result = integ.read_pr_metadata("proj:1", 42)
+
+        self.assertIn(self._TOKEN_IN_FIELD, raw_meta["secret_field"])
+        self.assertIn(self._TOKEN_IN_FIELD, raw_meta["nested"]["token"])
+        self.assertNotIn(self._TOKEN_IN_FIELD, result["secret_field"])
+        self.assertNotIn(self._TOKEN_IN_FIELD, result["nested"]["token"])
+
+    def test_redact_value_unit_ghp(self):
+        self.assertNotIn(self._TOKEN_IN_FIELD, _redact_value(f"key={self._TOKEN_IN_FIELD}"))
+
+    def test_redact_value_unit_url(self):
+        redacted = _redact_value(self._TOKEN_URL)
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ01", redacted)
+
+    def test_redact_value_unit_nested_dict(self):
+        data = {"a": self._TOKEN_IN_FIELD, "b": {"c": self._TOKEN_IN_FIELD, "d": 1}}
+        result = _redact_value(data)
+        self.assertNotIn(self._TOKEN_IN_FIELD, result["a"])
+        self.assertNotIn(self._TOKEN_IN_FIELD, result["b"]["c"])
+        self.assertEqual(result["b"]["d"], 1)
+
+    def test_redact_value_unit_nested_list(self):
+        data = [self._TOKEN_IN_FIELD, "safe", [self._TOKEN_IN_FIELD]]
+        result = _redact_value(data)
+        self.assertNotIn(self._TOKEN_IN_FIELD, result[0])
+        self.assertEqual(result[1], "safe")
+        self.assertNotIn(self._TOKEN_IN_FIELD, result[2][0])
+
+    def test_redact_value_unit_tuple(self):
+        data = (self._TOKEN_IN_FIELD, 42)
+        result = _redact_value(data)
+        self.assertIsInstance(result, tuple)
+        self.assertNotIn(self._TOKEN_IN_FIELD, result[0])
+        self.assertEqual(result[1], 42)
+
+    def test_redact_value_unit_preserves_int_bool_none(self):
+        self.assertEqual(_redact_value(42), 42)
+        self.assertEqual(_redact_value(False), False)
+        self.assertIsNone(_redact_value(None))
 
 
 class TestReviewArtifactAttachment(unittest.TestCase):
