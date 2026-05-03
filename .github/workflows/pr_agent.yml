@@ -64,6 +64,8 @@ jobs:
           OPENAI__API_TYPE: "openai"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           config.model: "openai/cx/gpt-5.3-codex"
+          # Required by LiteLLM for GPT-5/Codex-class models; lower values fail
+          # before reaching OmniRoute.
           config.temperature: "1"
           config.custom_model_max_tokens: "65536"
           litellm.drop_params: "true"
