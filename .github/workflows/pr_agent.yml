@@ -63,10 +63,7 @@ jobs:
           OPENAI__API_BASE: "https://omniroute.infinitycore.space:8443/v1"
           OPENAI__API_TYPE: "openai"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          config.model: "openai/cx/gpt-5.3-codex"
-          # Required by LiteLLM for GPT-5/Codex-class models; lower values fail
-          # before reaching OmniRoute.
-          config.temperature: "1"
+          config.model: "openai/fireworks/accounts/fireworks/models/deepseek-v4-pro"
           config.custom_model_max_tokens: "65536"
           litellm.drop_params: "true"
           github_action_config.auto_review: "true"

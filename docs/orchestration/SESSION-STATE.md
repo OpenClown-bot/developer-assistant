@@ -74,10 +74,10 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - GitHub repository: `https://github.com/OpenClown-bot/developer-assistant`.
 - Local git identity observed: `OpenClown-bot <yourmomsenpai@yandex.ru>`.
 - Preferred review stack: GitHub Actions, docs validation, relevant tests/lint/typecheck, `pr-agent`, and separate Reviewer LLM.
-- PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on GPT-5.3 Codex through OmniRoute.
+- PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on DeepSeek V4 Pro through OmniRoute.
 - Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
 - PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
-- Available LLMs: Codex GPT-5.5 High/XHigh, GPT-5.3 Codex, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
+- Available LLMs: Codex GPT-5.5 High/XHigh, GPT-5.3 Codex, DeepSeek V4 Pro, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
 - Planned role-model mapping: Business Planner = Codex GPT-5.5 High; Architect = Codex GPT-5.5 XHigh; Executor = GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist); Reviewer = Kimi 2.6.
 - Strategic Orchestrator runtime: GPT-5.5 high on opencode (Founder's Windows PC). Replaces the prior implicit "Devin = orchestrator" assumption — Devin is now a tool the Strategic Orchestrator may invoke, not the orchestrator itself.
 - Ticket Orchestrator runtime: GPT-5.5 thinking on opencode (Founder's Windows PC). One fresh TO session per TKT, never reused.

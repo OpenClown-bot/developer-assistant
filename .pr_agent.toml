@@ -1,7 +1,7 @@
 [config]
-# Model: GPT-5.3 Codex through OmniRoute.
-# The `cx/` model id is routed by OmniRoute through the OpenAI-compatible API base
-# configured in .github/workflows/pr_agent.yml.
+# Model: DeepSeek V4 Pro through OmniRoute.
+# The Fireworks model id is routed by OmniRoute through the OpenAI-compatible API
+# base configured in .github/workflows/pr_agent.yml.
 # `openai/` prefix is required by LiteLLM (PR-Agent's underlying client) to route
 # this call through the OpenAI-compatible custom endpoint defined by `OPENAI.API_BASE`
 # (set in .github/workflows/pr_agent.yml). Without `openai/`, LiteLLM tries to
@@ -9,9 +9,7 @@
 # NOT provided" because the canonical Fireworks provider in LiteLLM is `fireworks_ai`,
 # and even that bypasses our OmniRoute proxy). Ref:
 # https://litellm.vercel.app/docs/providers/openai_compatible
-model = "openai/cx/gpt-5.3-codex"
-# GPT-5/Codex-class models reject PR-Agent's default temperature=0.2.
-temperature = 1
+model = "openai/fireworks/accounts/fireworks/models/deepseek-v4-pro"
 # 64k effective context. In practice we rarely need more than ~30-40k for
 # review/describe even on large diffs, and this keeps PR-Agent calls smaller
 # and more predictable while still leaving room for ticket context.
@@ -29,8 +27,7 @@ ignore_pr_title = ["^\\[Auto\\]", "^Auto", "^session-log:", "^clerical:", "^chor
 response_language = "en-US"
 
 [litellm]
-# GPT-5/Codex-class models can reject provider-unsupported OpenAI params; drop
-# them instead of failing the PR-Agent run.
+# Drop provider-unsupported OpenAI params instead of failing the PR-Agent run.
 drop_params = true
 
 [pr_reviewer]
