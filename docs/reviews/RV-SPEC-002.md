@@ -46,7 +46,7 @@ Both blocking prerequisites declared in `docs/orchestration/SESSION-STATE.md` §
 
 - `TKT-014` is `done` (merged PR #32, reviewed PR #33, `RV-CODE-014` verdict `pass`). It provides the reviewed project-specific REST API + constrained `git` workflow capability.
 - `TKT-006` is `done` (merged PR #35, reviewed PR #36, `RV-CODE-018` verdict `pass`). It provides the Telegram founder interaction logic layer.
-- `TKT-012` is `done` (merged PR #22, reviewed PR #33, `RV-CODE-014` verdict `pass`). It blocks Hermes bundled GitHub credential-bearing skills from production use.
+- `TKT-012` is `done` (merged PR #22; its closure metadata records reviewer artifact `docs/reviews/RV-CODE-014.md` as the pass artifact for PR #22, while noting the repository later reused `RV-CODE-014` for TKT-014/PR #32 bookkeeping). It blocks Hermes bundled GitHub credential-bearing skills from production use.
 
 Promotion from `draft` to `ready` is therefore correct per `CONTRIBUTING.md` §3 (`ready`: approved for Executor) and `SESSION-STATE.md` §20 (`TKT-008` can move to an Architect readiness/promotion pass).
 
