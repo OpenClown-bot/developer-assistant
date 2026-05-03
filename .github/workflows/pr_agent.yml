@@ -24,7 +24,7 @@ jobs:
     # PR-Agent's primary value (security / correctness / tests / scope drift)
     # does not apply. validate-docs + Reviewer LLM (Kimi) cover discipline for
     # these PR classes. This skip avoids burning ~12-18 min of OmniRoute time
-    # on Qwen Plus reviewing Markdown that nobody needs reviewed.
+    # on the configured PR-Agent model reviewing Markdown that nobody needs reviewed.
     #
     # The skip applies to pull_request events only. Manual triggers
     # (issue_comment with /review, workflow_dispatch, pull_request_review_comment)
@@ -63,8 +63,9 @@ jobs:
           OPENAI__API_BASE: "https://omniroute.infinitycore.space:8443/v1"
           OPENAI__API_TYPE: "openai"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          config.model: "openai/accounts/fireworks/models/qwen3p6-plus"
-          config.custom_model_max_tokens: "131072"
+          config.model: "openai/fireworks/accounts/fireworks/models/deepseek-v4-pro"
+          config.custom_model_max_tokens: "65536"
+          litellm.drop_params: "true"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
           # `/improve` is intentionally manual: on small PRs it dominated runtime

@@ -11,12 +11,12 @@ updated: 2026-05-02
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, and project-specific GitHub workflow capability are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, and Telegram founder interaction logic layer are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-005, TKT-007, TKT-009, TKT-010, TKT-012, TKT-013, and TKT-014 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-006` is ready; `TKT-008` and `TKT-011` remain draft.
+TKT-001 through TKT-007, TKT-009, TKT-010, TKT-012, TKT-013, and TKT-014 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` and `TKT-011` remain draft.
 
 ## Process Variant
 
@@ -38,7 +38,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-012`: done in PR #22; source-review gate for credential-bearing Hermes Telegram and GitHub capabilities.
 - `TKT-013`: done in PR #23; state-store hardening follow-up from RV-CODE-010.
 - `TKT-010`: done in PR #26; reviewed in PR #27.
-- `TKT-006`: ready; Telegram founder interaction through Hermes.
+- `TKT-006`: done in PR #35; reviewed in PR #36.
 - `TKT-008`: draft; GitHub repository and PR integration. Can now be promoted by Architect because TKT-014 is complete.
 - `TKT-011`: draft; first Telegram-to-PR orchestration trial.
 - `TKT-014`: done in PR #32; reviewed in PR #33.
@@ -66,7 +66,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Hermes Telegram gateway source review passed with constraints for production `TELEGRAM_BOT_TOKEN` use.
 - Hermes bundled GitHub credential-bearing skills reviewed in TKT-012 are not cleared for production `GITHUB_TOKEN` or `GH_TOKEN` use; use project-specific REST API plus `git` orchestration instead.
 - Operational state store hardening is complete: SQLite foreign keys are enforced, project binding upserts preserve omitted optional fields, and WAL/single-thread guidance is documented.
-- Runtime readiness pass: `TKT-006` is ready. `TKT-014` now provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability, so `TKT-008` can move to an Architect readiness/promotion pass.
+- Runtime readiness pass: `TKT-006` now provides the Telegram founder interaction logic layer, and `TKT-014` provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability. `TKT-008` can move to an Architect readiness/promotion pass.
 
 ## Current Tooling Decisions
 
@@ -74,10 +74,10 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - GitHub repository: `https://github.com/OpenClown-bot/developer-assistant`.
 - Local git identity observed: `OpenClown-bot <yourmomsenpai@yandex.ru>`.
 - Preferred review stack: GitHub Actions, docs validation, relevant tests/lint/typecheck, `pr-agent`, and separate Reviewer LLM.
-- PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on Qwen 3.6 Plus through OmniRoute.
+- PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on DeepSeek V4 Pro through OmniRoute.
 - Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
 - PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
-- Available LLMs: Codex GPT-5.5 High/XHigh, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
+- Available LLMs: Codex GPT-5.5 High/XHigh, GPT-5.3 Codex, DeepSeek V4 Pro, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
 - Planned role-model mapping: Business Planner = Codex GPT-5.5 High; Architect = Codex GPT-5.5 XHigh; Executor = GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist); Reviewer = Kimi 2.6.
 - Strategic Orchestrator runtime: GPT-5.5 high on opencode (Founder's Windows PC). Replaces the prior implicit "Devin = orchestrator" assumption — Devin is now a tool the Strategic Orchestrator may invoke, not the orchestrator itself.
 - Ticket Orchestrator runtime: GPT-5.5 thinking on opencode (Founder's Windows PC). One fresh TO session per TKT, never reused.
@@ -87,8 +87,8 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 ## Pending User Decisions
 
 - Whether to create a retroactive ticket for PR-Agent setup/configuration history.
-- Whether to dispatch `TKT-006` next for Telegram runtime progress or run an Architect readiness/promotion pass for `TKT-008` now that TKT-014 is complete.
+- Whether to run an Architect readiness/promotion pass for `TKT-008` now that TKT-006 and TKT-014 are complete, or prioritize one of the live-runtime follow-ups from TKT-006.
 
 ## Next Recommended Action
 
-Recommended next step: either dispatch a fresh Ticket Orchestrator for `TKT-006@0.3.0` to implement Telegram founder interaction through Hermes, or ask Architect for a readiness/promotion pass on `TKT-008` now that its TKT-014 dependency is complete. Prefer `TKT-006` if the next goal is first runtime interaction; prefer `TKT-008` readiness if the next goal is end-to-end repository/PR automation.
+Recommended next step: ask Architect for a readiness/promotion pass on `TKT-008` now that its TKT-006 and TKT-014 prerequisites are complete. If the next priority is live Telegram operation before GitHub orchestration, select the highest-priority TKT-006 follow-up (`TKT-NEW-006-A` or `TKT-NEW-006-D`) instead.
