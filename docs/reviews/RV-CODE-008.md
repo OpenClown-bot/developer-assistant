@@ -12,7 +12,8 @@ verdict: pass
 - **PR**: [#41](https://github.com/OpenClown-bot/developer-assistant/pull/41)
 - **Title**: TKT-008: Implement GitHub repository and PR integration
 - **Branch**: `tkt-008/github-pr-integration` → `main`
-- **Head SHA**: `3b09ab4644abc67af0a7108951c44eedb575acec`
+- **Head SHA (iter-1)**: `3b09ab4644abc67af0a7108951c44eedb575acec`
+- **Head SHA (iter-2)**: `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
 - **Base SHA**: `8dfed1be02c8f5c8f1f11232f74255d984de75e7`
 - **Changed files**: 3
   - `src/developer_assistant/github_pr_integration.py` (new, 632 lines)
@@ -41,19 +42,20 @@ verdict: pass
 | Check | Conclusion | Evidence |
 |---|---|---|
 | `validate-docs` (Docs CI) | **SUCCESS** | Completed on PR HEAD |
-| `Run PR Agent on every pull request` | **SUCCESS** | Completed on PR HEAD |
-| PR-Agent inline `/improve` comments | **Present** | 2 findings posted as PR review comment block (non-blocking) |
+| `Run PR Agent on every pull request` | **IN_PROGRESS** at time of iter-2 review; prior run SUCCESS on iter-1 head | See §11 for PR-Agent state |
+| PR-Agent inline `/improve` comments | **Present** on iter-1 head | 2 findings posted; PA-1 (token redaction) promoted to iter-2 fix scope by TO |
 | Local docs validation | **PASS** | `python scripts/validate_docs.py` — Docs validation passed. |
-| Local unit tests | **PASS** | `python -m unittest discover -s tests -p "test_*.py" -v` — 293 tests OK, 1 skipped (218 pre-existing + 75 new TKT-008). |
+| Local unit tests (iter-1) | **PASS** | `python -m unittest discover -s tests -p "test_*.py" -v` — 293 tests OK, 1 skipped. |
+| Local unit tests (iter-2) | **PASS** | `python -m unittest discover -s tests -p "test_*.py" -v` — 306 tests OK, 1 skipped (218 pre-existing + 75 iter-1 TKT-008 + 13 new iter-2 redaction tests). |
 
 ## 5. Findings (ordered by severity)
 
-### Info — `read_pr_metadata` docstring claims token redaction that is not performed
+### Info — `read_pr_metadata` docstring claims token redaction that is not performed → **RESOLVED in iter-2**
 
-- **Location**: `src/developer_assistant/github_pr_integration.py:416` (docstring)
-- **Description**: The docstring for `read_pr_metadata` states the returned dict is "redacted of any tokens," but the method returns the raw dict from `_rest_executor.execute(request, token)` without redacting values. If a future caller relies on this guarantee, a malformed API response containing a token-bearing `html_url` or similar field could leak credentials. The method does redact error messages and PR URLs in other code paths; only the result dict is unredacted.
-- **Recommendation**: Either apply `_redact_url` / `redact_token` recursively to string values in the result dict, or update the docstring to state that callers must handle redaction if they serialize or log the dict.
-- **Impact**: Non-blocking for v0.1. No live callers exist yet; the method is tested with mocked responses that do not contain tokens.
+- **Location**: `src/developer_assistant/github_pr_integration.py:416` (docstring, iter-1); `_redact_value()` added at line 65 (iter-2)
+- **Description (iter-1)**: The docstring for `read_pr_metadata` stated the returned dict was "redacted of any tokens," but the method returned the raw dict without redacting values. This was a PR-Agent security-class finding (PA-1).
+- **Resolution (iter-2)**: Executor added `_redact_value(value)` recursive redaction helper that applies `_redact_url()` and `redact_token()` to all string values, recurses into `dict`, `list`, and `tuple` containers, preserves non-string scalars (`int`, `bool`, `None`) unchanged, and returns a sanitized copy without mutating the original object. `read_pr_metadata` now returns `_redact_value(result)` instead of the raw dict. The `state.active_pr_state` field is updated from the raw dict before redaction so internal state uses unredacted values. See §11 for full verification.
+- **Impact**: Resolved. No live callers existed in iter-1; the fix closes the credential-leak vector before any runtime adapter consumes the method.
 
 ### Info — `create_branch_and_open_pr` is not idempotent on retry
 
@@ -75,7 +77,7 @@ verdict: pass
 | 7 | The integration uses the project-specific GitHub workflow capability from TKT-014 and does not enable Hermes bundled GitHub skills rejected by TKT-012. | **Pass** | All REST/git construction imported from `github_workflow.py`; 2 tests confirm no Hermes skill imports and `github_workflow` is present in source. |
 | 8 | The integration composes GitHub PR state with the TKT-006 Telegram founder interaction logic without treating Telegram chat history as authoritative. | **Pass** | `compose_telegram_status`, `compose_telegram_progress`, and `compose_github_aware_progress_report` render Russian text from `ProjectGitHubState`; 11 tests verify repo, PR, CI, ticket, review-gate, and merge-gate appear in status, and that state is authoritative (not chat history). |
 | 9 | `python scripts/validate_docs.py` passes. | **Pass** | CI and local validation both pass. TKT-008.md changes are append-only to Section 10. |
-| 10 | Relevant unit tests pass. | **Pass** | 293 tests OK, 1 skipped (symlink bypass platform skip). 75 new TKT-008 tests cover all AC categories including credential security, merge gate, secret hygiene, artifact validation, and Telegram composition. |
+| 10 | Relevant unit tests pass. | **Pass** | 306 tests OK, 1 skipped (218 pre-existing + 75 iter-1 TKT-008 + 13 iter-2 redaction tests). All AC categories including credential security, merge gate, secret hygiene, artifact validation, Telegram composition, and recursive metadata redaction are covered. |
 
 ## 7. Security / Process Notes
 
@@ -99,7 +101,7 @@ PR #41 satisfies all TKT-008@0.3.0 acceptance criteria, aligns with ARCH-001@0.2
 
 1. **No live GitHub smoke test**: All tests use mocked REST and git executors. A follow-up ticket should add an optional sanitized live smoke test when credentials and repository access are available.
 2. **In-memory project state**: `ProjectGitHubState` is stored in an in-memory dict (`self._project_states`). Process restart loses GitHub state tracking. Production should persist through the SQLite operational state store from TKT-007 or Hermes native persistence.
-3. **`read_pr_metadata` result dict is unredacted**: As noted in Finding Info-1, the raw API response dict is returned without token redaction. Callers must not log or serialize the dict directly.
+3. ~~`read_pr_metadata` result dict is unredacted~~: **Resolved in iter-2** — `_redact_value()` now recursively redacts token strings and credential-bearing URLs in the returned dict. See §11.
 4. **Idempotency gap in branch/PR creation**: As noted in Finding Info-2, retry after partial failure may create duplicate branches or PRs. Documented as a known operational limitation.
 5. **Integration layer is not wired to real HTTP/git subprocess**: The `RESTExecutor` and `GitExecutor` protocols enable mocking; a runtime adapter ticket must still bind them to actual HTTP client and subprocess calls.
 
@@ -108,5 +110,55 @@ PR #41 satisfies all TKT-008@0.3.0 acceptance criteria, aligns with ARCH-001@0.2
 - **Founder approval required:** yes
 - **Founder approval status:** pending
 - **Required before merge:**
-  1. Founder acknowledges the residual risks listed in §9 (no live smoke test, in-memory state, unredacted metadata dict, idempotency gap, no real HTTP/git wiring).
+  1. Founder acknowledges the residual risks listed in §9 (no live smoke test, in-memory state, idempotency gap, no real HTTP/git wiring).
   2. Founder approves merge after reading this review artifact.
+
+## 11. Iter-2 Verification
+
+- **New Executor HEAD reviewed**: `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
+- **Date**: 2026-05-04
+- **Delta**: `3b09ab4644abc67af0a7108951c44eedb575acec` → `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
+- **Files changed in iter-2**:
+  - `src/developer_assistant/github_pr_integration.py` — Added `_redact_value()` helper; `read_pr_metadata` returns `_redact_value(result)`
+  - `tests/test_github_pr_integration.py` — Added `TestReadPRMetadataRedaction` (13 tests)
+  - `docs/tickets/TKT-008.md` — Section 10 Iteration 2 log appended
+
+### 11.1 PA-1 — Token Redaction in `read_pr_metadata` Result → **RESOLVED**
+
+- **Finding source**: PR-Agent security-class persistent review comment on PR #41, comment ID `IC_kwDOSRonSc8AAAABBFIDtw`, created 2026-05-03T23:32:59Z. Also recorded as Info-1 in RV-CODE-008 §5.
+- **Fix verified**:
+  - `_redact_value(value)` is implemented at `github_pr_integration.py:65–80`.
+  - It recursively traverses `dict`, `list`, and `tuple` containers.
+  - String values are passed through `_redact_url()` then `redact_token()`, covering both `://token@host` URL patterns and GitHub token prefixes (`ghp_`, `github_pat_`, `gho_`, `ghs_`, `ghr_`).
+  - Non-string scalars (`int`, `bool`, `None`) are returned unchanged.
+  - The function returns a **copy**; the original response object is not mutated.
+  - `read_pr_metadata` now returns `_redact_value(result)` at line 459.
+  - `state.active_pr_state = result.get("state", ...)` is executed **before** redaction, so internal state uses the unredacted value.
+- **Tests verified** (13 new tests in `TestReadPRMetadataRedaction`):
+  - `test_redacts_ghp_token_in_string_field` — direct string field redaction
+  - `test_redacts_github_pat_in_string_field` — fine-grained PAT prefix redaction
+  - `test_redacts_token_bearing_url` — URL credential pattern redaction
+  - `test_redacts_nested_dict_fields` — recursive dict traversal
+  - `test_redacts_nested_list_fields` — recursive list traversal
+  - `test_preserves_non_string_values` — `int`, `bool`, `None` preserved
+  - `test_does_not_mutate_raw_response` — original object unchanged
+  - 6 unit tests for `_redact_value` directly: ghp token, URL, nested dict, nested list, tuple, int/bool/None
+- **Security assessment**: The fix closes the credential-exposure vector without introducing new risks. The recursive copy avoids mutation side effects. Non-string scalars are preserved, preventing type corruption of API metadata. No new credential paths were introduced.
+
+### 11.2 PR-Agent Status at Review Time
+
+- PR-Agent `Run PR Agent on every pull request` check was **IN_PROGRESS** on Executor head `d885480fe0b0c5c5ef91ea38cd680244164f2d21` at the time of this iter-2 review.
+- The prior PR-Agent persistent comment (iter-1 head) contained two findings: PA-1 (token redaction, now resolved) and an idempotency observation (Info-2, remains non-blocking residual risk).
+- No new inline `/improve` comments were present on the iter-2 head at review time.
+- The Ticket Orchestrator will separately wait for PR-Agent completion on the final head before closure hand-back.
+
+### 11.3 Validation Commands and Results
+
+| Command | Result | Count |
+|---|---|---|
+| `python scripts/validate_docs.py` | **PASS** | — |
+| `python -m unittest discover -s tests -p "test_*.py" -v` | **PASS** | 306 tests OK, 1 skipped |
+
+### 11.4 Updated Verdict
+
+**`pass`** — All iter-1 findings are resolved or remain non-blocking. PA-1 is fully verified resolved. No new blockers, security issues, or acceptance criteria regressions were introduced by the iter-2 delta. The PR is approved for merge subject to founder acknowledgement of residual risks listed in §9.
