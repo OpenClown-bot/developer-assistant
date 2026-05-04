@@ -35,18 +35,17 @@ drop_params = true
 # Security and tests are LOAD-BEARING and stay on (they catch the highest-impact
 # misses our human/LLM process must not let through).
 #
-# can_be_split, estimate_effort, and ticket_analysis are advisory analyses that
-# each cost an additional LLM call but rarely produce actionable output for
-# this repo's PR style (small ticket-scoped diffs, ticket already linked,
-# effort already pre-estimated by the Architect at ticket creation time).
-# Disabled to cut typical PR-Agent run latency by ~30-50%. If a future PR is
-# big enough that any of these would actually help, the founder can manually
-# trigger via /review with the appropriate flag.
+# can_be_split and estimate_effort are advisory analyses that each cost an
+# additional LLM call but rarely produce actionable output for this repo's PR
+# style (small ticket-scoped diffs, effort already pre-estimated by Architect).
+# Ticket analysis is load-bearing for this AI-generated workflow: it gives
+# PR-Agent an explicit path to flag AC traceability and scope mismatches instead
+# of only reporting the generic "no major issues" summary.
 require_security_review = true
 require_tests_review = true
 require_estimate_effort_to_review = false
 require_can_be_split_review = false
-require_ticket_analysis_review = false
+require_ticket_analysis_review = true
 # Up from default 3 - we want PR-Agent to surface more as the supplementary reviewer.
 num_max_findings = 6
 publish_output_no_suggestions = true
