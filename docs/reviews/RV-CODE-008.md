@@ -5,70 +5,160 @@ status: complete
 verdict: pass
 ---
 
-# RV-CODE-008: Review of PR #15 — Prepare runtime security implementation batch
+# RV-CODE-008: Review of PR #41 — TKT-008: Implement GitHub Repository and PR Integration
 
-## PR reviewed
+## 1. PR Reviewed
 
-- **PR**: [#15](https://github.com/OpenClown-bot/developer-assistant/pull/15)
-- **Title**: Prepare runtime security implementation batch
-- **Branch**: `chore/prepare-runtime-security-batch` → `main`
-- **Author**: `OpenClown-bot`
-- **Merge state**: `CLEAN`
-- **Scope**: Docs-only status and dependency updates across `docs/orchestration/SESSION-STATE.md` and tickets `TKT-006` through `TKT-011`.
+- **PR**: [#41](https://github.com/OpenClown-bot/developer-assistant/pull/41)
+- **Title**: TKT-008: Implement GitHub repository and PR integration
+- **Branch**: `tkt-008/github-pr-integration` → `main`
+- **Head SHA (iter-1)**: `3b09ab4644abc67af0a7108951c44eedb575acec`
+- **Head SHA (iter-2)**: `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
+- **Base SHA**: `8dfed1be02c8f5c8f1f11232f74255d984de75e7`
+- **Changed files**: 3
+  - `src/developer_assistant/github_pr_integration.py` (new, 632 lines)
+  - `tests/test_github_pr_integration.py` (new, 864 lines, 75 test methods)
+  - `docs/tickets/TKT-008.md` (Section 10 Execution Log only, 52 additions)
 
-## Files reviewed
+## 2. Ticket Reviewed
 
-| File | Role write zone | Change type |
-| --- | --- | --- |
-| `docs/orchestration/SESSION-STATE.md` | Orchestrator | Phase, active ticket list, next action update |
-| `docs/tickets/TKT-006.md` | Architect | Add required context (`HERMES-RUNTIME-CONTRACT.md`, `TKT-007`, `TKT-009`); strengthen `TKT-009` dependency to "must" |
-| `docs/tickets/TKT-007.md` | Architect | Status `draft` → `ready`; add `HERMES-RUNTIME-CONTRACT.md` context; remove `TKT-006` circular reference; add risk note |
-| `docs/tickets/TKT-008.md` | Architect | Add `HERMES-RUNTIME-CONTRACT.md` and `TKT-009` context; strengthen `TKT-009` dependency to "must" |
-| `docs/tickets/TKT-009.md` | Architect | Status `draft` → `ready`; add `HERMES-RUNTIME-CONTRACT.md` context; add blocking risk note |
-| `docs/tickets/TKT-010.md` | Architect | Add `HERMES-RUNTIME-CONTRACT.md` context; add orthogonal priority note |
-| `docs/tickets/TKT-011.md` | Architect | Add `HERMES-RUNTIME-CONTRACT.md` context; add `TKT-006`/`TKT-008` dependency for full trial |
+- **Ticket**: `docs/tickets/TKT-008.md` @ `0.3.0`
+- **Status at review time**: `ready` (not changed by this PR)
+- **Scope alignment**: The PR stays entirely within TKT-008 scope. It wires the reviewed TKT-014 project-specific GitHub workflow capability into a higher-level runtime integration layer, adds state-tracking dataclasses, review-gate validation, Telegram composition, and comprehensive tests. It does not implement autonomous merges, VPS deployment, Hermes bundled skill enablement, or low-level REST/git reimplementation.
 
-All changes are within Architect (`docs/tickets/`, `docs/architecture/`) and Orchestrator (`docs/orchestration/`) write zones per `CONTRIBUTING.md`. No production code, prompts, templates, scripts, tests, workflows, or review artifacts were modified.
+## 3. Architecture / ADR References
 
-## CI / PR-Agent status
+- **Architecture**: `docs/architecture/ARCH-001.md` @ `0.2.0`
+- **Relevant contracts**:
+  - `docs/architecture/HERMES-RUNTIME-CONTRACT.md` @ `0.2.0`
+  - `docs/architecture/HERMES-SKILL-ALLOWLIST.md` @ `0.1.0`
+  - `docs/architecture/OPERATIONAL-STATE-STORE.md` @ `0.2.0`
+- **Relevant ADRs**:
+  - `ADR-001-platform-foundation.md` @ `0.2.0`
+  - `ADR-003-plugin-supply-chain.md` @ `0.2.0`
 
-- **Docs CI** (`validate-docs`): pass (5s).
-- **PR-Agent** (`Run PR Agent on every pull request`): pass (1m44s).
-- **Local docs validation**: `python scripts/validate_docs.py` passes.
-- **PR-Agent comment**: advisory; no security concerns, no multiple themes, no major issues detected; estimated review effort 1. Reasonably ignorable for a docs-only status-change PR.
+## 4. CI Status
 
-## Ticket readiness / dependency assessment
+| Check | Conclusion | Evidence |
+|---|---|---|
+| `validate-docs` (Docs CI) | **SUCCESS** | Completed on PR HEAD |
+| `Run PR Agent on every pull request` | **IN_PROGRESS** at time of iter-2 review; prior run SUCCESS on iter-1 head | See §11 for PR-Agent state |
+| PR-Agent inline `/improve` comments | **Present** on iter-1 head | 2 findings posted; PA-1 (token redaction) promoted to iter-2 fix scope by TO |
+| Local docs validation | **PASS** | `python scripts/validate_docs.py` — Docs validation passed. |
+| Local unit tests (iter-1) | **PASS** | `python -m unittest discover -s tests -p "test_*.py" -v` — 293 tests OK, 1 skipped. |
+| Local unit tests (iter-2) | **PASS** | `python -m unittest discover -s tests -p "test_*.py" -v` — 306 tests OK, 1 skipped (218 pre-existing + 75 iter-1 TKT-008 + 13 new iter-2 redaction tests). |
 
-| Ticket | New status | Assessment |
-| --- | --- | --- |
-| `TKT-009` | `ready` | **Correct**. TKT-005 is done. `HERMES-RUNTIME-CONTRACT.md` (Section 11, Security Requirements / Skill and Plugin Use) defines the allowlist fields, pinning, sandbox, and rollback controls that TKT-009 must implement. ADR-003 is approved. No unresolved blockers remain. |
-| `TKT-007` | `ready` | **Correct**. The operational state store is non-credential-bearing by default (bindings, registry, timestamps, run IDs). `HERMES-RUNTIME-CONTRACT.md` Section 6 defines the required operational state categories. TKT-007 can proceed in parallel with TKT-009 as long as implementation avoids credential-bearing operations before the allowlist is complete. Dependency on TKT-005 is satisfied. |
-| `TKT-006` | `draft` | **Correct**. Credential-bearing Telegram runtime (bot token, chat allowlist) must wait for TKT-009. Durable chat/project/schedule behavior should wait for TKT-007 where required. The dependency strengthening from "should" to "must" for TKT-009 is appropriate. |
-| `TKT-008` | `draft` | **Correct**. Credential-bearing GitHub automation (fine-grained PAT) must wait for TKT-009. Dependency strengthening is appropriate. |
-| `TKT-010` | `draft` | **Correct**. The generated-project deployment contract is orthogonal to the immediate Hermes runtime/security batch. There is no process reason to mark it ready now; it does not unblock TKT-009 or TKT-007, and the PR correctly notes it can be prepared separately when deployment handoff becomes the next priority. |
-| `TKT-011` | `draft` | **Correct**. The end-to-end trial requires the full runtime stack. The newly added dependency on TKT-006 and TKT-008 for a full trial is accurate. A narrower dry run would require explicit user approval. |
+## 5. Findings (ordered by severity)
 
-## Findings (ordered by severity)
+### Info — `read_pr_metadata` docstring claims token redaction that is not performed → **RESOLVED in iter-2**
 
-### Info
+- **Location**: `src/developer_assistant/github_pr_integration.py:416` (docstring, iter-1); `_redact_value()` added at line 65 (iter-2)
+- **Description (iter-1)**: The docstring for `read_pr_metadata` stated the returned dict was "redacted of any tokens," but the method returned the raw dict without redacting values. This was a PR-Agent security-class finding (PA-1).
+- **Resolution (iter-2)**: Executor added `_redact_value(value)` recursive redaction helper that applies `_redact_url()` and `redact_token()` to all string values, recurses into `dict`, `list`, and `tuple` containers, preserves non-string scalars (`int`, `bool`, `None`) unchanged, and returns a sanitized copy without mutating the original object. `read_pr_metadata` now returns `_redact_value(result)` instead of the raw dict. The `state.active_pr_state` field is updated from the raw dict before redaction so internal state uses unredacted values. See §11 for full verification.
+- **Impact**: Resolved. No live callers existed in iter-1; the fix closes the credential-leak vector before any runtime adapter consumes the method.
 
-1. **`HERMES-RUNTIME-CONTRACT.md` remains `status: draft`** (`HERMES-RUNTIME-CONTRACT.md:5`). The PR acknowledges this and does not change architecture content or status. This is acceptable because TKT-005 delivered the contract artifact; a future ticket may promote it to `approved`. No action required now.
+### Info — `create_branch_and_open_pr` is not idempotent on retry
 
-2. **TKT-007 removed `TKT-006` from Required Context** (`TKT-007.md:29`). This eliminates a potential circular dependency (TKT-006 depends on TKT-007; TKT-007 previously listed TKT-006). Good cleanup.
+- **Location**: `src/developer_assistant/github_pr_integration.py:277–351`
+- **Description**: `create_branch_and_open_pr` unconditionally executes `build_branch_create_command` and `build_pr_open_request`. If the method is retried after a transient failure (e.g., branch creation succeeds but PR open fails), it will attempt to create the branch again and open a second PR. The `ProjectGitHubState` does not track whether a branch or PR already exists for the current ticket.
+- **Recommendation**: Document the retry hazard in the docstring, or add idempotency checks (e.g., skip branch creation if the branch already exists, skip PR open if a PR already exists for the branch) in a follow-up ticket.
+- **Impact**: Non-blocking for v0.1. Retry behavior is an operational concern, not a security or governance violation.
 
-3. **TKT-006 and TKT-008 dependency language strengthened** (`TKT-006.md:73`, `TKT-008.md:72`). Changed from "should define the approved allowlist" to "must be done before enabling credential-bearing … capabilities". This aligns with `HERMES-RUNTIME-CONTRACT.md` Section 11 and ADR-003 required controls.
+## 6. Acceptance Criteria Assessment
 
-4. **TKT-009 new risk note** (`TKT-009.md:64`): explicitly warns that incomplete allowlist decisions block TKT-006 and TKT-008. This accurately reflects the critical-path role of TKT-009.
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | The integration can create or register a GitHub repository for a project. | **Pass** | `register_repository` calls `build_repo_create_request` or `build_repo_register_request`; 7 tests verify create vs register, public/private, URL redaction, and failure paths. |
+| 2 | The integration can create branches and open PRs linked to one ticket. | **Pass** | `create_branch_and_open_pr` composes `build_branch_create_command` and `build_pr_open_request`; PR body auto-includes ticket link; 8 tests verify branch creation, PR linkage, failure paths, and registered-repo guard. |
+| 3 | The integration can read CI/check status for a PR. | **Pass** | `read_check_status` uses `build_check_status_request`; returns `PRCheckState`; 7 tests cover success, empty check runs, state updates, and unregistered-repo guard. |
+| 4 | The integration can attach or reference Reviewer artifacts under `docs/reviews/`. | **Pass** | `attach_review_artifact` creates `ReviewGateState` and validates path prefix (`docs/reviews/`) and suffix (`.md`); 11 tests cover valid paths, wrong prefix/suffix, empty path, verdict text rendering, and no body write. |
+| 5 | The integration requires founder acknowledgement before merge in v0.1. | **Pass** | `check_merge_gate` raises `MergeGateError` unless `founder_acknowledgement=True`; 8 tests verify default block, error message mentions "founder" and "v0.1", state update on success, no-branch guard, and double-gate enforcement. |
+| 6 | GitHub credentials are scoped and supplied through `PROJECT_GITHUB_PAT` via `load_credential()`, not prohibited sources. | **Pass** | `_load_token` calls `load_credential()` exclusively; 6 tests prove `GITHUB_TOKEN` and `GH_TOKEN` are rejected, `PROJECT_GITHUB_PAT` is preferred even when both are present, and missing env raises. |
+| 7 | The integration uses the project-specific GitHub workflow capability from TKT-014 and does not enable Hermes bundled GitHub skills rejected by TKT-012. | **Pass** | All REST/git construction imported from `github_workflow.py`; 2 tests confirm no Hermes skill imports and `github_workflow` is present in source. |
+| 8 | The integration composes GitHub PR state with the TKT-006 Telegram founder interaction logic without treating Telegram chat history as authoritative. | **Pass** | `compose_telegram_status`, `compose_telegram_progress`, and `compose_github_aware_progress_report` render Russian text from `ProjectGitHubState`; 11 tests verify repo, PR, CI, ticket, review-gate, and merge-gate appear in status, and that state is authoritative (not chat history). |
+| 9 | `python scripts/validate_docs.py` passes. | **Pass** | CI and local validation both pass. TKT-008.md changes are append-only to Section 10. |
+| 10 | Relevant unit tests pass. | **Pass** | 306 tests OK, 1 skipped (218 pre-existing + 75 iter-1 TKT-008 + 13 iter-2 redaction tests). All AC categories including credential security, merge gate, secret hygiene, artifact validation, Telegram composition, and recursive metadata redaction are covered. |
 
-## Security / process notes
+## 7. Security / Process Notes
 
-- **Sequencing risk is mitigated**: The PR keeps all credential-bearing tickets (`TKT-006`, `TKT-008`) in `draft` and makes their readiness conditional on `TKT-009`. This prevents premature exposure of Telegram or GitHub tokens before the skill/plugin allowlist and supply-chain controls are in place.
-- **Parallel execution guidance is clear**: `SESSION-STATE.md` and the PR body state that `TKT-007` may run next or in parallel if capacity allows, provided it avoids credential-bearing dependencies. This is a safe execution plan consistent with ADR-002.
-- **No secrets committed**: Diff contains only markdown files with no values, tokens, or credentials.
-- **No scope creep**: The PR does not implement any ticket; it only updates status and context. This is correct Architect/Orchestrator preparation work.
+- **Credential source**: `PROJECT_GITHUB_PAT` only via `load_credential()`. `GITHUB_TOKEN`, `GH_TOKEN`, `~/.git-credentials`, token-bearing remotes, committed config, and CLI arguments are all rejected by the underlying TKT-014 implementation and verified by TKT-008 tests.
+- **Token redaction**: `_redact_url` and `redact_token` are applied to URLs stored in `ProjectGitHubState`, error messages, and Telegram rendered text. 7 secret-hygiene tests confirm no fake token values leak into status, progress, errors, or composed reports.
+- **No committed secrets**: Test fixtures use `FAKE_TEST_TOKEN_NOT_REAL_1234567890` and `FAKE_PAT_NOT_REAL_AAA...`, which do not match real GitHub token prefixes.
+- **Constrained git commands**: Branch creation, commit/push, and merge commands are constructed exclusively through TKT-014 builders (`build_branch_create_command`, `build_commit_push_command`, `build_merge_command`). No unsafe subprocess or shell command path was introduced.
+- **Merge gate**: Enforced at two layers — the integration layer (`check_merge_gate`) and the TKT-014 `build_merge_command` layer. Default behavior blocks merge; explicit `founder_acknowledgement=True` is required.
+- **Hermes bundled skills blocked**: No imports or references to `github-pr-workflow`, `github-issues`, or `github-auth`.
+- **Telegram authority**: `ProjectGitHubState` is the source of truth for rendered status/progress; Telegram chat history is not treated as authoritative. This aligns with `HERMES-RUNTIME-CONTRACT.md` Section 3 and `ARCH-001` Section 7.
+- **Reviewer artifact validation**: `attach_review_artifact` enforces `docs/reviews/` prefix and `.md` suffix, preventing path/scope drift.
+- **Write zone compliance**: Confirmed. Only `src/developer_assistant/github_pr_integration.py`, `tests/test_github_pr_integration.py`, and `docs/tickets/TKT-008.md` Section 10 were modified.
 
-## Final verdict
+## 8. Verdict
 
-`pass`
+**`pass`**
 
-PR #15 correctly prepares the next implementation batch after TKT-005. Ticket statuses and dependencies are aligned with `HERMES-RUNTIME-CONTRACT.md`, ADR-002, and ADR-003. The next recommended action (`TKT-009` first, `TKT-007` in parallel if safe) is sound. No changes are required before merge.
+PR #41 satisfies all TKT-008@0.3.0 acceptance criteria, aligns with ARCH-001@0.2.0, HERMES-RUNTIME-CONTRACT@0.2.0, HERMES-SKILL-ALLOWLIST@0.1.0, ADR-001, and ADR-003. The implementation correctly composes the reviewed TKT-014 project-specific GitHub workflow capability into a higher-level integration layer, enforces the `PROJECT_GITHUB_PAT`-only credential path, preserves token redaction, maintains the founder-acknowledgement merge gate, validates reviewer artifact paths, and composes GitHub state with the TKT-006 Telegram logic layer without elevating chat history to authoritative status. CI is fully green and all 293 tests pass. The two PR-Agent findings are minor docstring/operational observations and do not block merge.
+
+## 9. Residual Risks
+
+1. **No live GitHub smoke test**: All tests use mocked REST and git executors. A follow-up ticket should add an optional sanitized live smoke test when credentials and repository access are available.
+2. **In-memory project state**: `ProjectGitHubState` is stored in an in-memory dict (`self._project_states`). Process restart loses GitHub state tracking. Production should persist through the SQLite operational state store from TKT-007 or Hermes native persistence.
+3. ~~`read_pr_metadata` result dict is unredacted~~: **Resolved in iter-2** — `_redact_value()` now recursively redacts token strings and credential-bearing URLs in the returned dict. See §11.
+4. **Idempotency gap in branch/PR creation**: As noted in Finding Info-2, retry after partial failure may create duplicate branches or PRs. Documented as a known operational limitation.
+5. **Integration layer is not wired to real HTTP/git subprocess**: The `RESTExecutor` and `GitExecutor` protocols enable mocking; a runtime adapter ticket must still bind them to actual HTTP client and subprocess calls.
+
+## 10. Founder Approval
+
+- **Founder approval required:** yes
+- **Founder approval status:** pending
+- **Required before merge:**
+  1. Founder acknowledges the residual risks listed in §9 (no live smoke test, in-memory state, idempotency gap, no real HTTP/git wiring).
+  2. Founder approves merge after reading this review artifact.
+
+## 11. Iter-2 Verification
+
+- **New Executor HEAD reviewed**: `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
+- **Date**: 2026-05-04
+- **Delta**: `3b09ab4644abc67af0a7108951c44eedb575acec` → `d885480fe0b0c5c5ef91ea38cd680244164f2d21`
+- **Files changed in iter-2**:
+  - `src/developer_assistant/github_pr_integration.py` — Added `_redact_value()` helper; `read_pr_metadata` returns `_redact_value(result)`
+  - `tests/test_github_pr_integration.py` — Added `TestReadPRMetadataRedaction` (13 tests)
+  - `docs/tickets/TKT-008.md` — Section 10 Iteration 2 log appended
+
+### 11.1 PA-1 — Token Redaction in `read_pr_metadata` Result → **RESOLVED**
+
+- **Finding source**: PR-Agent security-class persistent review comment on PR #41, comment ID `IC_kwDOSRonSc8AAAABBFIDtw`, created 2026-05-03T23:32:59Z. Also recorded as Info-1 in RV-CODE-008 §5.
+- **Fix verified**:
+  - `_redact_value(value)` is implemented at `github_pr_integration.py:65–80`.
+  - It recursively traverses `dict`, `list`, and `tuple` containers.
+  - String values are passed through `_redact_url()` then `redact_token()`, covering both `://token@host` URL patterns and GitHub token prefixes (`ghp_`, `github_pat_`, `gho_`, `ghs_`, `ghr_`).
+  - Non-string scalars (`int`, `bool`, `None`) are returned unchanged.
+  - The function returns a **copy**; the original response object is not mutated.
+  - `read_pr_metadata` now returns `_redact_value(result)` at line 459.
+  - `state.active_pr_state = result.get("state", ...)` is executed **before** redaction, so internal state uses the unredacted value.
+- **Tests verified** (13 new tests in `TestReadPRMetadataRedaction`):
+  - `test_redacts_ghp_token_in_string_field` — direct string field redaction
+  - `test_redacts_github_pat_in_string_field` — fine-grained PAT prefix redaction
+  - `test_redacts_token_bearing_url` — URL credential pattern redaction
+  - `test_redacts_nested_dict_fields` — recursive dict traversal
+  - `test_redacts_nested_list_fields` — recursive list traversal
+  - `test_preserves_non_string_values` — `int`, `bool`, `None` preserved
+  - `test_does_not_mutate_raw_response` — original object unchanged
+  - 6 unit tests for `_redact_value` directly: ghp token, URL, nested dict, nested list, tuple, int/bool/None
+- **Security assessment**: The fix closes the credential-exposure vector without introducing new risks. The recursive copy avoids mutation side effects. Non-string scalars are preserved, preventing type corruption of API metadata. No new credential paths were introduced.
+
+### 11.2 PR-Agent Status at Review Time
+
+- PR-Agent `Run PR Agent on every pull request` check was **IN_PROGRESS** on Executor head `d885480fe0b0c5c5ef91ea38cd680244164f2d21` at the time of this iter-2 review.
+- The prior PR-Agent persistent comment (iter-1 head) contained two findings: PA-1 (token redaction, now resolved) and an idempotency observation (Info-2, remains non-blocking residual risk).
+- No new inline `/improve` comments were present on the iter-2 head at review time.
+- The Ticket Orchestrator will separately wait for PR-Agent completion on the final head before closure hand-back.
+
+### 11.3 Validation Commands and Results
+
+| Command | Result | Count |
+|---|---|---|
+| `python scripts/validate_docs.py` | **PASS** | — |
+| `python -m unittest discover -s tests -p "test_*.py" -v` | **PASS** | 306 tests OK, 1 skipped |
+
+### 11.4 Updated Verdict
+
+**`pass`** — All iter-1 findings are resolved or remain non-blocking. PA-1 is fully verified resolved. No new blockers, security issues, or acceptance criteria regressions were introduced by the iter-2 delta. The PR is approved for merge subject to founder acknowledgement of residual risks listed in §9.
