@@ -223,7 +223,7 @@ class GitHubSmokeLane:
             pr_number = pr_resp.get("number")
             if pr_number is not None:
                 evidence_parts.append(
-                    f"pr: {_sanitize_pr_url(self._owner, self._repo, pr_number)} (draft)"
+                    f"pr: {_sanitize_pr_url(self._owner, self._repo, pr_number)}"
                 )
             else:
                 evidence_parts.append("pr: opened but number not in response")
