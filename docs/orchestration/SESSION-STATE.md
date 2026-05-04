@@ -11,12 +11,12 @@ updated: 2026-05-04
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, and TKT-017 gated live-smoke readiness harness/review are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, TKT-017 gated live-smoke readiness harness/review, and TKT-011 readiness promotion/spec review are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-010 and TKT-012 through TKT-017 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-015` implementation PR #47 and review PR #48 are merged. `TKT-016` implementation PR #53 and review PR #54 are merged. `TKT-017` implementation PR #60 and review PR #61 are merged. `TKT-011` remains draft.
+TKT-001 through TKT-010 and TKT-012 through TKT-017 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-015` implementation PR #47 and review PR #48 are merged. `TKT-016` implementation PR #53 and review PR #54 are merged. `TKT-017` implementation PR #60 and review PR #61 are merged. `TKT-011` is ready after PR #64 and SPEC review PR #65; execution must still run the TKT-017 gated readiness semantics and fail closed if either GitHub or Telegram readiness lane is blocked, fail, or unavailable.
 
 ## Process Variant
 
@@ -40,7 +40,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-010`: done in PR #26; reviewed in PR #27.
 - `TKT-006`: done in PR #35; reviewed in PR #36.
 - `TKT-008`: done in PR #41; reviewed in PR #42 / `RV-CODE-008.md` with verdict `pass`.
-- `TKT-011`: draft; first Telegram-to-PR orchestration trial.
+- `TKT-011`: ready in PR #64; reviewed in PR #65 / `RV-SPEC-006.md` with verdict `pass`; first Telegram-to-PR orchestration trial.
 - `TKT-014`: done in PR #32; reviewed in PR #33.
 - `TKT-015`: done in PR #47; reviewed in PR #48 / `RV-CODE-019.md` with verdict `pass`.
 - `TKT-016`: done in PR #53; reviewed in PR #54 / `RV-CODE-020.md` with verdict `pass`.
@@ -69,7 +69,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Hermes Telegram gateway source review passed with constraints for production `TELEGRAM_BOT_TOKEN` use.
 - Hermes bundled GitHub credential-bearing skills reviewed in TKT-012 are not cleared for production `GITHUB_TOKEN` or `GH_TOKEN` use; use project-specific REST API plus `git` orchestration instead.
 - Operational state store hardening is complete: SQLite foreign keys are enforced, project binding upserts preserve omitted optional fields, and WAL/single-thread guidance is documented.
-- Runtime readiness pass: `TKT-006` provides the Telegram founder interaction logic layer, `TKT-014` provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability, `TKT-008` provides the high-level GitHub PR integration logic layer, `TKT-015` binds the Telegram adapter to a Hermes Telegram gateway transport boundary with mocked smoke coverage and security checks, `TKT-016` binds GitHub executor protocols to real runtime HTTP/git execution with mocked coverage and token-redaction checks, and `TKT-017` adds a gated live-smoke readiness harness that fails closed without explicit gates/credentials and keeps `TKT-011` draft.
+- Runtime readiness pass: `TKT-006` provides the Telegram founder interaction logic layer, `TKT-014` provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability, `TKT-008` provides the high-level GitHub PR integration logic layer, `TKT-015` binds the Telegram adapter to a Hermes Telegram gateway transport boundary with mocked smoke coverage and security checks, `TKT-016` binds GitHub executor protocols to real runtime HTTP/git execution with mocked coverage and token-redaction checks, and `TKT-017` adds a gated live-smoke readiness harness that fails closed without explicit gates/credentials. `TKT-011` is now ready for the first Telegram-to-PR orchestration trial, but TKT-017 existence alone is not live readiness; both GitHub and Telegram readiness lanes must pass before the full trial runs.
 
 ## Current Tooling Decisions
 
@@ -94,4 +94,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Recommended next step: close the TKT-017 cycle with a small SO closure PR, then create the required auto-cold session snapshot. After closure, decide whether `TKT-011` needs an Architect readiness revision/promotion before any end-to-end Telegram-to-PR trial, because `TKT-011` remains draft and the merged TKT-017 harness is gated readiness infrastructure rather than an executed live trial.
+Recommended next step: dispatch a fresh Ticket Orchestrator session for `TKT-011@0.2.0`. The Ticket Orchestrator must preserve the ticket's fail-closed gates: run or invoke TKT-017 readiness semantics for both GitHub and Telegram lanes before any full trial, stop if either lane is `blocked`, `fail`, or unavailable, and require CI, PR-Agent, Reviewer LLM, and explicit founder acknowledgement before merge.
