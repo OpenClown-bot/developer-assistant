@@ -1,9 +1,11 @@
 ---
 id: TKT-NEW-008-D
 version: 0.1.0
-status: backlog
+status: completed
 source_tkt: TKT-008
 created: 2026-05-04
+completed_by_tkt: TKT-016
+completed_at: 2026-05-04
 ---
 
 # TKT-NEW-008-D: Bind GitHub Executors To Real Runtime HTTP And Git
@@ -23,3 +25,7 @@ TKT-008 introduced injectable `RESTExecutor` and `GitExecutor` protocols and tes
 ## Priority
 
 High before live Hermes GitHub automation uses the TKT-008 integration layer.
+
+## Resolution
+
+Implemented by `TKT-016` in PR #53 and reviewed by `RV-CODE-020` in PR #54. The backlog item is consumed; retry/idempotency, sanitized live GitHub smoke coverage, and GitHub integration state persistence remain separate follow-ups under `TKT-NEW-008-A`, `TKT-NEW-008-B`, and `TKT-NEW-008-C`.
