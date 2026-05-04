@@ -11,12 +11,12 @@ updated: 2026-05-04
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, and TKT-008 readiness promotion/review are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, and TKT-008 GitHub PR integration implementation/review are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-007, TKT-009, TKT-010, TKT-012, TKT-013, and TKT-014 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` is ready and reviewed by RV-SPEC-002. `TKT-011` remains draft.
+TKT-001 through TKT-010, TKT-012, TKT-013, and TKT-014 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-011` remains draft.
 
 ## Process Variant
 
@@ -39,7 +39,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-013`: done in PR #23; state-store hardening follow-up from RV-CODE-010.
 - `TKT-010`: done in PR #26; reviewed in PR #27.
 - `TKT-006`: done in PR #35; reviewed in PR #36.
-- `TKT-008`: ready in PR #38; GitHub repository and PR integration. Reviewed by PR #39 / `RV-SPEC-002.md` with verdict `pass`.
+- `TKT-008`: done in PR #41; reviewed in PR #42 / `RV-CODE-008.md` with verdict `pass`.
 - `TKT-011`: draft; first Telegram-to-PR orchestration trial.
 - `TKT-014`: done in PR #32; reviewed in PR #33.
 
@@ -66,7 +66,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Hermes Telegram gateway source review passed with constraints for production `TELEGRAM_BOT_TOKEN` use.
 - Hermes bundled GitHub credential-bearing skills reviewed in TKT-012 are not cleared for production `GITHUB_TOKEN` or `GH_TOKEN` use; use project-specific REST API plus `git` orchestration instead.
 - Operational state store hardening is complete: SQLite foreign keys are enforced, project binding upserts preserve omitted optional fields, and WAL/single-thread guidance is documented.
-- Runtime readiness pass: `TKT-006` now provides the Telegram founder interaction logic layer, and `TKT-014` provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability. `TKT-008` is ready for TO dispatch.
+- Runtime readiness pass: `TKT-006` provides the Telegram founder interaction logic layer, `TKT-014` provides the reviewed project-specific GitHub REST API plus constrained `git` workflow capability, and `TKT-008` provides the high-level GitHub PR integration logic layer.
 
 ## Current Tooling Decisions
 
@@ -78,7 +78,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
 - PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
 - Available LLMs: Codex GPT-5.5 High/XHigh, GPT-5.3 Codex, DeepSeek V4 Pro, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
-- Planned role-model mapping: Business Planner = Codex GPT-5.5 High; Architect = Codex GPT-5.5 XHigh; Executor = GLM 5.1 (default), Qwen 3.6 Plus (parallel), Codex GPT-5.5 (specialist); Reviewer = Kimi 2.6.
+- Planned role-model mapping: Business Planner = Codex GPT-5.5 High; Architect = Codex GPT-5.5 XHigh; Executor = DeepSeek V4 Pro by default for upcoming tickets to compare against prior GLM 5.1 results, unless an Architect ticket explicitly requests GPT-5.5 XHigh or another specialist model; Reviewer = Kimi 2.6.
 - Strategic Orchestrator runtime: GPT-5.5 high on opencode (Founder's Windows PC). Replaces the prior implicit "Devin = orchestrator" assumption — Devin is now a tool the Strategic Orchestrator may invoke, not the orchestrator itself.
 - Ticket Orchestrator runtime: GPT-5.5 thinking on opencode (Founder's Windows PC). One fresh TO session per TKT, never reused.
 - Runtime Hermes Orchestrator persona is loaded at runtime by the deployed Hermes Agent (`docs/prompts/runtime-hermes-orchestrator.md`); it is NOT one of the dev-time pipeline roles.
@@ -87,8 +87,8 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 ## Pending User Decisions
 
 - Whether to create a retroactive ticket for PR-Agent setup/configuration history.
-- None blocking immediate `TKT-008` dispatch.
+- None blocking immediate post-TKT-008 closure planning.
 
 ## Next Recommended Action
 
-Recommended next step: dispatch a fresh Ticket Orchestrator session for `TKT-008@0.3.0` from `main` at `e6072e24a46faf0394a0a9cc0658f6f8924cba58`. After `TKT-008` is implemented and reviewed, continue toward live Telegram/Hermes wiring and the `TKT-011` Telegram-to-PR trial.
+Recommended next step: close the TKT-008 cycle with a small SO closure PR, then ask Architect for a readiness pass that turns the highest-priority live runtime wiring backlog item into an executable ticket. The likely next implementation target is `TKT-NEW-006-A` (wire the Telegram adapter to Hermes gateway transport) before `TKT-011`, because `TKT-011` is an end-to-end Telegram-to-PR trial and still depends on live Telegram/Hermes wiring.
