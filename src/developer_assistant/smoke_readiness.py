@@ -27,9 +27,10 @@ Security constraints:
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.developer_assistant.github_workflow import (
     CredentialSourceError,
@@ -115,8 +116,18 @@ def _is_gate_set(env_var: str, environ: Optional[Dict[str, str]] = None) -> bool
     return val in ("1", "true", "yes")
 
 
-def _sanitize_branch_name(ticket_id: str) -> str:
-    return f"smoke/{ticket_id.lower()}-live-check"
+LiveGatewayProofCallback = Callable[[Dict[str, Any]], Dict[str, Any]]
+
+
+def _sanitize_branch_name(ticket_id: str, *, suffix: str = "") -> str:
+    base = f"smoke/{ticket_id.lower()}-live-check"
+    if suffix:
+        return f"{base}-{suffix}"
+    return base
+
+
+def _generate_branch_suffix() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def _sanitize_pr_url(owner: str, repo: str, pr_number: int) -> str:
@@ -151,6 +162,7 @@ class GitHubSmokeLane:
         git_executor: Optional[SubprocessGitExecutor] = None,
         ticket_id: str = "TKT-017",
         environ: Optional[Dict[str, str]] = None,
+        branch_suffix: Optional[str] = None,
     ) -> None:
         self._owner = owner
         self._repo = repo
@@ -158,6 +170,7 @@ class GitHubSmokeLane:
         self._git = git_executor or SubprocessGitExecutor()
         self._ticket_id = ticket_id
         self._environ = environ
+        self._branch_suffix = branch_suffix if branch_suffix is not None else _generate_branch_suffix()
 
     def run(self) -> SmokeLaneResult:
         if not _is_gate_set(_GITHUB_SMOKE_GATE, self._environ):
@@ -177,7 +190,7 @@ class GitHubSmokeLane:
                 evidence=f"Credential source blocked: env var {_CREDENTIAL_ENV_VAR} unavailable or rejected.",
             )
 
-        branch_name = _sanitize_branch_name(self._ticket_id)
+        branch_name = _sanitize_branch_name(self._ticket_id, suffix=self._branch_suffix)
         evidence_parts: List[str] = []
         pr_number: Optional[int] = None
 
@@ -228,8 +241,12 @@ class GitHubSmokeLane:
             else:
                 evidence_parts.append("pr: opened but number not in response")
         except RuntimeRESTError as exc:
-            evidence_parts.append(f"pr_open: blocked ({redact_token(str(exc))})")
-            pr_number = None
+            return SmokeLaneResult(
+                lane="github",
+                status=SmokeLaneStatus.BLOCKED,
+                blocker=redact_token(str(exc)),
+                evidence="PR open failed; " + "; ".join(evidence_parts),
+            )
 
         try:
             check_req = build_check_status_request(
@@ -280,23 +297,26 @@ class GitHubSmokeLane:
 class TelegramSmokeLane:
     """Telegram/Hermes gateway readiness lane for TKT-017.
 
-    Validates transport config readiness without performing a live
-    gateway send. Checks:
-    1. TELEGRAM_BOT_TOKEN availability (name only, not value).
-    2. Founder allowlist or DM pairing configuration.
-    3. GATEWAY_ALLOW_ALL_USERS and TELEGRAM_ALLOW_ALL_USERS are unset/false.
-    4. Polling mode preference.
-    5. Sanitized inbound/outbound path through TKT-015 transport.
+    Validates transport config readiness and requires an injectable
+    live gateway proof callback for a PASS verdict.
 
-    If TELEGRAM_BOT_TOKEN is not available, the result is blocked.
+    Without the callback, local config/payload readiness alone yields
+    BLOCKED (not PASS), preventing a false impression of live
+    Telegram/Hermes gateway readiness.
+
+    The callback receives only sanitized labels / command names /
+    non-secret payload data. Its result is sanitized before being
+    recorded in evidence.
     """
 
     def __init__(
         self,
         *,
         environ: Optional[Dict[str, str]] = None,
+        live_gateway_proof: Optional[LiveGatewayProofCallback] = None,
     ) -> None:
         self._environ = environ if environ is not None else dict(os.environ)
+        self._live_gateway_proof = live_gateway_proof
 
     def run(self) -> SmokeLaneResult:
         if not _is_gate_set(_TELEGRAM_SMOKE_GATE, self._environ):
@@ -427,9 +447,52 @@ class TelegramSmokeLane:
         evidence_parts.append("no_raw_ids_in_output: true")
         evidence_parts.append("no_token_values_in_output: true")
 
+        if self._live_gateway_proof is None:
+            evidence_parts.append("live_gateway_proof: not provided")
+            return SmokeLaneResult(
+                lane="telegram",
+                status=SmokeLaneStatus.BLOCKED,
+                blocker="Live gateway proof callback not provided; local config/payload readiness alone is insufficient for PASS.",
+                evidence="; ".join(evidence_parts),
+            )
+
+        proof_input: Dict[str, Any] = {
+            "commands": ["/status", "/decisions", "/pause", "/resume", "/new_project"],
+            "chat_label": "chat:founder",
+            "user_label": "user:founder",
+            "transport_mode": "webhook" if webhook_mode else "polling",
+        }
+
+        try:
+            proof_result = self._live_gateway_proof(proof_input)
+        except Exception as exc:
+            sanitized_error = redact_token(str(exc))
+            evidence_parts.append(f"live_gateway_proof: exception ({sanitized_error})")
+            return SmokeLaneResult(
+                lane="telegram",
+                status=SmokeLaneStatus.FAIL,
+                blocker=f"Live gateway proof raised exception: {sanitized_error}",
+                evidence="; ".join(evidence_parts),
+            )
+
+        proof_success = proof_result.get("success", False) if isinstance(proof_result, dict) else False
+        if proof_success:
+            proof_evidence = str(proof_result.get("evidence", "ok"))
+            sanitized_proof_evidence = redact_token(proof_evidence)
+            evidence_parts.append(f"live_gateway_proof: {sanitized_proof_evidence}")
+            return SmokeLaneResult(
+                lane="telegram",
+                status=SmokeLaneStatus.PASS,
+                evidence="; ".join(evidence_parts),
+            )
+
+        proof_error = str(proof_result.get("error", "unknown error"))
+        sanitized_proof_error = redact_token(proof_error)
+        evidence_parts.append(f"live_gateway_proof: failed ({sanitized_proof_error})")
         return SmokeLaneResult(
             lane="telegram",
-            status=SmokeLaneStatus.PASS,
+            status=SmokeLaneStatus.BLOCKED,
+            blocker=f"Live gateway proof failed: {sanitized_proof_error}",
             evidence="; ".join(evidence_parts),
         )
 

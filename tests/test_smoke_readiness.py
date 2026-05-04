@@ -64,6 +64,14 @@ class TestSanitizationHelpers(unittest.TestCase):
     def test_sanitize_branch_name(self):
         self.assertEqual(_sanitize_branch_name("TKT-017"), "smoke/tkt-017-live-check")
 
+    def test_sanitize_branch_name_with_suffix(self):
+        name = _sanitize_branch_name("TKT-017", suffix="a1b2c3d4")
+        self.assertEqual(name, "smoke/tkt-017-live-check-a1b2c3d4")
+
+    def test_sanitize_branch_name_prefix_preserved_with_suffix(self):
+        name = _sanitize_branch_name("TKT-017", suffix="ff00ff00")
+        self.assertTrue(name.startswith("smoke/tkt-017-live-check-"))
+
     def test_sanitize_pr_url(self):
         url = _sanitize_pr_url("owner", "repo", 42)
         self.assertEqual(url, "https://github.com/owner/repo/pull/42")
@@ -172,14 +180,13 @@ class TestGitHubSmokeLanePass(unittest.TestCase):
         self.assertEqual(result.status, SmokeLaneStatus.PASS)
         self.assertIn("pull/42", result.evidence)
 
-    def test_pass_with_pr_open_failure(self):
+    def test_blocked_on_pr_open_failure(self):
         from src.developer_assistant.runtime_executors import RuntimeRESTError
 
         rest_mock = MagicMock()
         rest_mock.execute.side_effect = [
             {"full_name": "owner/repo"},
             RuntimeRESTError("HTTP 422 for https://api.github.com/repos/owner/repo/pulls: ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
-            {"total_count": 0, "check_runs": []},
         ]
         git_mock = MagicMock()
         git_mock.execute.return_value = 0
@@ -191,8 +198,10 @@ class TestGitHubSmokeLanePass(unittest.TestCase):
             environ=self._pass_env(),
         )
         result = lane.run()
-        self.assertEqual(result.status, SmokeLaneStatus.PASS)
+        self.assertEqual(result.status, SmokeLaneStatus.BLOCKED)
         self.assertNotIn("ghp_", result.evidence)
+        self.assertNotIn("ghp_", result.blocker)
+        self.assertIn("PR open failed", result.evidence)
 
     def test_fail_on_branch_creation_error(self):
         from src.developer_assistant.runtime_executors import RuntimeGitError
@@ -322,8 +331,18 @@ class TestTelegramSmokeLanePass(unittest.TestCase):
         env.update(overrides)
         return env
 
+    @staticmethod
+    def _successful_proof():
+        def _proof(payload):
+            assert isinstance(payload, dict)
+            return {"success": True, "evidence": "live gateway proof OK"}
+        return _proof
+
     def test_pass_with_minimal_config(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         self.assertEqual(result.status, SmokeLaneStatus.PASS)
         self.assertIn("chat:founder", result.evidence)
@@ -331,37 +350,55 @@ class TestTelegramSmokeLanePass(unittest.TestCase):
         self.assertIn("/status", result.evidence)
 
     def test_pass_evidence_no_raw_ids(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         import re
         raw_id_pattern = re.compile(r"\b\d{5,}\b")
         self.assertIsNone(raw_id_pattern.search(result.evidence))
 
     def test_pass_evidence_no_token_values(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         self.assertNotIn("redacted-bot-token", result.evidence)
         self.assertNotIn("123456:", result.evidence)
 
     def test_pass_mentions_commands(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         for cmd in ["/status", "/decisions", "/pause", "/resume", "/new_project"]:
             self.assertIn(cmd, result.evidence)
 
     def test_pass_mentions_classification_paths(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         for cat in ["intake", "answer", "clarification", "approval", "rejection", "general_question"]:
             self.assertIn(cat, result.evidence)
 
     def test_pass_polling_preferred(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         self.assertIn("polling", result.evidence)
 
     def test_pass_allow_all_disabled(self):
-        lane = TelegramSmokeLane(environ=self._pass_env())
+        lane = TelegramSmokeLane(
+            environ=self._pass_env(),
+            live_gateway_proof=self._successful_proof(),
+        )
         result = lane.run()
         self.assertIn("disabled", result.evidence)
 
@@ -388,6 +425,137 @@ class TestTelegramSmokeLaneWebhook(unittest.TestCase):
         lane = TelegramSmokeLane(environ=env)
         result = lane.run()
         self.assertEqual(result.status, SmokeLaneStatus.BLOCKED)
+
+
+class TestGitHubBranchUniqueness(unittest.TestCase):
+    def test_different_instances_generate_different_branches(self):
+        lane_a = GitHubSmokeLane("owner", "repo")
+        lane_b = GitHubSmokeLane("owner", "repo")
+        self.assertNotEqual(lane_a._branch_suffix, lane_b._branch_suffix)
+
+    def test_branch_suffix_injectable(self):
+        lane = GitHubSmokeLane("owner", "repo", branch_suffix="ff00ff00")
+        self.assertEqual(lane._branch_suffix, "ff00ff00")
+
+    def test_branch_name_includes_injected_suffix(self):
+        from src.developer_assistant.smoke_readiness import _sanitize_branch_name
+        name = _sanitize_branch_name("TKT-017", suffix="a1b2c3d4")
+        self.assertTrue(name.startswith("smoke/tkt-017-live-check-"))
+        self.assertEqual(name, "smoke/tkt-017-live-check-a1b2c3d4")
+
+    def test_branch_name_prefix_clear_for_cleanup(self):
+        from src.developer_assistant.smoke_readiness import _sanitize_branch_name
+        name = _sanitize_branch_name("TKT-017", suffix="abcdef12")
+        self.assertTrue(name.startswith("smoke/tkt-017-"))
+
+    def test_branch_suffix_no_secret_in_branch_name(self):
+        from src.developer_assistant.smoke_readiness import _sanitize_branch_name, _generate_branch_suffix
+        suffix = _generate_branch_suffix()
+        self.assertIsInstance(suffix, str)
+        self.assertGreater(len(suffix), 0)
+        name = _sanitize_branch_name("TKT-017", suffix=suffix)
+        self.assertNotIn("ghp_", name)
+        self.assertNotIn("token", name)
+        self.assertNotIn("pat", name)
+        self.assertNotIn("@", name)
+        self.assertNotIn(":", name)
+
+
+class TestTelegramLiveGatewayProof(unittest.TestCase):
+    def _live_env(self, **overrides):
+        env = {
+            "SMOKE_TELEGRAM_LIVE": "1",
+            "TELEGRAM_BOT_TOKEN": "redacted-bot-token",
+            "TELEGRAM_ALLOWED_USERS": "user:founder",
+        }
+        env.update(overrides)
+        return env
+
+    def test_config_only_without_proof_returns_blocked(self):
+        lane = TelegramSmokeLane(environ=self._live_env())
+        result = lane.run()
+        self.assertEqual(result.status, SmokeLaneStatus.BLOCKED)
+        self.assertIn("live_gateway_proof: not provided", result.evidence)
+
+    def test_live_proof_success_returns_pass(self):
+        def _success_proof(payload):
+            self.assertIn("commands", payload)
+            self.assertIn("chat_label", payload)
+            self.assertNotIn("token", str(payload).lower())
+            self.assertNotIn("ghp_", str(payload))
+            return {"success": True, "evidence": "gateway ok"}
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_success_proof,
+        )
+        result = lane.run()
+        self.assertEqual(result.status, SmokeLaneStatus.PASS)
+        self.assertIn("live_gateway_proof: gateway ok", result.evidence)
+
+    def test_live_proof_failure_returns_blocked(self):
+        def _fail_proof(payload):
+            return {"success": False, "error": "Gateway timeout"}
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_fail_proof,
+        )
+        result = lane.run()
+        self.assertEqual(result.status, SmokeLaneStatus.BLOCKED)
+        self.assertIn("live_gateway_proof: failed", result.evidence)
+        self.assertIn("Gateway timeout", result.blocker)
+
+    def test_live_proof_exception_returns_fail(self):
+        def _exc_proof(payload):
+            raise ConnectionError("Connection refused at 127.0.0.1:8080")
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_exc_proof,
+        )
+        result = lane.run()
+        self.assertEqual(result.status, SmokeLaneStatus.FAIL)
+        self.assertIn("Connection refused at 127.0.0.1:8080", result.evidence)
+
+    def test_live_proof_failure_no_secret_leak(self):
+        def _fail_proof(payload):
+            return {"success": False, "error": "Failed with ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_fail_proof,
+        )
+        result = lane.run()
+        self.assertNotIn("ghp_", result.evidence)
+        self.assertNotIn("ghp_", result.blocker)
+
+    def test_live_proof_exception_no_secret_leak(self):
+        def _exc_proof(payload):
+            raise RuntimeError("Token was ghp_" + "A" * 36)
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_exc_proof,
+        )
+        result = lane.run()
+        self.assertNotIn("ghp_", result.evidence)
+        self.assertNotIn("ghp_", result.blocker)
+
+    def test_live_proof_receives_only_sanitized_input(self):
+        received = []
+
+        def _capture_proof(payload):
+            received.append(payload)
+            return {"success": True, "evidence": "ok"}
+
+        lane = TelegramSmokeLane(
+            environ=self._live_env(),
+            live_gateway_proof=_capture_proof,
+        )
+        lane.run()
+        self.assertEqual(len(received), 1)
+        payload = received[0]
+        self.assertIsInstance(payload, dict)
+        self.assertNotIn("redacted-bot-token", str(payload))
+        self.assertNotIn("user:founder", payload.get("chat_label", ""))
+        self.assertIn("chat:founder", payload.get("chat_label", ""))
+        self.assertNotIn("ghp_", str(payload))
 
 
 class TestSmokeReadinessReport(unittest.TestCase):
