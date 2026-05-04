@@ -1,9 +1,11 @@
 ---
 id: TKT-NEW-006-A
 version: 0.1.0
-status: backlog
+status: completed
 source_tkt: TKT-006
 created: 2026-05-03
+completed_by_tkt: TKT-015
+completed_at: 2026-05-04
 ---
 
 # TKT-NEW-006-A: Wire Telegram Adapter To Hermes Gateway Transport
@@ -22,3 +24,7 @@ TKT-006 delivered a tested logic-layer Telegram founder adapter. It does not yet
 ## Priority
 
 High for first live Telegram runtime use.
+
+## Resolution
+
+Implemented by `TKT-015` in PR #47 and reviewed by `RV-CODE-019` in PR #48. The backlog item is consumed; live Telegram smoke testing remains a separate deployment-readiness requirement because credentials and a live Hermes Telegram gateway were unavailable during the ticket.
