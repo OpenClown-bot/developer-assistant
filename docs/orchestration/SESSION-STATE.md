@@ -2,7 +2,7 @@
 id: SESSION-STATE
 version: 0.1.0
 status: active
-updated: 2026-05-04
+updated: 2026-05-05
 ---
 
 # Session State
@@ -11,12 +11,12 @@ updated: 2026-05-04
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, TKT-017 gated live-smoke readiness harness/review, TKT-011 readiness promotion/spec review, TKT-011 iter-1 blocked outcome record, and TKT-018 trial-vehicle readiness/spec review are merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, TKT-017 gated live-smoke readiness harness/review, TKT-011 readiness promotion/spec review, TKT-011 iter-1 blocked outcome record, TKT-018 trial-vehicle readiness/spec review, TKT-018 implementation + TKT-011 iter-2, and RV-CODE-023 review are merged to `main`.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-010 and TKT-012 through TKT-017 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-015` implementation PR #47 and review PR #48 are merged. `TKT-016` implementation PR #53 and review PR #54 are merged. `TKT-017` implementation PR #60 and review PR #61 are merged. `TKT-011` is ready after PR #64 and SPEC review PR #65, and `TKT-018` is now ready/reviewed as the separate minimal implementation trial vehicle after PR #69 and PR #70.
+TKT-001 through TKT-010 and TKT-012 through TKT-017 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-015` implementation PR #47 and review PR #48 are merged. `TKT-016` implementation PR #53 and review PR #54 are merged. `TKT-017` implementation PR #60 and review PR #61 are merged. `TKT-011` remains ready after PR #64 and SPEC review PR #65; iter-2 (part of PR #72) reaffirmed blocked readiness — PROJECT_GITHUB_PAT and TELEGRAM_BOT_TOKEN unavailable; full Telegram-to-PR trial not yet executed. `TKT-018` is now done after implementation PR #72 and CODE review PR #74 / RV-CODE-023; it served as the trial vehicle.
 
 ## Process Variant
 
@@ -45,7 +45,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-015`: done in PR #47; reviewed in PR #48 / `RV-CODE-019.md` with verdict `pass`.
 - `TKT-016`: done in PR #53; reviewed in PR #54 / `RV-CODE-020.md` with verdict `pass`.
 - `TKT-017`: done in PR #60; reviewed in PR #61 / `RV-CODE-021.md` with verdict `pass`.
-- `TKT-018`: ready in PR #69; reviewed in PR #70 / `RV-SPEC-007.md` with verdict `pass`; selected minimal implementation trial vehicle for the next `TKT-011@0.2.0` orchestration attempt.
+- `TKT-018`: done in PR #72; reviewed in PR #74 / `RV-CODE-023.md` with verdict `pass`; served as TKT-011 iter-2 trial vehicle.
 
 ## Current Blockers
 
@@ -95,4 +95,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Recommended next step: re-run a fresh `TKT-011@0.2.0` Ticket Orchestrator session with `TKT-018@0.1.0` as the selected trial vehicle. The TO/Executor must still run or invoke TKT-017 readiness semantics for both GitHub and Telegram lanes before any full trial, stop if either lane is `blocked`, `fail`, or unavailable, and preserve CI, PR-Agent, Reviewer LLM, and founder acknowledgement gates.
+Recommended next step: TKT-011 needs iter-3 when PROJECT_GITHUB_PAT and TELEGRAM_BOT_TOKEN are available in runtime environment. No new trial vehicle needed — TKT-018 is done but another ready implementation ticket can be selected as the next target if credentials become available. Alternatively, SO may close TKT-011 as blocked/unexecutable for v0.1 if credential path remains unavailable.
