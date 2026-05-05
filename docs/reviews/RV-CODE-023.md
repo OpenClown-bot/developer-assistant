@@ -1,7 +1,10 @@
 ---
 id: RV-CODE-023
 version: 0.1.0
-status: complete
+status: approved
+approved_at: 2026-05-05
+approved_after_iters: 1
+approved_by: Strategic Orchestrator
 verdict: pass
 review_target: PR-72
 review_type: code
