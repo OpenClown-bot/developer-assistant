@@ -1,0 +1,1 @@
+TKT-011 iter-3 readiness smoke file. Branch: smoke/tkt-011-iter3-readiness-ba557ac5. Safe to delete.
