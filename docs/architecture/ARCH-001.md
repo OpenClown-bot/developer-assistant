@@ -42,7 +42,7 @@ The following remain out of v0.1 unless later approved by the Founder:
 - Public SaaS or hostile multi-tenant operation.
 - OpenClaw as the primary runtime, default gateway, or part of v0.1's upstream adapter set. v0.2+ adds OpenClaw as an upstream adapter alongside Telegram per `UPSTREAM-ADAPTER-CONTRACT.md` § 4.
 - Rich web dashboard beyond optional read-only status.
-- Fully autonomous production deployment to a Founder VPS.
+- **Ungated** fully autonomous production deployment (no Founder approval at `start` or `upgrade`). The PRD-mandated **gated** self-deployment with three approval gates (`install`, `start`, `upgrade`) is **in scope** for v0.1 per `SELF-DEPLOYMENT-CONTRACT.md` § 6 and `PRD-001.md` § 12; only the ungated, fully autonomous variant remains deferred.
 - Unreviewed marketplace plugin or skill installation.
 - Autonomous merge policy that bypasses user acknowledgement.
 - Paid sandbox terminal backends (`modal`, `daytona`, `vercel_sandbox`) and other paid third-party hard dependencies. v0.1 budget covers one Founder-owned VPS plus already-approved LLM API spend (OmniRoute / OpenRouter / direct providers); anything else escalates per `ESCALATION-POLICY.md` § 4.
@@ -54,7 +54,7 @@ The following remain out of v0.1 unless later approved by the Founder:
 - Hermes Agent is the runtime foundation. Each specialist role runs as a separate Hermes installation with its own `HERMES_HOME`, memory, and self-learning state.
 - Repository artifacts remain the governance source of truth.
 - Hermes memory, Telegram chat history, and operational databases are operational state, not authoritative product or engineering decisions.
-- Per-runtime memory isolation is **physical** (separate `~/.hermes/` directories), not implemented through a custom memory broker.
+- Per-runtime memory isolation is **filesystem-level**: each runtime has a distinct `HERMES_HOME` directory, enforced by systemd sandbox directives (`ProtectHome=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`). All five runtimes share a single Linux uid (`devassist`); a hostile intra-runtime actor is out of the v0.1 single-Founder threat model. Isolation is conditional on correct systemd unit configuration; no custom memory broker is introduced.
 - Cross-runtime work is dispatched through a SQLite-mediated work queue that lives in the same operational store the v0.2 of `OPERATIONAL-STATE-STORE.md` already adopts.
 - The escalation policy is enforced as a shared Hermes plugin loaded into every specialist runtime, not as a runtime-local instruction the LLM might forget.
 - Self-deployment is a Founder-visible product surface (one-command install, one-command verify, one-command rollback, three approval gates), with implementation kept simple, observable, and dependency-light.
@@ -203,11 +203,12 @@ v0.1 runs five specialist Hermes runtimes on one Founder-owned VPS, supervised b
 
 Each runtime is a separate Hermes installation under `/srv/devassist/runtimes/<role>/.hermes/`, where `<role>` is one of `orchestrator`, `planner`, `architect`, `executor`, `reviewer`. Each runtime has:
 
-- Its own `config.yaml`, `.env`, `auth.json`, `SOUL.md`, `memories/MEMORY.md`, `memories/USER.md`, `sessions/`, `state.db`, `cron/`, `logs/`, and `skills/` directory.
+- Its own `config.yaml`, `.env`, `auth.json`, `SOUL.md`, `memories/MEMORY.md`, `memories/USER.md`, `sessions/`, `state.db` (Hermes native sessions database, per `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.5), `cron/`, `logs/`, and `skills/` directory.
+- A symlink `operational.db -> /srv/devassist/state/operational.db` pointing at the **shared operational store** (distinct from the per-runtime `state.db`); never overwritten by Hermes itself, owned by the project's IPC layer (`MULTI-HERMES-CONTRACT.md` § 6, `OPERATIONAL-STATE-STORE.md`).
 - Its own systemd unit (`devassist-<role>.service`), supervised by the umbrella `devassist.target`.
 - A per-runtime `HERMES_DEVASSIST_ROLE` env var so the shared escalation-policy and work-queue plugins can specialize behavior without per-runtime plugin packages.
 
-Memory isolation is physical: nothing in `runtimes/orchestrator/.hermes/` is visible to `runtimes/architect/.hermes/`. The PRD § 13.2 strict isolation requirement is satisfied by the natural Hermes layout, not by a custom memory broker (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 6.2).
+Memory isolation is **filesystem-level**: each runtime's `HERMES_HOME` is a distinct path, and systemd sandbox directives (`ProtectHome=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`) prevent cross-runtime read/write through normal DAC. Because all five runtimes share the `devassist` uid, the isolation is **conditional on correct systemd unit configuration**; a hostile intra-runtime actor is out of the v0.1 single-Founder threat model. The PRD § 13.2 strict isolation requirement is satisfied by the Hermes layout plus systemd sandboxing, not by a custom memory broker (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 6.2).
 
 ### 11.2 Inter-Runtime IPC
 
@@ -226,7 +227,7 @@ The set of skills enabled per runtime is in `MULTI-HERMES-CONTRACT.md` § 5.
 
 ### 11.4 Self-Learning State Preservation
 
-Each runtime's `MEMORY.md`, `USER.md`, and sessions database are part of its self-learning state. Self-deployment rollback and upgrade preserve these per runtime, alongside the shared `state.db` (see `SELF-DEPLOYMENT-CONTRACT.md` § 7).
+Each runtime's `MEMORY.md`, `USER.md`, and sessions database (`~/.hermes/state.db`) are part of its self-learning state. Self-deployment rollback and upgrade preserve these per runtime, alongside the shared **operational store** (`/srv/devassist/state/operational.db`, see `SELF-DEPLOYMENT-CONTRACT.md` § 7).
 
 ## 12. Skills And Plugins Per Role
 
@@ -262,7 +263,7 @@ Detailed contract in `SELF-DEPLOYMENT-CONTRACT.md`; summary of the architectural
 - **Mechanism (ADR-004)**: idempotent bash bootstrap script (`scripts/install-self.sh`) that lays down filesystem layout, installs Hermes once at `/usr/local/lib/hermes-agent/`, creates five per-runtime `HERMES_HOME` directories under `/srv/devassist/runtimes/<role>/.hermes/`, renders systemd unit templates, writes the umbrella `devassist.target`, and runs preflight health checks. systemd supervises the runtimes; Docker is used only inside the Executor and Reviewer terminal sandboxes.
 - **Approval gates**: `install` runs without approval; `start` requires explicit Founder approval (the install script leaves all units in `inactive` state); `upgrade` requires explicit Founder approval AND a state-store backup taken before the upgrade begins (`SELF-DEPLOYMENT-CONTRACT.md` § 6).
 - **Health check (`scripts/verify-self.sh`)**: connectivity-only invariant set per `PRD-001.md` § 10 Q12 recommendation: Telegram reachable, GitHub PAT valid, OmniRoute reachable, state store writable and at expected schema version, each systemd unit `active (running)`, no secrets in `journalctl` output. Returns non-zero on failure with a human-readable summary.
-- **Rollback (`scripts/rollback-self.sh`)**: stop all units, restore the last `state.db` backup snapshot, restore last known-good runtime config tarball, restart units. Operational data needed to resume project bindings, scheduled progress timers, and in-flight Hermes run metadata is preserved.
+- **Rollback (`scripts/rollback-self.sh`)**: stop all units, restore the last `operational.db` backup snapshot (the shared operational store at `/srv/devassist/state/operational.db`), restore last known-good runtime config tarball, restart units. Operational data needed to resume project bindings, scheduled progress timers, and in-flight Hermes run metadata is preserved. Per-runtime `state.db` (Hermes native sessions database) is preserved per runtime under each `HERMES_HOME`.
 - **Repeatability**: the install script is safe to re-run on an already-installed VPS without duplicating runtime processes or corrupting the operational state store (PRD § 9 success criterion).
 - **Secrets**: a single `/srv/devassist/secrets/SELF-DEPLOY.env` (mode 0600, owner `devassist:devassist`) is the only place secret values exist on disk; the install script reads it and renders systemd `EnvironmentFile=` directives that point at it. Secrets never enter committed config, repository artifacts, logs, PR artifacts, review artifacts, or shell history.
 

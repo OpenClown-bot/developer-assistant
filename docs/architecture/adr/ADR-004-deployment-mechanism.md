@@ -40,7 +40,7 @@ Trade-offs:
 - + No new abstraction beyond what Ubuntu 22.04 already ships. systemd is universally available, well-understood, and Founder-inspectable via `systemctl`/`journalctl`.
 - + Per-runtime resource limits, restart policies, and sandbox flags are first-class systemd primitives (`MemoryMax=`, `Restart=on-failure`, `NoNewPrivileges=`, `ProtectHome=`, `ProtectSystem=`, etc.).
 - + Idempotent: re-run the install script and it skips already-applied steps (Hermes already at pinned version, layout already created, units already up-to-date by hash).
-- + Rollback-friendly: stopping a unit is `systemctl stop`; restoring state is restoring `state.db` from a backup; restoring config is flipping a `releases/current` symlink.
+- + Rollback-friendly: stopping a unit is `systemctl stop`; restoring state is restoring `operational.db` (the shared operational store) from a backup; restoring config is flipping a `releases/current` symlink.
 - + No paid third-party dependency.
 - + Consistent with Ubuntu's expected operating model: a system administrator can use `systemctl status devassist.target` and immediately understand the system.
 - − Tied to systemd-using Linux. Not portable to FreeBSD, Alpine without OpenRC, or non-Linux platforms. v0.1 does not target these.
@@ -119,10 +119,40 @@ Rejected: the operational complexity exceeds the determinism benefit at v0.1 sca
 
 Option A scores best on the operational-complexity / Founder-inspectability axes while matching the others on isolation, idempotence, and rollback.
 
+## Timing Feasibility (15-Minute Bound)
+
+`PRD-001.md` § 12 mandates that *after explicit start approval the assistant responds to a Telegram message within 15 minutes of starting the install*. The 15-minute budget covers the install script (`scripts/install-self.sh`) plus the post-`systemctl start` warmup of the five runtimes, ending when the Orchestrator runtime's `telegram-gateway` skill processes its first inbound Founder message.
+
+Worst-case decomposition under the v0.1 target VPS profile (Ubuntu 22.04 LTS, 2 vCPU / 4 GB RAM / 40 GB SSD class, residential-grade outbound bandwidth):
+
+| Step | Worst-case duration | Source / assumption |
+| --- | --- | --- |
+| Apt update + install of `python3.11`, `nodejs 22`, `ripgrep`, `ffmpeg`, `git`, `docker.io`, `sqlite3`, `systemd` (already present) | 180 s | Apt cache cold; ~250 MB download. Cached re-runs drop to <10 s. |
+| Hermes Agent one-line installer at `/usr/local/lib/hermes-agent/` (downloads, sets up venv, pulls Python deps) | 300 s | Hermes Agent installer documented runtime on a clean VPS; ~400 MB Python-package fetch. Cached re-runs drop to <30 s. |
+| Filesystem layout creation (`/srv/devassist/runtimes/<role>/.hermes/` × 5, `state/`, `secrets/`, `shared-skills/`, `shared-plugins/`) | 5 s | Pure `mkdir -p` + `chmod` + `chown`. |
+| Render five systemd unit files + umbrella `devassist.target` from templates; `systemctl daemon-reload` | 10 s | Bash + envsubst + one daemon-reload. |
+| Render five per-runtime `HERMES_HOME/config.yaml` + `.env` symlink + `auth.json` initial entries | 15 s | Five small writes. |
+| Preflight `verify-self.sh` (Telegram reachability, GitHub PAT validity, OmniRoute reachability, `operational.db` writable, schema version, each unit definition parseable, no secrets in journal) | 30 s | Five outbound HTTP probes plus local checks. |
+| **Subtotal: install script** | **~9 minutes (540 s)** | |
+| Founder approval pause (out-of-band) | 0 s in budget | The 15-minute bound starts *after* explicit start approval per PRD § 12. |
+| `systemctl start devassist.target` and per-unit warmup of five Hermes runtimes (load skills, open SQLite WAL, render `SOUL.md`, register cron jobs) | 90 s | Five Python-process starts at ≈18 s each, parallelizable; conservative serial worst-case 90 s. |
+| Orchestrator runtime first Telegram polling tick + first inbound message dispatch | 30 s | Polling interval default 30 s. |
+| **Subtotal: post-approval startup** | **~2 minutes (120 s)** | |
+| **Total worst-case: install + startup** | **~11 minutes (660 s)** | Budget remaining: ≈4 minutes. |
+
+Steps that threaten the bound and the mitigations chosen:
+
+- **Hermes Agent one-line installer (300 s)** is the dominant install-time cost. Mitigation: cache the Hermes install across re-runs (the install script skips Hermes installation if the pinned commit is already present at `/usr/local/lib/hermes-agent/`).
+- **Apt cold-cache install (180 s)** dominates first-run. Mitigation: install script runs `apt-get update` once and reuses the cached metadata for all subsequent package installs.
+- **Outbound network reachability** (Telegram, GitHub, OmniRoute, OpenRouter) is the only external dependency in the budget; if any of these is unreachable, `verify-self.sh` fails fast and the install script aborts before the 15-minute window starts (the Founder is never asked to start a system that cannot reach its dependencies).
+- **First-time Python-package fetch** is the most variable cost. Mitigation: `developer-assistant`'s own pip dependencies are pinned and pre-bundled into the Hermes runtime layout; only Hermes Agent's own deps are fetched from PyPI on first install.
+
+The research record (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 5.2.1) flags the Hermes installer time and the steady-state per-runtime memory footprint as **unverified estimates** until measured during TKT-020 dry-run. If empirical measurement on the target VPS shows the worst-case install >12 minutes (leaving <3 minutes warmup margin), the install script will pre-stage the Hermes installer tarball into the project's `vendor/` directory at architect-pass time and replace the live one-line install with a local-file install, eliminating the 300 s download.
+
 ## Consequences
 
 - Implementation in TKT-020 produces four shell scripts and six systemd unit files.
-- The terminal sandbox for Executor and Reviewer uses the host Docker socket via the `docker` group; the runtimes' systemd units carry `SupplementaryGroups=docker`.
+- **`docker` group is a high-privilege boundary**: the terminal sandbox for Executor and Reviewer uses the host Docker socket via the `docker` group, and the runtimes' systemd units carry `SupplementaryGroups=docker`. Membership in the `docker` group is **effectively root-equivalent** on most Linux systems because the Docker daemon runs as root and the socket grants full container-orchestration capability. v0.1 accepts this risk for two reasons: (a) the threat model is one trusted Founder/operator, not hostile multi-tenant; (b) the Executor and Reviewer runtimes already need to run untrusted code in a sandbox and the Docker backend is the only paid-third-party-free option (paid sandboxes `modal`, `daytona`, `vercel_sandbox` are out of v0.1 budget per `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 5.5). Mitigations recorded as v0.2+ hardening candidates: rootless Docker, a dedicated Docker user with restricted socket access, AppArmor/SELinux profile for the runtime units, or migration to `podman` with user-namespace isolation. Until then, the runbook (`docs/operations/RECOVERY-PLAYBOOK.md`) warns that compromise of the Executor or Reviewer runtime is equivalent to host compromise.
 - Adding a sixth runtime in v0.2+ requires editing the install script (one line for the new role) and adding a new systemd unit file. The change is small.
 - If the VPS does not run systemd (e.g., a future Alpine deployment), this ADR is revisited.
 - The decision does not preclude wrapping the v0.1 deployment in Docker Compose later if a packaging benefit emerges (e.g., a one-shot demo deployment); systemd remains the v0.1 primary mechanism.
