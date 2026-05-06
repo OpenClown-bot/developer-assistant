@@ -17,6 +17,10 @@ custom_model_max_tokens = 65536
 # 3 minutes - enough for normal PR-Agent calls while still failing fast on
 # upstream routing stalls.
 ai_timeout = 180
+# Fallback when DeepSeek V4 Pro is unavailable. Must be Fireworks-hosted
+# and route through OmniRoute per ADR-011. Qwen3.6-Plus: fast, cheap,
+# code-optimized, already in catalog. See ADR-012.
+fallback_models = ["openai/fireworks/accounts/fireworks/models/qwen3p6-plus"]
 # More patch context lets the reviewer model reason about callers/callees per chunk.
 patch_extra_lines_before = 8
 patch_extra_lines_after = 3
