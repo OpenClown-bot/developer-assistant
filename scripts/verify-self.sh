@@ -34,7 +34,7 @@ record_pass() {
 record_fail() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
     FAIL_SUMMARY="${FAIL_SUMMARY}\n  - $1: FAIL ($2)"
-    log "FAIL: $1 — $2"
+    log "FAIL: $1 -- $2"
 }
 
 invariant_01_telegram() {
@@ -185,14 +185,53 @@ check_unit_active() {
     fi
 }
 
-invariant_07_orchestrator() { check_unit_active "devassist-orchestrator.service" "orchestrator unit active"; }
-invariant_08_planner()      { check_unit_active "devassist-planner.service"      "planner unit active"; }
-invariant_09_architect()    { check_unit_active "devassist-architect.service"    "architect unit active"; }
-invariant_10_executor()     { check_unit_active "devassist-executor.service"     "executor unit active"; }
-invariant_11_reviewer()     { check_unit_active "devassist-reviewer.service"     "reviewer unit active"; }
+invariant_07_runtime_units() {
+    local any_fail=0
+    for role in $ROLES; do
+        local unit="devassist-${role}.service"
+        local label="${role} unit active"
+        if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+            log "FIXTURE/DRY_RUN: ${unit} assumed active"
+            record_pass "$label"
+        else
+            local status
+            status=$(systemctl is-active "$unit" 2>/dev/null) || status="unknown"
+            if [ "$status" = "active" ]; then
+                record_pass "$label"
+            else
+                record_fail "$label" "${unit} inactive (${status})"
+                any_fail=1
+            fi
+        fi
+    done
+    return $any_fail
+}
 
-invariant_12_omniroute() {
+invariant_08_omniroute_unit() {
     check_unit_active "omniroute.service" "omniroute unit active"
+}
+
+invariant_09_web_service() {
+    local name="web unit active"
+    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+        log "FIXTURE/DRY_RUN: devassist-web.service assumed active"
+        log "FIXTURE/DRY_RUN: web /health returning stub 200"
+        record_pass "$name"
+        return 0
+    fi
+    local status
+    status=$(systemctl is-active devassist-web.service 2>/dev/null) || status="unknown"
+    if [ "$status" != "active" ]; then
+        record_fail "$name" "devassist-web.service inactive (${status})"
+        return 0
+    fi
+    local http_code
+    http_code=$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8180/health" 2>/dev/null) || http_code="000"
+    if [ "$http_code" = "200" ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "web /health probe returned HTTP ${http_code}"
+    fi
 }
 
 main() {
@@ -204,12 +243,9 @@ main() {
     invariant_04_omniroute_probe
     invariant_05_state_store_writable
     invariant_06_schema_version
-    invariant_07_orchestrator
-    invariant_08_planner
-    invariant_09_architect
-    invariant_10_executor
-    invariant_11_reviewer
-    invariant_12_omniroute
+    invariant_07_runtime_units
+    invariant_08_omniroute_unit
+    invariant_09_web_service
 
     local total=$((PASS_COUNT + FAIL_COUNT))
     echo ""

@@ -243,7 +243,7 @@ class TestVerifySelf(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_verify_counts_12_invariants(self) -> None:
+    def test_verify_counts_invariants(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
         try:
             env = {
@@ -255,7 +255,7 @@ class TestVerifySelf(unittest.TestCase):
             }
             _run_script("install-self.sh", env)
             result = _run_script("verify-self.sh", env)
-            self.assertIn("12/12", result.stdout)
+            self.assertIn("13/13", result.stdout)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -273,6 +273,22 @@ class TestVerifySelf(unittest.TestCase):
             result = _run_script("verify-self.sh", env)
             output = result.stdout + result.stderr
             self.assertNotIn("test-token-placeholder", output)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_verify_includes_web_service_invariant(self) -> None:
+        tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
+        try:
+            env = {
+                "INSTALL_DRY_RUN": "1",
+                "INSTALL_DRY_RUN_PREFIX": tmpdir,
+                "VERIFY_FIXTURE_MODE": "1",
+                "ROLLBACK_DRY_RUN": "1",
+                "UPGRADE_DRY_RUN": "1",
+            }
+            _run_script("install-self.sh", env)
+            result = _run_script("verify-self.sh", env)
+            self.assertIn("web unit active", result.stdout + result.stderr)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
