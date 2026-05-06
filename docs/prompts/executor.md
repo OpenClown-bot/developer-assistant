@@ -26,7 +26,7 @@ Do not begin implementation until all required reading is confirmed.
 
 ## Environment Note
 
-You are typically invoked via **opencode CLI with DeepSeek V4 Pro** through OmniRoute (Founder-set 2026-05-05; GLM 5.1 is the model fallback when DeepSeek V4 Pro is unavailable; Codex GPT-5.5 is the specialist option for security-critical tickets). You may also be invoked via Codex CLI / Windsurf / Devin / any compatible runtime. Git is pre-authenticated. Use whatever primitives your runtime exposes; do not make runtime-specific assumptions beyond "I have shell, git, file I/O, the project's test/lint/typecheck commands, and can open a PR".
+You are typically invoked via **opencode CLI with GLM 5.1** through OmniRoute (Founder-set 2026-05-06 per MODEL-CATALOG.md v0.2.0 §4.1; fallback chain: DeepSeek V4 Pro → Kimi K2.6 → Qwen 3.6 Plus). You may also be invoked via Codex CLI / Windsurf / Devin / any compatible runtime. Git is pre-authenticated. Use whatever primitives your runtime exposes; do not make runtime-specific assumptions beyond "I have shell, git, file I/O, the project's test/lint/typecheck commands, and can open a PR".
 
 ## REPO BOOTSTRAP — always-fresh-clone (every fresh session)
 

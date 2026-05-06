@@ -6,13 +6,13 @@ This repository is managed by a **multi-LLM pipeline** with strict role separati
 
 | Role | Prompt file | Default model | Runtime |
 |---|---|---|---|
-| Strategic Orchestrator | `docs/meta/strategic-orchestrator.md` | GPT-5.5 high (main) / DeepSeek V4 Pro (fallback) | opencode (Founder's Windows PC) |
-| Ticket Orchestrator | `docs/prompts/ticket-orchestrator.md` | GPT-5.5 high (main) / GLM 5.1 (fallback) | opencode (Founder's Windows PC) |
+| Strategic Orchestrator | `docs/meta/strategic-orchestrator.md` | MiniMax M2.7 (main) / Kimi K2.6 / Qwen 3.6 Plus / DeepSeek V4 Pro | opencode (Founder's Windows PC) |
+| Ticket Orchestrator | `docs/prompts/ticket-orchestrator.md` | MiniMax M2.7 (main) / Kimi K2.6 / Qwen 3.6 Plus / DeepSeek V4 Pro | opencode (Founder's Windows PC) |
 | Runtime Hermes Orchestrator | `docs/prompts/runtime-hermes-orchestrator.md` | runtime persona | Hermes Agent (deployed v0.1 product) — NOT a dev-time pipeline role |
-| Business Planner | `docs/prompts/business-planner.md` | GPT-5.5 thinking / Claude Opus 4.7 thinking | ChatGPT Plus (web) |
-| Technical Architect | `docs/prompts/architect.md` | GPT-5.5 xhigh / GPT-5.5 thinking / Opus 4.6 thinking | Codex CLI / opencode CLI / Windsurf |
-| Code Executor | `docs/prompts/executor.md` | DeepSeek V4 Pro (main) / GLM 5.1 (fallback), Codex GPT-5.5 (specialist) | opencode + OmniRoute |
-| Reviewer | `docs/prompts/reviewer.md` | Kimi K2.6 (main) / Qwen 3.6 Plus (fallback) | opencode + OmniRoute |
+| Business Planner | `docs/prompts/business-planner.md` | Qwen 3.6 Plus (main) / Kimi K2.6 / MiniMax M2.7 / DeepSeek V4 Pro | ChatGPT Plus (web) |
+| Technical Architect | `docs/prompts/architect.md` | DeepSeek V4 Pro (main) / Kimi K2.6 / GLM 5.1 / Qwen 3.6 Plus | Codex CLI / opencode CLI / Windsurf |
+| Code Executor | `docs/prompts/executor.md` | GLM 5.1 (main) / DeepSeek V4 Pro / Kimi K2.6 / Qwen 3.6 Plus | opencode + OmniRoute |
+| Reviewer | `docs/prompts/reviewer.md` | Kimi K2.6 (main) / DeepSeek V4 Pro / GLM 5.1 / Qwen 3.6 Plus | opencode + OmniRoute |
 
 **Qodo PR-Agent** (DeepSeek V4 Pro through OmniRoute) auto-reviews every PR; it is a **second** reviewer alongside Kimi, not a replacement. See `.pr_agent.toml` and `.github/workflows/pr_agent.yml` for its configuration.
 

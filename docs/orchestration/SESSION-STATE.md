@@ -82,16 +82,16 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - PR-Agent is configured as an advisory automated review layer using Qodo PR-Agent on DeepSeek V4 Pro through OmniRoute.
 - Required GitHub Actions secret for PR-Agent: `OMNIROUTE_API_KEY`.
 - PR-Agent action is pinned to commit `0e37fc84fcc8207561e64eef8f7f634fb57e8447` in PR #3 to avoid floating `@main` supply-chain risk.
-- Available LLMs: Codex GPT-5.5 High/XHigh, GPT-5.3 Codex, DeepSeek V4 Pro, GLM 5.1, Kimi 2.6, Qwen 3.6 Plus.
-- **Founder-set role-model mapping (2026-05-05):**
-  - Business Planner = Codex GPT-5.5 High.
-  - Architect = Codex GPT-5.5 XHigh.
-  - Strategic Orchestrator = GPT-5.5 high (main) / DeepSeek V4 Pro (fallback) on opencode (Founder's Windows PC). Supersedes the prior implicit "Devin = orchestrator" assumption — Devin is now a tool the Strategic Orchestrator may invoke, not the orchestrator itself.
-  - Ticket Orchestrator = GPT-5.5 high (main) / GLM 5.1 (fallback) on opencode (Founder's Windows PC). Supersedes the prior "GPT-5.5 thinking" baseline. One fresh TO session per TKT, never reused.
-  - Executor = DeepSeek V4 Pro (main) / GLM 5.1 (fallback) / Codex GPT-5.5 (specialist) on opencode + OmniRoute. Supersedes the prior "GLM 5.1 default, Qwen 3.6 Plus parallel" baseline.
-  - Reviewer = Kimi K2.6 (main) / Qwen 3.6 Plus (fallback) on opencode + OmniRoute. Supersedes the prior "Kimi K2.6" only baseline.
+- Available LLMs (via OmniRoute → Fireworks): MiniMax M2.7, DeepSeek V4 Pro, GLM 5.1, Kimi K2.6, Qwen 3.6 Plus. All models reachable through OmniRoute with the identifiers in `docs/architecture/MODEL-CATALOG.md` v0.2.0 §4.1.
+- **Founder-set role-model mapping (2026-05-06, per MODEL-CATALOG.md v0.2.0 §4.1):**
+  - Business Planner = Qwen 3.6 Plus (main) / Kimi K2.6 / MiniMax M2.7 / DeepSeek V4 Pro.
+  - Architect = DeepSeek V4 Pro (main) / Kimi K2.6 / GLM 5.1 / Qwen 3.6 Plus.
+  - Strategic Orchestrator = MiniMax M2.7 (main) / Kimi K2.6 / Qwen 3.6 Plus / DeepSeek V4 Pro on opencode (Founder's Windows PC). Supersedes the prior implicit "Devin = orchestrator" assumption — Devin is now a tool the Strategic Orchestrator may invoke, not the orchestrator itself.
+  - Ticket Orchestrator = MiniMax M2.7 (main) / Kimi K2.6 / Qwen 3.6 Plus / DeepSeek V4 Pro on opencode (Founder's Windows PC). One fresh TO session per TKT, never reused.
+  - Executor = GLM 5.1 (main) / DeepSeek V4 Pro / Kimi K2.6 / Qwen 3.6 Plus on opencode + OmniRoute.
+  - Reviewer = Kimi K2.6 (main) / DeepSeek V4 Pro / GLM 5.1 / Qwen 3.6 Plus on opencode + OmniRoute.
   - PR-Agent = DeepSeek V4 Pro through OmniRoute on GitHub Actions (unchanged).
-- Doctrine collisions introduced by the 2026-05-05 model-mapping change are filed in `docs/backlog/` as `TKT-NEW-to-rationale-doctrine-collision.md` (TO/SO uncorrelation rationale vs new GLM-5.1 / DeepSeek V4 Pro fallback positions). Architect-refresh required before either fallback is exercised in a closed cycle.
+- Doctrine collision from 2026-05-05 (TO/SO uncorrelation rationale vs GLM-5.1 / DeepSeek V4 Pro fallback positions) is resolved: TO and SO now share MiniMax M2.7 as primary, eliminating the GLM/GLM same-family risk. The BACKLOG entry `TKT-NEW-to-rationale-doctrine-collision.md` is superseded.
 - Runtime Hermes Orchestrator persona is loaded at runtime by the deployed Hermes Agent (`docs/prompts/runtime-hermes-orchestrator.md`); it is NOT one of the dev-time pipeline roles.
 - Token budget: no strict limit for listed models.
 
