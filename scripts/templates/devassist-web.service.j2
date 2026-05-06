@@ -1,0 +1,29 @@
+[Unit]
+Description=developer-assistant read-only web status surface (dev-assist-cli serve-web)
+PartOf=devassist.target
+After=network-online.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=devassist
+Group=devassist
+WorkingDirectory=/srv/devassist
+Environment=DEVASSIST_OPERATIONAL_DB=/srv/devassist/state/operational.db
+Environment=DEVASSIST_REPO=/srv/devassist/repo
+ExecStart=/opt/dev-assist/bin/dev-assist-cli serve-web --port 8180 --bind 127.0.0.1
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/srv/devassist
+ReadWritePaths=/srv/devassist/logs
+BindReadOnlyPaths=/srv/devassist/state /srv/devassist/repo /srv/devassist/web
+
+[Install]
+WantedBy=devassist.target

@@ -1,0 +1,30 @@
+[Unit]
+Description=developer-assistant orchestrator Hermes runtime (Telegram gateway)
+PartOf=devassist.target
+After=network-online.target omniroute.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=devassist
+Group=devassist
+WorkingDirectory=/srv/devassist/runtimes/orchestrator
+Environment=HERMES_HOME=/srv/devassist/runtimes/orchestrator/.hermes
+Environment=HERMES_DEVASSIST_ROLE=orchestrator
+EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
+ExecStart=/usr/local/bin/hermes gateway run
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/srv/devassist
+ReadWritePaths=/srv/devassist/runtimes/orchestrator /srv/devassist/state /srv/devassist/logs
+BindReadOnlyPaths=/srv/devassist/repo /srv/devassist/shared-skills /srv/devassist/shared-plugins /srv/devassist/releases
+
+[Install]
+WantedBy=devassist.target
