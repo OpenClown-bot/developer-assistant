@@ -405,3 +405,12 @@ These remain open and are intentionally not closed in this pass. They are not bl
 | `docs/architecture/adr/ADR-003-plugin-supply-chain.md` v0.2.0 | OpenClaw v0.1 deferral |
 | `docs/reviews/RV-CODE-024.md` | review-language conventions for tickets |
 | `docs/session-log/2026-05-06-session-1.md` | latest authoritative project state |
+| `https://github.com/diegosouzapw/OmniRoute` (v3.7.x README, `providerRegistry.ts`) | § 5.4, § 6.7 (routing-layer findings); ADR-011 verification gate |
+| `https://github.com/diegosouzapw/OmniRoute/issues/265` (closed 2026-03-10; mainteiner: "send the Fireworks path as model ID and OmniRoute auto-resolves it") | § 5.4 OmniRoute-supports-Fireworks binding precondition; ADR-011, ADR-009 v0.1.1, MODEL-CATALOG.md v0.2.0 § 4.2 |
+| `https://api.fireworks.ai/inference/v1` (OpenAI-compatible chat-completions endpoint; OmniRoute upstream) | § 5.4; ADR-011 Decision step 3 |
+| `https://fireworks.ai/models/fireworks/deepseek-v3p1` (Fireworks `accounts/fireworks/models/deepseek-v4-pro` → architect role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/qwen3-235b-a22b-instruct-2507` (Fireworks `accounts/fireworks/models/qwen3p6-plus` → planner role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/glm-4p5` (Fireworks `accounts/fireworks/models/glm-5p1` → executor role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/kimi-k2-instruct` (Fireworks `accounts/fireworks/models/kimi-k2p6` → reviewer role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/minimax-m2` (Fireworks `accounts/fireworks/models/minimax-m2p7` → orchestrator role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://openrouter.ai/api/v1` (OpenRouter chat-completions endpoint; backup routing layer) | § 5.4; ADR-011 Decision step 4 |
