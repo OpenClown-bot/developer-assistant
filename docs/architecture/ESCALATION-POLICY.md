@@ -1,6 +1,6 @@
 ---
 id: ESCALATION-POLICY
-version: 0.1.1
+version: 0.1.0
 status: draft
 ---
 
@@ -26,36 +26,36 @@ This placement matters:
 
 ## 3. Decision Tree
 
-For every tool call a specialist runtime is about to make, the plugin walks this tree. Every step is **deterministic**: the entire decision is a pure function of the candidate action, the structured concept anchor (`PROJECT-CONCEPT.md`), and this file's § 4 rule set. There is **no LLM call inside the decision path** (RV-SPEC-012 F3 fix; ADR-008 v0.1.1).
+For every tool call a specialist runtime is about to make, the plugin walks this tree:
 
 ```
-A. Read-only or trivially-safe tool call?
-   (read_file, list_files, session_search, memory tool actions
-   add/replace/remove on this runtime's own MEMORY.md, etc.)
-   ─► PROCEED, no further checks
-   │ (action is not read-only)
-   ▼
-B. Match against the deterministic rule set (§ 4)?
-   ─► ESCALATE with trigger_kind=deterministic_rule:<id>
-   │ (no deterministic rule matched)
-   ▼
-C. Within-catalog model pick? (§ 6 of MODEL-CATALOG.md)
-   ─► PROCEED
-   │ (action is not within-catalog and not read-only)
-   ▼
-D. Deterministic concept-deviation classifier (§ 5)
-   Compares the candidate action against PROJECT-CONCEPT.md § 2
-   using a fully-specified pure-function predicate set (§ 5.1).
-   ─► ESCALATE with trigger_kind=concept_deviation:<rule_id>
-   ─► PROCEED
+┌─────────────────────────────────────────────────────────────────────┐
+│ A. Read-only or trivially-safe tool call?                           │
+│    (read_file, list_files, session_search, memory tool actions      │
+│    add/replace/remove on this runtime's own MEMORY.md, etc.)        │
+│  ────────────► PROCEED, no further checks                           │
+└──────────┬──────────────────────────────────────────────────────────┘
+           ▼ (action is not read-only)
+┌─────────────────────────────────────────────────────────────────────┐
+│ B. Match against the deterministic rule set (§ 4)?                  │
+│  ────────────► ESCALATE with trigger_kind=deterministic_rule:<id>   │
+└──────────┬──────────────────────────────────────────────────────────┘
+           ▼ (no deterministic rule matched)
+┌─────────────────────────────────────────────────────────────────────┐
+│ C. Within-catalog model pick? (§ 6 of MODEL-CATALOG.md)              │
+│  ────────────► PROCEED, no LLM consultation                         │
+└──────────┬──────────────────────────────────────────────────────────┘
+           ▼ (action might affect scope)
+┌─────────────────────────────────────────────────────────────────────┐
+│ D. Run the LLM classifier (§ 5)                                     │
+│   verdict = ASK_FOUNDER | PROCEED                                   │
+└──────────┬──────────────────────────────────────────────────────────┘
+           ▼
+        if ASK_FOUNDER → ESCALATE with trigger_kind=llm_classifier
+        if PROCEED     → PROCEED
 ```
 
-**Fail-closed defaults**:
-
-- If the deterministic rule engine errors (parser failure, malformed `PROJECT-CONCEPT.md`, file unreadable), the plugin escalates rather than proceeds with `trigger_kind='classifier_error'`.
-- If the action passes all four steps (read-only, no § 4 rule, within-catalog, no concept-deviation rule) but the action is in a category the deterministic rules cover (state-modifying, credential-touching, network-touching, repository-write) AND a structural defect prevents § 4 from being evaluated, the plugin treats step B as not-yet-decided and escalates with `trigger_kind='rule_engine_unavailable'`.
-
-The rationale: an unenforceable policy is worse than slow. Both fail-closed paths are reachable only on engineering bugs (the rule engine cannot legitimately be unavailable in production); they exist so that misconfiguration cannot silently degrade enforcement to fail-open.
+**Fail-closed default**: if the deterministic rule engine errors, OR the LLM classifier is unreachable AND the action is in a category the deterministic rules cover (state-modifying, credential-touching, network-touching, repository-write), the plugin escalates rather than proceeds. The rationale: an unenforceable policy is worse than slow.
 
 ## 4. Deterministic Rule Set
 
@@ -155,71 +155,59 @@ These rules catch the obvious shape of "I am about to redefine the project." The
 
 The deterministic rule set is exhaustive for `pre_tool_call` interception: any tool call matching a rule above MUST escalate, regardless of LLM verdict. The LLM is not consulted on these.
 
-## 5. Deterministic Concept-Deviation Classifier
+## 5. LLM Classifier
 
-When no deterministic rule from § 4 matches and the action is not trivially read-only or within-catalog, the plugin runs the concept-deviation classifier. The classifier is a **pure function** — same inputs always yield the same verdict — with **no LLM call inside the decision path** (RV-SPEC-012 F3 fix; ADR-008 v0.1.1).
+When no deterministic rule matches but the action is not trivially read-only, the plugin asks an auxiliary LLM whether the action triggers either limb of the PRD § 13.1 rule.
 
-### 5.1 Algorithm
+### 5.1 Classifier prompt (English; immutable to LLM)
 
-The algorithm is the one specified in `PROJECT-CONCEPT.md` v0.1.0 § 3, repeated here for completeness:
+The classifier prompt is hard-coded in the plugin source (not editable by any runtime's MEMORY.md). It looks like:
 
-```python
-def classify_concept_deviation(action: CandidateAction, anchor: ConceptAnchor) -> Verdict:
-    """
-    Pure function. No I/O. No LLM. No randomness.
-    Postcondition: same (action, anchor) ALWAYS yields the same Verdict.
-    """
-    for rule in anchor.deviation_rules:
-        if matches(action, rule.match):
-            if rule.verdict == "ESCALATE":
-                return Verdict.ESCALATE(rule_id=rule.id, cite=rule.cite)
-            elif rule.verdict == "PROCEED_OR_RULE_4_DECIDES":
-                if any_section_4_rule_matches(action):
-                    return Verdict.ESCALATE(rule_id="<§ 4 match>", cite="§ 4")
-                return Verdict.PROCEED
-            else:
-                return Verdict.PROCEED
-    return Verdict.ESCALATE(rule_id="classifier_safety_default", cite="§ 5 fail-closed")
+```
+You are an escalation classifier for the developer-assistant project.
+
+You receive:
+1. The PRD's intake-time concept summary (a static block of text).
+2. The PRD § 12 (v0.1 commitments) as a static block.
+3. The PRD § 13 (autonomy/team/upstream) as a static block.
+4. The current candidate action: tool name, tool arguments, and a short
+   plain-English description of what the action will do.
+
+Classify the candidate action against this rule:
+
+  Escalate to the Founder if and only if the candidate action:
+   (a) deviates from the concept, target user, success criteria, or
+       constraints captured in the intake / PRD § 12 / PRD § 13;
+   OR
+   (b) risks breaking already-committed scope, durable engineering state,
+       or external commitments (force-push, schema-destructive ops,
+       credential rotation, public endpoint exposure, paid third-party
+       introduction, etc.).
+
+You return EXACTLY one line of JSON:
+  {"verdict":"ASK_FOUNDER","reason":"<one sentence>"}
+or
+  {"verdict":"PROCEED","reason":"<one sentence>"}
+
+You do NOT add any other text. You do NOT execute the candidate action.
+You do NOT have access to tools. You only classify.
 ```
 
-The `matches(action, rule.match)` predicate is composed exclusively from Python primitives — string equality, regex (`re.search`), Unix glob (`fnmatch.fnmatch`), and list membership. The full predicate language is enumerated in `PROJECT-CONCEPT.md` § 3 (`kind`, `path_glob`, `argument_keyword_set`, `argument_regex`, `content_regex`, `content_diff_touches`).
+The plugin parses the JSON, and treats anything other than a parseable response or any other verdict value as ASK_FOUNDER (fail-closed).
 
-Every `deviation_rules` entry that fires comes with a stable `id` and a back-reference (`cite`) to the deterministic-rule line in § 4 or to the concept clause in `PROJECT-CONCEPT.md` § 2. Both go into the `escalations.trigger_kind` column as `concept_deviation:<rule_id>` so audits in § 8 can group by rule.
+### 5.2 Classifier model
 
-### 5.2 Concept anchor location
+Per `MODEL-CATALOG.md` § 6 the classifier model is one of the Founder-pre-approved entries explicitly tagged `auxiliary_classifier`. v0.1 default: `gpt-5.1-mini` via OmniRoute (independent of any specialist runtime's primary model so the audit is independent). The classifier model can be overridden per runtime in config, but only to another `auxiliary_classifier`-tagged entry.
 
-The anchor block consumed by the classifier is the YAML in `PROJECT-CONCEPT.md` § 2 — file path: **`docs/architecture/PROJECT-CONCEPT.md`** in the developer-assistant repository (RV-SPEC-012 F4 fix). The plugin loads the file at startup with these guarantees:
+### 5.3 Classifier latency budget
 
-- The file MUST exist and parse as valid YAML; otherwise the plugin fails to start (systemd `ExecStart` exits non-zero, `Restart=on-failure` retries but the runtime never reaches `agent run`). This prevents a missing/corrupted anchor from silently degrading enforcement.
-- The `version` field in the file's frontmatter MUST match a hard-coded minimum version in the plugin source. Mismatch is a fatal-startup error. Bumping the file version triggers a coordinated plugin update.
-- The plugin re-reads the file on `SIGHUP` so that an in-place anchor update can roll out without a full systemd restart of every runtime.
+- Hard timeout: 10 seconds. On timeout: fail-closed (ASK_FOUNDER).
+- Hard cost ceiling per classification: <0.001 USD (per `MODEL-CATALOG.md` § 4 estimate).
+- Cache: identical (action_kind, action_args_hash) within a 5-minute window reuses the previous verdict (within the same runtime; not shared across runtimes).
 
-The anchor file is itself protected by a deterministic rule — `concept:edit_concept_anchor` in § 4.10 — so the file cannot be modified by any specialist runtime without escalation.
+### 5.4 Classifier inputs scope
 
-### 5.3 Performance bounds
-
-Because the classifier is pure-Python with no I/O, the bounds are tight:
-
-- Hard wall-clock timeout: 100 ms per classification (vs the prior 10 s LLM budget). The previous “hard cost ceiling per classification: <0.001 USD” clause is obsolete — the deterministic classifier has zero per-call cost.
-- Cache: identical `(action_kind, action_args_hash)` within a 5-minute window reuses the previous verdict (within the same runtime; not shared across runtimes). The cache exists to avoid re-walking the rule list for repeated identical Hermes tool calls; correctness does not depend on it.
-- The previous ADDENDUM-001 reference to a 10-second auxiliary-classifier latency budget in `MODEL-CATALOG.md` § 5.3 is preserved as the bound for the **advisory narrative call** in § 5.5 below — NOT for the escalate/proceed decision.
-
-### 5.4 Argument scope and redaction
-
-The classifier receives a redacted version of the candidate action's arguments. Specifically: paths and tool names are passed through verbatim; secret-like values are replaced with `<REDACTED>`; LLM API keys are never read into the classifier's input. The redaction list is the same as the deterministic `secret:*` rule set in § 4.4.
-
-Redaction is part of `matches(action, rule.match)`'s contract (the predicate operates on the redacted argument string only) so that adding a new secret-detection regex to § 4.4 also strengthens the concept-deviation classifier's input hygiene. TKT-023 § 1 covers this with a unit test that asserts no environment-variable value listed in `SELF-DEPLOY.env`'s required set ever appears in the classifier's input string.
-
-### 5.5 Optional advisory narrative (NOT in the decision path)
-
-When § 5.1 returns `ESCALATE`, the plugin MAY invoke the runtime's catalog main model (`MODEL-CATALOG.md` § 4.1) to generate a short Russian-language narrative for the Founder explaining what was about to happen and why the deterministic classifier matched. This narrative is **advisory text on the escalation surface only**; it has no effect on the verdict, and the deterministic classifier never waits on it.
-
-Bounds for the advisory call:
-
-- Hard wall-clock timeout: 10 seconds (matches the legacy `MODEL-CATALOG.md` § 5.3 budget).
-- Hard cost ceiling: <0.001 USD per call (same as legacy).
-- If the call times out or fails, the plugin attaches a fallback English-language narrative built deterministically from `rule_id` + `cite` and proceeds with the escalation. The fallback path is the default; the LLM call is best-effort.
-- The advisory call uses the runtime's own catalog main model; no separate "auxiliary classifier" model entry is required (`MODEL-CATALOG.md` v0.1.1 § 4.2).
+The classifier receives a redacted version of the candidate action's arguments. Specifically: paths and tool names are passed through verbatim; secret-like values are replaced with `<REDACTED>`; LLM API keys are never sent. The redaction list is the same as the deterministic `secret:*` rule set.
 
 ## 6. Escalation Lifecycle
 
@@ -286,33 +274,29 @@ These queries inform whether the policy is too noisy (too many escalations), too
 Tuning is itself a Founder-approved decision. To change a rule:
 
 - Adding a new deterministic rule, removing one, or weakening one all require Founder approval — they are governance changes to `ESCALATION-POLICY.md`. The change goes through the normal Architect → RV-SPEC → Founder loop.
-- Adding, removing, or modifying any line of the structured anchor in `PROJECT-CONCEPT.md` § 2 is itself caught by the deterministic rule `concept:edit_concept_anchor` (§ 4.10). It cannot land without Founder approval.
-- Changing the deterministic classifier algorithm in § 5.1 (e.g., adding a new predicate type to the `match` schema) requires the same Architect → RV-SPEC → Founder loop.
-- Changing the advisory-narrative call in § 5.5 (model, prompt, latency / cost bound, opt-out) does NOT require Founder approval because it does not affect the escalate/proceed decision; the Architect documents the change in this file's frontmatter version and ships. The advisory call is functionally optional.
-- Changing the wall-clock timeout for the deterministic classifier (§ 5.3) or the cache window does NOT require Founder approval; same path.
+- Changing the LLM classifier's prompt requires the same loop.
+- Changing which model is used as the auxiliary classifier requires Founder approval per `MODEL-CATALOG.md` § 7 (catalog change escalates).
+- Changing the latency budget or cache window does NOT require Founder approval; the Architect documents the change in this file's frontmatter version and ships.
 
 ## 10. Failure Modes
 
 | Failure | Detection | Recovery |
 | --- | --- | --- |
 | Plugin crashes inside the hook | Hermes `pre_tool_call` raises | The runtime treats this as fail-closed (ESCALATE) and writes an escalation with `trigger_kind='plugin_crash'`; restarts via systemd `Restart=on-failure` |
-| `PROJECT-CONCEPT.md` missing or malformed at startup | Plugin's YAML parser raises in `ExecStart` | systemd marks the unit `failed`; install verify catches before the start gate (`SELF-DEPLOYMENT-CONTRACT.md` § 8). At runtime: fail-closed escalate with `trigger_kind='classifier_error'` until restored |
-| Concept-anchor version mismatch | Plugin's startup version-check raises | Same as above |
-| Deterministic rule engine raises during `matches()` | Plugin's exception handler catches | Fail-closed: escalate with `trigger_kind='rule_engine_unavailable'` and log the rule id that raised; aggregate audit query in § 8 surfaces a recurring failure |
-| Advisory narrative call (§ 5.5) times out or fails | LLM call exceeds 10 s | Drop the LLM narrative; attach the deterministic English fallback narrative built from `rule_id` + `cite`. The escalation is unaffected |
+| LLM classifier unreachable | Network timeout on the classifier call | Fail-closed: escalate with `trigger_kind='llm_classifier_unreachable'` |
+| Classifier returns malformed JSON | Plugin's parser raises | Fail-closed: escalate with `trigger_kind='llm_classifier_malformed'` |
 | Deterministic rule false positive | Founder sees an escalation that should not have triggered | Founder approves it; tunes the rule via the § 9 process |
-| Deterministic rule false negative | A scope-changing action proceeds without escalation | This is the worst-case failure mode; mitigated by (a) the structured concept anchor catching concept-level deviations the § 4 list misses, (b) the Hermes approval prompt as a second layer (still active in `manual` mode), and (c) the audit query in § 8 reviewed regularly |
+| Deterministic rule false negative | A scope-changing action proceeds without escalation | This is the worst-case failure mode; mitigated by (a) the LLM classifier as a second layer, (b) the Hermes approval prompt as a third layer (still active in `manual` mode), and (c) the audit query in § 8 reviewed regularly |
 | Escalation surfaces to Founder but Founder is offline | Escalation stays `surfaced`; the 7-day expiration sweep eventually marks it `expired` and re-escalates | |
 
 ## 11. Cross-References
 
 - `PRD-001.md` v0.2.1 § 13.1 (autonomy/escalation rule)
 - `ARCH-001.md` v0.3.0 § 15
-- `PROJECT-CONCEPT.md` v0.1.0 (structured anchor consumed by § 5)
 - `MULTI-HERMES-CONTRACT.md` § 5.6, § 6.3, § 8.2
 - `UPSTREAM-ADAPTER-CONTRACT.md` § 4.3
-- `MODEL-CATALOG.md` v0.1.1 § 4.1 (catalog main models, used for advisory narrative in § 5.5), § 4.2 (no separate auxiliary classifier in v0.1)
+- `MODEL-CATALOG.md` § 6 (auxiliary classifier model)
 - `HERMES-RUNTIME-CONTRACT.md` v0.2.0 § 5 founder_questions sub-fields
 - `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.8, § 3.9, § 6.4
-- `docs/architecture/adr/ADR-008-escalation-classifier.md` v0.1.1 (deterministic + structured anchor)
+- `docs/architecture/adr/ADR-008-escalation-classifier.md`
 - Implementation: TKT-023 (escalation policy enforcement plugin)
