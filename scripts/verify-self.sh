@@ -186,25 +186,26 @@ check_unit_active() {
 }
 
 invariant_07_runtime_units() {
-    local any_fail=0
+    local name="each runtime unit active"
+    local failed_roles=""
     for role in $ROLES; do
         local unit="devassist-${role}.service"
-        local label="${role} unit active"
         if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
             log "FIXTURE/DRY_RUN: ${unit} assumed active"
-            record_pass "$label"
         else
             local status
             status=$(systemctl is-active "$unit" 2>/dev/null) || status="unknown"
-            if [ "$status" = "active" ]; then
-                record_pass "$label"
-            else
-                record_fail "$label" "${unit} inactive (${status})"
-                any_fail=1
+            if [ "$status" != "active" ]; then
+                failed_roles="${failed_roles} ${role}(${status})"
+                log "  ${unit} inactive (${status})"
             fi
         fi
     done
-    return $any_fail
+    if [ -z "$failed_roles" ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "inactive units:${failed_roles}"
+    fi
 }
 
 invariant_08_omniroute_unit() {
@@ -234,6 +235,80 @@ invariant_09_web_service() {
     fi
 }
 
+invariant_10_runtime_health_endpoints() {
+    local name="per-runtime health endpoints"
+    local port=8181
+    local failed=""
+    for role in $ROLES; do
+        if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+            log "FIXTURE/DRY_RUN: ${role} /health at :${port} returning stub 200"
+        else
+            local http_code
+            http_code=$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${port}/health" 2>/dev/null) || http_code="000"
+            if [ "$http_code" != "200" ]; then
+                failed="${failed} ${role}(:${port} HTTP ${http_code})"
+                log "  ${role} /health at :${port} returned HTTP ${http_code}"
+            fi
+        fi
+        port=$((port + 1))
+    done
+    if [ -z "$failed" ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "failed probes:${failed}"
+    fi
+}
+
+invariant_11_journald_retention() {
+    local name="journald retention configured"
+    local dropin="${PREFIX}/etc/systemd/journald.conf.d/dev-assist.conf"
+    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+        log "FIXTURE/DRY_RUN: journald drop-in assumed configured"
+        record_pass "$name"
+        return 0
+    fi
+    if [ ! -f "$dropin" ]; then
+        record_fail "$name" "journald drop-in missing at ${dropin}"
+        return 0
+    fi
+    local has_max has_ret
+    has_max=$(grep -c "SystemMaxUse=1G" "$dropin" 2>/dev/null) || has_max=0
+    has_ret=$(grep -c "MaxRetentionSec=30d" "$dropin" 2>/dev/null) || has_ret=0
+    if [ "$has_max" -ge 1 ] && [ "$has_ret" -ge 1 ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "journald drop-in misconfigured (SystemMaxUse=1G:${has_max}, MaxRetentionSec=30d:${has_ret})"
+    fi
+}
+
+invariant_12_no_secrets_in_journal() {
+    local name="no secrets in journal"
+    local secret_names="TELEGRAM_BOT_TOKEN GITHUB_TOKEN FIREWORKS_API_KEY OMNIROUTE_API_KEY OPENROUTER_API_KEY"
+    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+        log "FIXTURE/DRY_RUN: journal secret scan returning stub clean"
+        record_pass "$name"
+        return 0
+    fi
+    local journal_out
+    journal_out=$(journalctl -u "devassist-*" -u omniroute -u devassist-web --since "-1 hour" --no-pager --output=json 2>/dev/null) || journal_out=""
+    local leak_found=0
+    for sname in $secret_names; do
+        local sval
+        sval=$(printenv "$sname" 2>/dev/null) || continue
+        if [ -n "$sval" ] && [ "$sval" != "test-token-placeholder" ]; then
+            if echo "$journal_out" | grep -qF "$sval" 2>/dev/null; then
+                log "  possible secret leak: ${sname} value found in journal"
+                leak_found=1
+            fi
+        fi
+    done
+    if [ "$leak_found" = "0" ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "possible secret leak in journal (env-var names logged above, not values)"
+    fi
+}
+
 main() {
     log "verify-self.sh v${SELF_DEPLOY_VERSION} starting (FIXTURE=${FIXTURE}, DRY_RUN=${DRY_RUN})"
 
@@ -246,6 +321,9 @@ main() {
     invariant_07_runtime_units
     invariant_08_omniroute_unit
     invariant_09_web_service
+    invariant_10_runtime_health_endpoints
+    invariant_11_journald_retention
+    invariant_12_no_secrets_in_journal
 
     local total=$((PASS_COUNT + FAIL_COUNT))
     echo ""

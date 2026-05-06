@@ -255,7 +255,7 @@ class TestVerifySelf(unittest.TestCase):
             }
             _run_script("install-self.sh", env)
             result = _run_script("verify-self.sh", env)
-            self.assertIn("13/13", result.stdout)
+            self.assertIn("12/12", result.stdout)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
