@@ -45,11 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     # Hard cap so a runaway run cannot block the pipeline indefinitely. If this
     # cap fires regularly, that is a signal to investigate OmniRoute/Fireworks
-    # health rather than silently sit and wait. 18-min calibrated against
-    # observed workloads: typical 3-9 min, large docs PRs ~12-15 min, openclown
-    # TKT-010 iter-3 outlier 22 min. 18 covers the long tail without permitting
-    # truly runaway runs.
-    timeout-minutes: 18
+    # health rather than silently sit and wait. 30-min calibrated against
+    # observed workloads: typical 3-9 min, large docs PRs ~12-15 min,
+    # architecture pass PRs ~18-25 min. 30 covers the long tail without
+    # permitting truly runaway runs. Raised from 18 after architect pass
+    # PR-C (#88) and PR-E (#90) hit the cap at ~18m on large diffs.
+    timeout-minutes: 30
     permissions:
       issues: write
       pull-requests: write
