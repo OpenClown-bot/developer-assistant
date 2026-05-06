@@ -22,3 +22,7 @@ TKT-006 progress report scheduling stores last-report timestamps and intervals i
 ## Priority
 
 Medium. Required before reliable long-running runtime operation.
+
+## Partial Resolution
+
+Persistence-facing helper subset delivered by `TKT-019` in PR #79: `is_report_due` and `mark_report_sent` in `src/developer_assistant/progress_scheduling.py`. Runtime wiring into the TKT-006 Telegram adapter and live scheduling loop remains deferred.
