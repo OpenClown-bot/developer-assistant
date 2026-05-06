@@ -11,12 +11,12 @@ updated: 2026-05-06
 
 - Name: `developer-assistant`
 - Summary: AI developer assistant for orchestrating full software delivery projects.
-- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, TKT-017 gated live-smoke readiness harness/review, TKT-011 readiness promotion/spec review, TKT-011 iter-1 blocked outcome record, TKT-018 trial-vehicle readiness/spec review, TKT-018 implementation + TKT-011 iter-2, and RV-CODE-023 review are merged to `main`. TKT-019 progress scheduling helper implementation PR #79, RV-CODE-024 review PR #81 merged to `main`.
+- Repository state: GitHub repository is active; docs-as-code scaffold, approved architecture baseline, PR-Agent, Docs CI, TKT-001 validator baseline, Hermes-aligned role prompts, PR/review templates, Hermes runtime integration contract, Hermes skill/plugin security allowlist, operational state store, Hermes credential-bearing capability source review, state-store hardening, generated-project VPS deployment contract, runtime ticket readiness pass, project-specific GitHub workflow capability, Telegram founder interaction logic layer, TKT-008 readiness promotion/review, TKT-008 GitHub PR integration implementation/review, TKT-015 Hermes Telegram gateway transport binding/review, TKT-016 runtime GitHub executor binding/review, TKT-017 gated live-smoke readiness harness/review, TKT-011 readiness promotion/spec review, TKT-011 iter-1 blocked outcome record, TKT-018 trial-vehicle readiness/spec review, TKT-018 implementation + TKT-011 iter-2, and RV-CODE-023 review are merged to `main`. TKT-019 progress scheduling helper implementation PR #79, RV-CODE-024 review PR #81 merged to `main`. Architecture revision ARCH-001 v0.3.0 PRs #86-#90 (PR-A through PR-E) all merged to `main` after RV-SPEC-010..015 reviews and conflict resolution; 12 new tickets (TKT-020..031), 11 ADRs (ADR-004..013), 10 boundary-surface docs now on main.
 - Artifact language: mixed. Conversation in Russian; long-lived repo docs and prompts in English.
 
 ## Current Phase
 
-TKT-001 through TKT-010 and TKT-012 through TKT-017 are complete. Runtime readiness pass PR #29 is merged and reviewed by RV-SPEC-001. `TKT-008` implementation PR #41 and review PR #42 are merged. `TKT-015` implementation PR #47 and review PR #48 are merged. `TKT-016` implementation PR #53 and review PR #54 are merged. `TKT-017` implementation PR #60 and review PR #61 are merged. `TKT-011` remains ready after PR #64 and SPEC review PR #65; iter-2 (part of PR #72) reaffirmed blocked readiness — PROJECT_GITHUB_PAT and TELEGRAM_BOT_TOKEN unavailable; full Telegram-to-PR trial not yet executed. `TKT-018` is now done after implementation PR #72 and CODE review PR #74 / RV-CODE-023; it served as the trial vehicle. `TKT-011` iter-3 completed: first time BOTH readiness lanes (GitHub + Telegram) passed. `TKT-019` is done after implementation PR #79 and CODE review PR #81 / RV-CODE-024 (pass_with_recommendations, 2 minor non-blocking findings filed as TKT-NEW-019-A and TKT-NEW-019-B).
+Architecture revision ARCH-001 v0.3.0 is complete and merged (PRs #86-#90). 12 implementation tickets (TKT-020..031) are promoted to `ready` for Executor dispatch. TKT-020 (self-deployment bootstrap) is the first dispatch target; TKT-021, TKT-022 can follow in parallel. TKT-011 remains blocked until self-deployment tickets are implemented and the assistant runs on VPS with live credentials.
 
 ## Process Variant
 
@@ -57,7 +57,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Architectural Decisions
 
-- `ARCH-001` version `0.2.0` is approved by the user as the v0.1 baseline.
+- `ARCH-001` version `0.3.0` is approved and merged to `main` (PRs #86-#90).
 - v0.1 is Telegram-first and Hermes-centered using a Hermes-first hybrid foundation.
 - Repository docs-as-code governance remains the source of truth for PRD, architecture, ADRs, tickets, reviews, decisions, and handoff state.
 - OpenClaw is deferred as a possible later gateway/control UI unless a Hermes blocker is documented.
@@ -102,4 +102,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Recommended next step: Decide fate of PR #73 (Devin, unreviewed by project pipeline). Then reassess TKT-011 iter-3 readiness — TKT-019 is done but live credentials (PROJECT_GITHUB_PAT, TELEGRAM_BOT_TOKEN) remain unavailable. SO may close TKT-011 as blocked/unexecutable for v0.1 if credential path remains unavailable, or promote a new offline-only ticket as the next trial vehicle.
+Dispatch TKT-020 (self-deployment bootstrap) to Executor. Then dispatch TKT-021 (multi-Hermes layout) and TKT-022 (work_items + escalations) in parallel. TKT-011 remains blocked until TKT-020+021+022 are implemented and the assistant runs on VPS.
