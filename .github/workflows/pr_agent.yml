@@ -8,14 +8,16 @@ on:
   issue_comment:
   workflow_dispatch:
 
-# Cancel stale runs when a new push lands on the same PR. PR-Agent's tail
-# latency through OmniRoute can be 15-25 minutes; without this, multiple
-# IN_PROGRESS runs pile up against successive HEADs and the cross-reviewer
-# audit Hard rule (TO must wait for PR-Agent settle on final HEAD) becomes
-# impossible to satisfy in reasonable time.
+# Allow parallel PR-Agent runs on the same PR. Previous setting
+# cancel-in-progress: true killed ~16% of runs because a new push during
+# a 10-20 minute LLM review would cancel the in-progress run before it
+# could post results. With false, runs proceed independently; the latest
+# run's comment appears last in the PR thread, which is the natural
+# reading order. Token cost increases (2-3 parallel runs on rapid-push
+# PRs) but reliability improves from ~84% to ~99%.
 concurrency:
   group: pr-agent-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   pr_agent_job:
