@@ -1,8 +1,8 @@
 ---
 id: SESSION-STATE
-version: 0.1.1
+version: 0.1.2
 status: active
-updated: 2026-05-06
+updated: 2026-05-07
 ---
 
 # Session State
@@ -16,7 +16,7 @@ updated: 2026-05-06
 
 ## Current Phase
 
-Architecture revision ARCH-001 v0.3.0 is complete and merged (PRs #86-#90). 12 implementation tickets (TKT-020..031) are promoted to `ready` for Executor dispatch. TKT-020 (self-deployment bootstrap) is the first dispatch target; TKT-021, TKT-022 can follow in parallel. TKT-011 remains blocked until self-deployment tickets are implemented and the assistant runs on VPS with live credentials.
+Architecture revision ARCH-001 v0.3.0 is complete and merged (PRs #86-#90). 12 implementation tickets (TKT-020..031) are promoted to `ready` for Executor dispatch. TKT-020 (self-deployment bootstrap) is merged (PR #98, commit f2be262) but merge-safe is BLOCKED: 29 unittest errors in test_self_deployment_scripts.py (bash not available on Windows; CI will fail). Fix required before CI passes. TKT-021, TKT-022 can be dispatched in parallel (no shared interfaces). TKT-011 remains blocked until self-deployment tickets are implemented and the assistant runs on VPS with live credentials.
 
 ## Process Variant
 
@@ -47,6 +47,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-017`: done in PR #60; reviewed in PR #61 / `RV-CODE-021.md` with verdict `pass`.
 - `TKT-018`: done in PR #72; reviewed in PR #74 / `RV-CODE-023.md` with verdict `pass`; served as TKT-011 iter-2 trial vehicle.
 - `TKT-019`: done in PR #79; reviewed in PR #81 / `RV-CODE-024.md` with verdict `pass_with_recommendations`; progress scheduling persistence helper, TKT-011 iter-3 trial vehicle.
+- `TKT-020`: merged in PR #98 (commit f2be262); self-deployment bootstrap scripts (install, rollback, upgrade, verify) + 8 systemd units + tests; merge-safe BLOCKED (29 unittest errors on Windows; bash unavailable; fix required). Process boundary violation: TO merged PR and committed session-log without SO hand-back or Founder approval.
 
 ## Current Blockers
 
@@ -102,4 +103,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-Dispatch TKT-020 (self-deployment bootstrap) to Executor. Then dispatch TKT-021 (multi-Hermes layout) and TKT-022 (work_items + escalations) in parallel. TKT-011 remains blocked until TKT-020+021+022 are implemented and the assistant runs on VPS.
+TKT-020 is merged but CI fails (29 errors from test_self_deployment_scripts.py — bash-on-Windows platform constraint; fix required). Meanwhile: dispatch TKT-021 (multi-Hermes runtime layout) and TKT-022 (work_items + escalations schema) in parallel (no shared interfaces; both are immediate per session-3 §8). After TKT-020 CI fix lands and passes: dispatch TKT-026 (model-catalog CLI). TKT-011 remains blocked until TKT-020..026 plus TKT-027 are merged.
