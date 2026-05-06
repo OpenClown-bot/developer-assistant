@@ -277,8 +277,8 @@ Detailed contract in `ESCALATION-POLICY.md` v0.1.1; summary:
 - Both layers run at the Hermes `pre_tool_call` hook, so they pre-empt the Hermes-level approval prompt rather than relying on it.
 - An escalation appends a row to the SQLite `escalations` table; the Orchestrator runtime polls the table and surfaces pending escalations to Telegram.
 - The Founder's response is captured back into the originating runtime's work item and into the durable artifact target the escalation declared (PRD, `docs/questions/`, ADR, or ticket).
-- The plugin MAY invoke the runtime's catalog main model from `MODEL-CATALOG.md` v0.1.1 § 4.1 to generate a Russian-language advisory narrative on the escalation surface (`ESCALATION-POLICY.md` v0.1.1 § 5.5). This narrative is **NOT in the decision path** — the deterministic classifier has already returned `ESCALATE` before the call is made; the call is best-effort with a deterministic English fallback narrative on timeout/failure.
-- ADR-008 v0.1.1 records the classifier-mechanism choice (deterministic rules + structured concept anchor; no LLM in the decision) and the v0.1.1 history (Option B — the v0.1.0 "deterministic + LLM classifier" design — was rejected by RV-SPEC-012 F3).
+- The plugin MAY invoke the runtime's catalog main model from `MODEL-CATALOG.md` v0.1.1 § 4.1 to generate a Russian-language advisory narrative on the escalation surface (`ESCALATION-POLICY.md` v0.1.1 § 5.5). This narrative is **NOT in the decision path** — the deterministic classifier verdict is final; the narrative is purely informational for the Founder.
+- ADR-008 v0.1.1 records the classifier-mechanism choice (fully deterministic rule set + deterministic concept-deviation classifier, no LLM in the decision; optional advisory narrative reuses the runtime's catalog main model).
 
 ## 16. Model Catalog Architecture
 
