@@ -3,6 +3,10 @@
 Validates install-self.sh, verify-self.sh, rollback-self.sh, upgrade-self.sh
 under dry-run mode using a temp prefix. Uses stdlib unittest and tempfile.
 No real tokens, PATs, or production hostnames appear here.
+
+Platform note: The shell scripts target Ubuntu VPS. Tests that invoke them
+skip gracefully on Windows where bash is unavailable. CI (GitHub Actions) runs
+on Linux where bash is present.
 """
 
 from __future__ import annotations
@@ -18,6 +22,27 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 ROLES = ["orchestrator", "planner", "architect", "executor", "reviewer"]
+
+
+def _bash_available() -> bool:
+    try:
+        subprocess.run(
+            ["bash", "--version"],
+            capture_output=True,
+            timeout=5,
+        )
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _skip_on_no_bash(cls: type) -> type:
+    if not _bash_available():
+        for name in dir(cls):
+            if name.startswith("test_"):
+                method = getattr(cls, name)
+                setattr(cls, name, unittest.skip("bash unavailable on this platform")(method))
+    return cls
 EXPECTED_SCHEMA_VERSION = "3"
 
 
@@ -40,6 +65,7 @@ def _run_script(
     )
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestInstallSelfIdempotent(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
@@ -132,6 +158,7 @@ class TestInstallSelfIdempotent(unittest.TestCase):
         self.assertIn("MaxRetentionSec=30d", content)
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestSystemdUnitRender(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
@@ -225,6 +252,7 @@ class TestSystemdUnitRender(unittest.TestCase):
             self.assertIn(name, content, f"target missing Wants for {name}")
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestVerifySelf(unittest.TestCase):
     def test_verify_passes_in_fixture_mode(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
@@ -293,6 +321,7 @@ class TestVerifySelf(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestRollbackSelf(unittest.TestCase):
     def test_rollback_aborts_with_no_backup(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
@@ -353,7 +382,8 @@ class TestRollbackSelf(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-class TestUpgradeSelf(unittest.TestCase):
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestUpgradeSelfPrimary(unittest.TestCase):
     def test_upgrade_staging_without_activate(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
         try:
@@ -389,6 +419,7 @@ class TestUpgradeSelf(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestDryRunPrefixContainment(unittest.TestCase):
     def test_install_does_not_write_outside_prefix(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
@@ -409,6 +440,7 @@ class TestDryRunPrefixContainment(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestNoSecretsInRepo(unittest.TestCase):
     def test_no_real_tokens_in_templates(self) -> None:
         templates_dir = SCRIPTS_DIR / "templates"
