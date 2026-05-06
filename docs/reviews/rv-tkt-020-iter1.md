@@ -1,5 +1,7 @@
 ---
 id: rv-tkt-020-iter1
+version: 0.1.0
+status: active
 pr: "#98"
 ticket: TKT-020
 reviewer: Kimi K2.6
