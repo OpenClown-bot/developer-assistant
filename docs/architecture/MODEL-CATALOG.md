@@ -1,6 +1,6 @@
 ---
 id: MODEL-CATALOG
-version: 0.1.1
+version: 0.2.0
 status: draft
 ---
 
@@ -128,12 +128,16 @@ The following do NOT escalate (within-catalog operational behavior):
 
 ## 8. Cost Posture
 
-v0.1 does not commit to a specific monthly LLM spend. The Founder pre-approved the catalog above with the expectation that:
+The Founder has approved any spend within this catalog. Per-runtime / per-day USD ceilings are out of scope for v0.1.
 
-- Routine operation (Orchestrator + Business Planner + Architect + Executor + Reviewer producing one PRD + one architecture pass + one ticket per work cycle) fits inside the already-approved LLM API budget.
-- Architect runs use `accounts/fireworks/models/deepseek-v4-pro` selectively; the model is more expensive per token but the runtime is invoked rarely and produces high-leverage output.
+Per ADDENDUM-001 (Founder, 2026-05-06): *"We are not saving on these models, so do not try to squeeze on token cost."* This wholesale supersedes the v0.1.0 catalog's "fits inside already-approved LLM API budget" framing and the "Architect adds a cost note if empirical spend diverges" clause. Specifically:
 
-If empirical cost during the trial diverges meaningfully from this expectation, the Architect adds a cost note to this file's next version and the Founder decides whether to adjust the catalog. (ADDENDUM-001 mandates a per-token-cost waiver for v0.1; that waiver lands as the v0.2.0 cost-posture rewrite in PR-E.)
+- **Within-catalog model selection**: pick each role's main model by capability fit alone. The fallback chain in § 4.1 is ordered by capability-degradation tolerance, not by cost ascent. A pricier-but-more-capable Fallback-N is preferred over a cheaper-but-less-capable Fallback-N.
+- **No per-token internal optimization**: runtimes do not minimize prompt size beyond what hygiene requires (no aggressive context compression, no token-count gating that could trade quality for token savings).
+- **No per-day / per-runtime spend cap**: there is no automatic budget circuit breaker. The deterministic escalation rule `paid:llm_provider_outside_catalog` (`ESCALATION-POLICY.md` § 4.6) is the only cost gate that escalates, and it only fires when a runtime tries to call a model that is NOT in this catalog at all.
+- **Observability remains mandatory**: every LLM call writes a row to the `llm_calls` table per `OBSERVABILITY-CONTRACT.md` v0.1.1 FR-OBS-07; the daily Telegram digest reports per-runtime per-model spend (FR-OBS-05). Cost tracking is the v0.1 commitment; cost optimization is not.
+
+The auxiliary classifier ceilings in `ESCALATION-POLICY.md` § 5.3 (≤ 10s latency, ≤ 0.001 USD per classification) remain in force. Those ceilings are about classifier independence and policy hygiene (not Founder savings), so the no-cost-optimization directive does not relax them.
 
 ## 9. Known-Caveat List
 
