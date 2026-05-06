@@ -1,6 +1,6 @@
 ---
 id: SELF-DEPLOYMENT-CONTRACT
-version: 0.1.0
+version: 0.2.0
 status: draft
 ---
 
@@ -18,7 +18,7 @@ In scope for v0.1:
 
 - One-command **install** that lays down the multi-Hermes runtime layout, installs the Hermes Agent foundation once, configures five per-runtime `HERMES_HOME` directories, renders systemd unit templates, runs preflight checks, and stops without starting any runtime.
 - One-command **verify** that runs the connectivity-only health invariant set and returns non-zero on failure.
-- One-command **rollback** that restores the last `state.db` backup and the last known-good runtime config tarball, then restarts units that were running prior to rollback.
+- One-command **rollback** that restores the last `operational.db` backup (the shared operational store) and the last known-good runtime config tarball, then restarts units that were running prior to rollback.
 - One-command **upgrade** that takes a state-store backup, fetches the new release, runs install in-place, runs verify, and surfaces a Founder approval prompt before activating units running the new version.
 - Three approval gates per `PRD-001.md` § 12.5: `install` (no approval), `start` (explicit Founder approval), `upgrade` (explicit Founder approval AND a state-store backup).
 - A single secrets file (`/srv/devassist/secrets/SELF-DEPLOY.env`) the install script reads and the systemd units load via `EnvironmentFile=`.
@@ -65,7 +65,8 @@ The install script lays down this layout. All paths are owned by the `devassist`
 │   │       ├── SOUL.md
 │   │       ├── memories/{MEMORY.md, USER.md}
 │   │       ├── sessions/
-│   │       ├── state.db -> /srv/devassist/state/state.db        (symlink)
+│   │       ├── state.db                                       # Hermes native sessions index (per-runtime, NOT a symlink)
+│   │       ├── operational.db -> /srv/devassist/state/operational.db  (symlink to shared operational store)
 │   │       ├── cron/
 │   │       ├── logs/
 │   │       └── skills/                        # per-runtime skills (mostly built-in references)
@@ -93,29 +94,43 @@ The install script lays down this layout. All paths are owned by the `devassist`
 │   ├── dev-assist-escalation-policy/
 │   └── dev-assist-work-queue/
 ├── state/
-│   ├── state.db                               # the SQLite operational store; mode 0640
+│   ├── operational.db                         # the SQLite operational store (shared by all five runtimes); mode 0640
 │   └── backups/                               # rotating snapshots; mode 0700
-│       └── state-YYYYMMDD-HHMMSS.db
+│       └── operational-YYYYMMDD-HHMMSS.db
 ├── secrets/
 │   └── SELF-DEPLOY.env                        # mode 0600, owner devassist:devassist
 ├── releases/
 │   ├── current -> /srv/devassist/releases/<release-id>/  (symlink)
 │   ├── previous -> ...                                    (symlink)
 │   └── <release-id>/                          # snapshot of repo + shared-skills + shared-plugins
+├── omniroute/                                 # OmniRoute install (per ADR-011); the binary lives at /opt/omniroute, this is its working tree
+│   ├── omniroute.db                           # OmniRoute's own state DB (provider registry, alias map, FIREWORKS_API_KEY)
+│   └── logs/
+├── web/
+│   └── templates/                             # HTML templates for dev-assist-cli serve-web (per ADR-013)
 └── logs/
     └── self-deploy.log                        # install/verify/rollback/upgrade trace
 ```
 
+Additional v0.2.0 paths laid down by the install script (outside `/srv/devassist/`):
+
+```
+/opt/dev-assist/bin/dev-assist-cli              # operator CLI + web server binary (ADR-010 / TKT-027 / ADR-013)
+/opt/omniroute/                                 # OmniRoute v3.7.x install root (ADR-011); owner: omniroute:omniroute
+/etc/systemd/journald.conf.d/dev-assist.conf    # journald drop-in (FR-OBS-09a; ADR-010)
+```
+
 Notes:
 
-- Per-runtime `HERMES_HOME` directories share the SQLite operational store via the symlink to `/srv/devassist/state/state.db`. This is the explicit mechanism that lets all five runtimes see the same `work_items` and `escalations` tables (`MULTI-HERMES-CONTRACT.md` § 6).
-- The `.env` symlink to `/srv/devassist/secrets/SELF-DEPLOY.env` makes each runtime see the same secret values (Telegram bot token, GitHub PAT, OmniRoute API key, etc.) without duplicating the secrets file.
-- Per-runtime `memories/`, `sessions/`, `cron/`, and `logs/` directories are NOT shared. Memory isolation between runtimes is physical per `ARCH-001.md` § 11.1.
+- Per-runtime `HERMES_HOME` directories share the SQLite operational store via the symlink `operational.db -> /srv/devassist/state/operational.db`. This is the explicit mechanism that lets all five runtimes see the same `work_items` and `escalations` tables (`MULTI-HERMES-CONTRACT.md` § 6, `OPERATIONAL-STATE-STORE.md` v0.2.1).
+- The per-runtime `state.db` (Hermes' native sessions index, FTS5 over JSONL transcripts) is **not** a symlink and **not** shared. It lives inside each runtime's `HERMES_HOME` directory and is owned by the Hermes runtime itself (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.5). The `state.db` and `operational.db` filename-distinction prevents the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1.
+- The `.env` symlink to `/srv/devassist/secrets/SELF-DEPLOY.env` makes each runtime see the same secret values (Telegram bot token, GitHub PAT, OmniRoute API key, etc.) without duplicating the secrets file. Although all five units load the same env file, only the Orchestrator's `config.yaml` enables `gateway.enabled: true` and loads the `telegram-gateway` skill, so non-Orchestrator runtimes cannot reach the Telegram API even though `TELEGRAM_BOT_TOKEN` is present in their environment. § 10 elaborates on this defense-in-depth pattern.
+- Per-runtime `memories/`, `sessions/`, `cron/`, and `logs/` directories are NOT shared. Memory isolation between runtimes is **filesystem-level**: enforced by distinct `HERMES_HOME` paths plus the systemd sandbox directives in § 5.2 (`ProtectHome=`, `ReadOnlyPaths=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`). All five runtimes share the `devassist` Linux uid; the isolation is conditional on correct systemd unit configuration (`ARCH-001.md` § 11.1).
 - The `releases/current` symlink is the activation surface. Upgrade flips it from the previous release to the new one **only** after the Founder approves.
 
 ## 5. systemd Units
 
-Six unit files are written by the install script:
+Eight unit files are written by the install script (v0.2.0 adds `omniroute.service` per ADR-011 and `devassist-web.service` per ADR-013 to the v0.1.1 set of six):
 
 ```
 /etc/systemd/system/devassist.target
@@ -124,7 +139,11 @@ Six unit files are written by the install script:
 /etc/systemd/system/devassist-architect.service
 /etc/systemd/system/devassist-executor.service
 /etc/systemd/system/devassist-reviewer.service
+/etc/systemd/system/omniroute.service
+/etc/systemd/system/devassist-web.service
 ```
+
+`omniroute.service` and `devassist-web.service` are both `PartOf=devassist.target` and listed in the target's `Wants=` / `After=`. `omniroute.service` is sequenced **before** the five specialist runtimes so the routing layer is up by the time any runtime issues an LLM call; `devassist-web.service` is sequenced **after** all five runtimes so the web surface only renders once per-runtime health endpoints are reachable.
 
 ### 5.1 Umbrella target
 
@@ -149,7 +168,8 @@ WorkingDirectory=/srv/devassist/runtimes/<role>
 Environment=HERMES_HOME=/srv/devassist/runtimes/<role>/.hermes
 Environment=HERMES_DEVASSIST_ROLE=<role>
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
-ExecStart=/usr/local/bin/hermes gateway run
+# ExecStart is role-specific (see § 5.2.1 for the per-role table). Default below is the specialist (non-gateway) runtime.
+ExecStart=/usr/local/bin/hermes run
 Restart=on-failure
 RestartSec=10s
 StartLimitIntervalSec=300
@@ -159,20 +179,148 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/srv/devassist/runtimes/<role> /srv/devassist/state /srv/devassist/logs
 PrivateTmp=true
+# Read-only by default for everything under /srv/devassist; ReadWritePaths below override this carve-out for the runtime's own directory plus shared writable paths.
+ReadOnlyPaths=/srv/devassist
+ReadWritePaths=/srv/devassist/runtimes/<role> /srv/devassist/state /srv/devassist/logs
+# Other runtime directories and the read-only shared assets are explicitly bound read-only as defense-in-depth, even though same-uid DAC alone is acceptable in v0.1.
+BindReadOnlyPaths=/srv/devassist/repo /srv/devassist/shared-skills /srv/devassist/shared-plugins /srv/devassist/releases
 
 [Install]
 WantedBy=devassist.target
 ```
 
-Per-runtime overrides applied by the install script:
+### 5.2.1 Per-Role `ExecStart` And Overrides
 
-- Orchestrator: `ExecStart` runs the gateway in Telegram polling mode; the runtime is the only one that loads the `telegram-gateway` skill.
-- Executor and Reviewer: `Supplementary` group `docker` is added so the Hermes terminal Docker backend can talk to the local Docker socket.
-- Reviewer: read-only mount of the project repo into the Docker terminal sandbox (`HERMES-SKILL-ALLOWLIST.md` § 4.6).
+The template above defaults to the specialist (non-gateway) runtime. The install script renders one unit per role with the following exact `ExecStart` and overrides:
 
-The install script does NOT run `systemctl enable` for any unit by default. Auto-start on reboot is opt-in per `PRD-001.md` § 10 Q13 (default: manual). The Founder enables it later with `systemctl enable devassist.target` if and when desired.
+| Role | `ExecStart` | Other overrides |
+| --- | --- | --- |
+| `orchestrator` | `/usr/local/bin/hermes gateway run` | Loads `telegram-gateway` skill (only runtime that does); `gateway.enabled: true` in `config.yaml`. |
+| `planner` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; no `telegram-gateway` skill loaded. |
+| `architect` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; no `telegram-gateway` skill loaded. |
+| `executor` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; `SupplementaryGroups=docker` so the Hermes terminal Docker backend can reach `/var/run/docker.sock`. |
+| `reviewer` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; `SupplementaryGroups=docker`; Docker sandbox runs with read-only bind of the project repo (`HERMES-SKILL-ALLOWLIST.md` § 4.6). |
+
+`hermes gateway run` and `hermes run` are distinct entry points in Hermes Agent v2026.4.30 (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.6). The specialist runtimes never invoke the gateway entry point and never expose any inbound listener; they are pure tool-using agent loops driven by `dev-assist-work-queue-poll` and `cronjob`. This eliminates the ambiguity flagged in RV-SPEC-011 MAJ-2 about whether `hermes gateway run` would gracefully degrade to a non-gateway worker when `gateway.enabled: false`.
+
+### 5.3 OmniRoute service
+
+The routing layer (ADR-011 v0.1.1) runs as a dedicated systemd unit. It is the seventh unit in the install set (added in v0.2.0):
+
+```
+[Unit]
+Description=OmniRoute v3.7.x routing layer for developer-assistant
+PartOf=devassist.target
+After=network-online.target
+Wants=network-online.target
+Before=devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service
+
+[Service]
+Type=simple
+User=omniroute
+Group=omniroute
+WorkingDirectory=/srv/devassist/omniroute
+EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
+# OmniRoute reads FIREWORKS_API_KEY from its own state DB at /srv/devassist/omniroute/omniroute.db (loaded once at install time);
+# the EnvironmentFile is loaded so OmniRoute can pick up secondary OPENROUTER_API_KEY for backup routing.
+ExecStart=/opt/omniroute/bin/omniroute serve --port 20128 --bind 127.0.0.1 --state-db /srv/devassist/omniroute/omniroute.db
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Sandboxing
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/omniroute
+ReadWritePaths=/srv/devassist/omniroute
+
+[Install]
+WantedBy=devassist.target
+```
+
+Key invariants:
+
+- Bound to `127.0.0.1:20128` (the harmonized port from ADR-011 v0.1.1; supersedes the placeholder `18080` referenced in earlier drafts of MULTI-HERMES-CONTRACT.md and HERMES-SKILL-ALLOWLIST.md). All five specialist runtimes' `config.yaml` set the LLM provider base URL to `http://127.0.0.1:20128`.
+- Runs as a separate Linux user (`omniroute`) so its read/write surface does not include `/srv/devassist/state/operational.db`.
+- Started **before** the five specialist runtimes so the routing layer is up first; the verify script's connectivity invariant set assumes OmniRoute is already responding at `127.0.0.1:20128`.
+- Crash recovery is `Restart=on-failure` with `RestartSec=10s`, matching the per-runtime template. If OmniRoute fails repeatedly past `StartLimitBurst`, the verify script's invariant set fails and the install / upgrade gate aborts.
+- `FIREWORKS_API_KEY` and `OMNIROUTE_API_KEY` live in OmniRoute's own state DB; specialist runtimes never receive `FIREWORKS_API_KEY`, only `OMNIROUTE_API_KEY` (`MODEL-CATALOG.md` v0.2.0 § 4.2). This is the binding precondition recorded in ADR-011 v0.1.1.
+
+### 5.4 Web surface service
+
+The Founder-facing read-only web surface (ADR-013) runs as a dedicated systemd unit. It is the eighth unit in the install set (added in v0.2.0):
+
+```
+[Unit]
+Description=developer-assistant read-only web status surface (dev-assist-cli serve-web)
+PartOf=devassist.target
+After=network-online.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=devassist
+Group=devassist
+WorkingDirectory=/srv/devassist
+Environment=DEVASSIST_OPERATIONAL_DB=/srv/devassist/state/operational.db
+Environment=DEVASSIST_REPO=/srv/devassist/repo
+ExecStart=/opt/dev-assist/bin/dev-assist-cli serve-web --port 8180 --bind 127.0.0.1
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Sandboxing — same posture as specialist runtimes
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/srv/devassist
+ReadWritePaths=/srv/devassist/logs
+# operational.db is opened read-only by serve-web; no ReadWritePaths needed for /srv/devassist/state.
+BindReadOnlyPaths=/srv/devassist/state /srv/devassist/repo /srv/devassist/web
+
+[Install]
+WantedBy=devassist.target
+```
+
+Key invariants:
+
+- Bound to `127.0.0.1:8180` (ADR-013 § Port Assignment And Network Posture). The web surface never opens any other port. The default install does not add a `ufw` rule for port 8180; the Founder explicitly opens external access if and when desired.
+- Read-only at the application layer (no SQLite write paths, no escalation row writes, no LLM calls) and read-only at the systemd layer (`/srv/devassist/state` is bind-mounted read-only for this unit).
+- Sequenced **after** the five specialist runtimes so the per-runtime `GET /health` endpoints (`127.0.0.1:8181..8185`) are reachable when the web surface fans out to them at request time.
+- Crashes are `Restart=on-failure`. A crashed web surface does not block the runtimes; the Founder still has the `dev-assist-cli` operator path and the daily Telegram digest.
+- The unit is part of the same `devassist.target` so `systemctl stop devassist.target` cleanly stops the web surface alongside the runtimes.
+
+### 5.5 journald drop-in
+
+Observability requires journald retention semantics per FR-OBS-09a (`OBSERVABILITY-CONTRACT.md` v0.1.1). The install script writes a single drop-in:
+
+```
+# /etc/systemd/journald.conf.d/dev-assist.conf
+[Journal]
+Storage=persistent
+SystemMaxUse=1G
+SystemMaxFileSize=128M
+MaxRetentionSec=30d
+ForwardToSyslog=no
+```
+
+Key invariants:
+
+- `Storage=persistent` ensures journald writes to `/var/log/journal/<machine-id>/` and survives reboot.
+- `SystemMaxUse=1G` and `MaxRetentionSec=30d` cap disk usage on the small VPS profile.
+- `ForwardToSyslog=no` avoids duplicating logs to `/var/log/syslog` (the operator CLI reads journald directly).
+- The install script runs `systemctl restart systemd-journald` after writing the drop-in. This is the only journald restart the install script triggers.
+- The verify invariant set (§ 8) checks that the drop-in exists and `journalctl --output=json --unit=devassist-* --since="-1 minute"` returns at least one structured line per active unit.
+
+### 5.6 No auto-enable
+
+The install script does NOT run `systemctl enable` for any unit by default — neither for the five specialist runtimes, nor for `omniroute.service`, nor for `devassist-web.service`. Auto-start on reboot is opt-in per `PRD-001.md` § 10 Q13 (default: manual). The Founder enables it later with `systemctl enable devassist.target` (which cascades to all `WantedBy=devassist.target` units) if and when desired.
 
 ## 6. Approval Gates
 
@@ -210,7 +358,7 @@ After start:
 `scripts/upgrade-self.sh` runs the upgrade flow:
 
 1. Records the current release id (target of `/srv/devassist/releases/current`).
-2. Takes a state-store backup (`sqlite3 .backup ...` to `/srv/devassist/state/backups/state-<timestamp>.db`).
+2. Takes a state-store backup (`sqlite3 .backup ...` to `/srv/devassist/state/backups/operational-<timestamp>.db`).
 3. Tarballs the current `runtimes/*/.hermes/{memories,sessions}` and shared-skills, shared-plugins, model catalog, and escalation policy artifacts to `/srv/devassist/state/backups/runtime-state-<timestamp>.tar.gz`.
 4. Fetches the new release into `/srv/devassist/releases/<new-release-id>/`.
 5. Runs `scripts/install-self.sh` against the new release (idempotent; updates Hermes if needed; renders new unit files).
@@ -233,7 +381,7 @@ Per-runtime state preserved:
 
 Shared state preserved:
 
-- `/srv/devassist/state/state.db` (operational store, including `work_items`, `escalations`, project registry, scheduled progress timers, in-flight Hermes run metadata)
+- `/srv/devassist/state/operational.db` (the shared operational store, including `work_items`, `escalations`, project registry, scheduled progress timers, in-flight Hermes run metadata, errors, llm_calls, llm_calls_daily — see `OPERATIONAL-STATE-STORE.md` v0.2.1+)
 - `/srv/devassist/shared-skills/` and `/srv/devassist/shared-plugins/` (the version pinned by the previous release id)
 - `MODEL-CATALOG.md` and `ESCALATION-POLICY.md` (read from the new release; if a Founder-edited override file exists at `/srv/devassist/state/founder-overrides/`, it is preserved).
 
@@ -250,24 +398,29 @@ NOT preserved across rollback (because they belong to the failed release):
 | --- | --- | --- |
 | Telegram reachable | HTTPS GET to `https://api.telegram.org/bot<TOKEN>/getMe` returns `200 OK` | Non-zero exit, log: "Telegram getMe failed" |
 | GitHub PAT valid | HTTPS GET to `https://api.github.com/user` with `Authorization: token <PAT>` returns `200 OK` | Non-zero exit, log: "GitHub PAT invalid" |
-| OmniRoute reachable | HTTPS GET to OmniRoute health endpoint returns `200 OK` | Non-zero exit, log: "OmniRoute unreachable" |
-| State store writable | `sqlite3 /srv/devassist/state/state.db 'PRAGMA quick_check;'` returns `ok` | Non-zero exit, log: "state.db check failed" |
+| OmniRoute reachable | `curl -fs http://127.0.0.1:20128/v1/models` returns `200 OK` and lists all five `MODEL-CATALOG.md` v0.2.0 § 4.1 identifiers | Non-zero exit, log: "OmniRoute model list mismatch" |
+| OmniRoute model probe | TKT-026's `dev-assist-cli probe-omniroute` issues a 1-token completion against `http://127.0.0.1:20128/v1/chat/completions` for each catalog identifier; failure raises `paid:third_party_external_service_not_yet_supported` (ESCALATION-POLICY § 4.6) | Non-zero exit, log: "OmniRoute probe failed for <identifier>" |
+| State store writable | `sqlite3 /srv/devassist/state/operational.db 'PRAGMA quick_check;'` returns `ok` | Non-zero exit, log: "operational.db check failed" |
 | Schema version | Apply migrations idempotently; final schema version equals expected | Non-zero exit, log: "schema version mismatch" |
-| Each unit active | `systemctl is-active devassist-<role>.service` returns `active` for all five | Non-zero exit, log: "<role> unit inactive" |
-| No secrets in journal | `journalctl -u devassist-*` since last verify run scanned for known secret env-var values | Non-zero exit, log: "possible secret leak in journal" (only the env-var name is logged, never the value) |
+| Each runtime unit active | `systemctl is-active devassist-<role>.service` returns `active` for all five | Non-zero exit, log: "<role> unit inactive" |
+| OmniRoute unit active | `systemctl is-active omniroute.service` returns `active` | Non-zero exit, log: "omniroute unit inactive" |
+| Web unit active | `systemctl is-active devassist-web.service` returns `active` AND `curl -fs http://127.0.0.1:8180/health` returns `200 OK` with body `{"role":"web","ok":true}` | Non-zero exit, log: "devassist-web unit inactive" or "web /health probe failed" |
+| Per-runtime health endpoints | `curl -fs http://127.0.0.1:8181/health` ... `http://127.0.0.1:8185/health` each returns `200 OK` with `{"role":"<role>","ok":true}` (`OBSERVABILITY-CONTRACT.md` v0.1.1 § 11) | Non-zero exit, log: "<role> /health probe failed" |
+| journald retention configured | `/etc/systemd/journald.conf.d/dev-assist.conf` exists with `SystemMaxUse=1G` and `MaxRetentionSec=30d` (FR-OBS-09a, c) | Non-zero exit, log: "journald drop-in missing or misconfigured" |
+| No secrets in journal | `journalctl -u devassist-* -u omniroute -u devassist-web` since last verify run scanned for known secret env-var values | Non-zero exit, log: "possible secret leak in journal" (only the env-var name is logged, never the value) |
 
 The verify script must produce a human-readable summary at the end:
 
 ```
-verify-self: PASS  (7/7 invariants)
+verify-self: PASS  (12/12 invariants)
 ```
 
 or
 
 ```
-verify-self: FAIL  (5/7 invariants)
+verify-self: FAIL  (10/12 invariants)
   - Telegram reachable: FAIL
-  - reviewer unit inactive: FAIL
+  - devassist-web unit inactive: FAIL
   See /srv/devassist/logs/self-deploy.log for details.
 ```
 
@@ -278,8 +431,8 @@ The verify script must NOT print secret values in any failure path. Failure mess
 `scripts/rollback-self.sh`:
 
 1. Stops `devassist.target` (graceful: SIGTERM with 30-second deadline, then SIGKILL).
-2. Identifies the most recent state-store backup under `/srv/devassist/state/backups/`. Aborts with non-zero exit if no backup exists.
-3. Restores `state.db` from that backup (atomic: copies to `state.db.new`, fsyncs, renames).
+2. Identifies the most recent state-store backup under `/srv/devassist/state/backups/` (file pattern `operational-<timestamp>.db`). Aborts with non-zero exit if no backup exists.
+3. Restores `operational.db` from that backup (atomic: copies to `operational.db.new`, fsyncs, renames).
 4. Identifies the corresponding runtime-state backup tarball; restores `memories/`, `sessions/`, `cron/` per runtime.
 5. Flips `releases/current` symlink back to the target of `releases/previous`.
 6. Runs `systemctl daemon-reload`.
@@ -304,14 +457,30 @@ Required env vars (the file must define all of these; missing values fail verify
 
 | Env var | Source | Used by |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | @BotFather | Orchestrator runtime |
-| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime |
+| `TELEGRAM_BOT_TOKEN` | @BotFather | Orchestrator runtime only (§ 10.1) |
+| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime only |
 | `GITHUB_TOKEN` | Founder PAT or GitHub App token | Executor runtime |
 | `OMNIROUTE_API_KEY` | OmniRoute | All runtimes |
 | `OPENROUTER_API_KEY` | OpenRouter (backup) | All runtimes; fallback chain |
 | `HERMES_DEVASSIST_REPO_URL` | Founder | All runtimes (clone target for the project repo) |
 | `HERMES_DEVASSIST_REPO_BRANCH` | Founder, default `main` | All runtimes |
-| `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` | Founder | Orchestrator runtime (escalation surface) |
+| `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` | Founder | Orchestrator runtime only (escalation surface) |
+
+### 10.1 Secret-Segregation Pattern (defense in depth)
+
+All five units load the same `EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env` because it is operationally simpler than rendering five different env files. The secret-segregation guarantee comes from **config-level skill loadout, not env-level segregation**:
+
+- `TELEGRAM_BOT_TOKEN` is technically present in every runtime's environment, but only the Orchestrator's `config.yaml` enables `gateway.enabled: true` and loads the `telegram-gateway` skill (`MULTI-HERMES-CONTRACT.md` § 4, § 5.1). A specialist runtime cannot reach the Telegram API because no skill in its loadout knows how to use the token.
+- `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` is similarly available everywhere but consumed only by the Orchestrator's escalation-surface skill.
+- `GITHUB_TOKEN` is consumed only by the Executor runtime's `dev-assist-github-workflow` skill; no other runtime loads that skill.
+
+This is **not** equivalent to env-level segregation: a compromised specialist runtime that could call arbitrary Python or arbitrary HTTP could still read its own environment and reach Telegram or GitHub. Defense-in-depth is provided by:
+
+- The `HERMES-SKILL-ALLOWLIST.md` deny-by-default policy: every runtime's `config.yaml` lists exactly the skills in `MULTI-HERMES-CONTRACT.md` § 5; new tool calls outside that loadout fail at Hermes' approval-policy hook.
+- The `dev-assist-escalation-policy` plugin's deterministic rule blocking arbitrary outbound HTTP from non-Orchestrator runtimes (`ESCALATION-POLICY.md` § 4).
+- The systemd unit's `BindReadOnlyPaths=` and `ReadOnlyPaths=` (§ 5.2) preventing cross-runtime config tampering at the filesystem layer.
+
+TKT-021 includes a startup config-level check that, for non-Orchestrator runtimes, asserts the `telegram-gateway` skill is **not** in the loaded set; mismatch is a fatal-startup error.
 
 Forbidden patterns:
 
@@ -326,7 +495,7 @@ Forbidden patterns:
 | --- | --- | --- |
 | Hermes install fails mid-way | `install-self.sh` non-zero exit | Re-run install (idempotent); if the partial install is unrecoverable, run `rollback-self.sh` |
 | One runtime unit fails to start | `verify-self.sh` invariant fails | Inspect `journalctl -u devassist-<role>.service`; fix root cause; `systemctl restart devassist-<role>.service` |
-| State store corruption | `verify-self.sh` schema/quick_check fails | Run `rollback-self.sh` to restore last good `state.db` |
+| State store corruption | `verify-self.sh` schema/quick_check fails | Run `rollback-self.sh` to restore last good `operational.db` |
 | Secret missing or rotated | Verify connectivity invariant fails for Telegram/GitHub/OmniRoute | Update `/srv/devassist/secrets/SELF-DEPLOY.env`; restart affected unit; re-run verify |
 | Upgrade verify fails after staging | `upgrade-self.sh` step 6 returns non-zero | Script stops at activation gate; Founder runs `rollback-self.sh` to restore the previous release |
 | Founder rejects upgrade activation | Founder does not run `--activate` | The new release stays staged; `releases/current` still points at the previous release; Founder may inspect `/srv/devassist/releases/<new-release-id>/` and `state-<timestamp>.db` backup at leisure |
@@ -348,10 +517,16 @@ Implementation is split into TKT-020 (bootstrap, systemd, install/verify/rollbac
 ## 13. Cross-References
 
 - `PRD-001.md` v0.2.1 § 12, § 12.5, § 13 (product mandate)
-- `ARCH-001.md` v0.3.0 § 14 (architectural shape)
+- `ARCH-001.md` v0.3.0 § 14 (architectural shape), § 23 (observability summary), § 24 (web interface architecture)
 - `MULTI-HERMES-CONTRACT.md` (per-runtime layout)
-- `OPERATIONAL-STATE-STORE.md` v0.2.0 (state.db schema baseline)
+- `OPERATIONAL-STATE-STORE.md` v0.3.0 (operational.db schema including `work_items`, `escalations`, `errors`, `llm_calls`, `llm_calls_daily`)
+- `OBSERVABILITY-CONTRACT.md` v0.1.1 § 11 (per-runtime health endpoints; ports 8181..8185), § 14 (ObservabilityManager), FR-OBS-09a/b/c (journald + SQLite retention)
+- `MODEL-CATALOG.md` v0.2.0 § 4.1 (catalog identifiers probed at install) and § 4.2 (FIREWORKS_API_KEY in OmniRoute state DB only)
+- `ESCALATION-POLICY.md` v0.1.1 § 4.5 (`net:public_endpoint_exposure` deterministic rule), § 4.6 (paid third-party gate)
 - `GENERATED-PROJECT-DEPLOYMENT-CONTRACT.md` v0.1.0 (distinct surface)
 - `HERMES-SKILL-ALLOWLIST.md` v0.1.0 § 3 (Hermes version pin, deployment assumptions)
 - `docs/architecture/adr/ADR-004-deployment-mechanism.md` (alternatives considered)
-- `docs/tickets/TKT-020.md` (implementation)
+- `docs/architecture/adr/ADR-010-observability-shape.md` (observability shape; `dev-assist-cli` and journald)
+- `docs/architecture/adr/ADR-011-routing-layer.md` (OmniRoute as the seventh unit; binding to 127.0.0.1:20128)
+- `docs/architecture/adr/ADR-013-web-interface.md` (web surface as the eighth unit; binding to 127.0.0.1:8180)
+- `docs/tickets/TKT-020.md` (install/verify/rollback bootstrap), `docs/tickets/TKT-026.md` (model-probe CLI used by the OmniRoute model-probe invariant), `docs/tickets/TKT-027.md` (`dev-assist-cli` and `serve-web` subcommand), `docs/tickets/TKT-031.md` (per-runtime `GET /health` endpoints)

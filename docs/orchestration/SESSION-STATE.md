@@ -1,6 +1,6 @@
 ---
 id: SESSION-STATE
-version: 0.1.0
+version: 0.1.1
 status: active
 updated: 2026-05-06
 ---
@@ -65,7 +65,7 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - Operational state backend default: SQLite on VPS unless Hermes native persistence is proven sufficient.
 - Security-sensitive data exists because the system may handle GitHub PATs, LLM API keys, repository access, and VPS credentials.
 - Telegram interaction model: hybrid commands plus free-form classification.
-- Lightweight web interface is deferred until Telegram works.
+- ~~Lightweight web interface is deferred until Telegram works.~~ Superseded 2026-05-06 by ADR-013 (`docs/architecture/adr/ADR-013-web-interface.md`): `PRD-001.md` v0.2.1 § 6 is met in v0.1 by a read-only `dev-assist-cli serve-web` HTTP surface on `127.0.0.1:8180`, with Founder access via SSH tunnel. No new daemon, no new framework, no auth at the application layer; lifecycle as the eighth systemd unit `devassist-web.service` (`SELF-DEPLOYMENT-CONTRACT.md` v0.2.0 § 5.4).
 - Merge policy for v0.1: always ask founder after CI and Reviewer pass.
 - Generated project VPS deployment contract: one-command `make deploy` or equivalent; final live execution requires founder approval.
 - Hermes Telegram gateway source review passed with constraints for production `TELEGRAM_BOT_TOKEN` use.
