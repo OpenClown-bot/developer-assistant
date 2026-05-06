@@ -1,6 +1,6 @@
 ---
 id: SELF-DEPLOYMENT-CONTRACT
-version: 0.1.0
+version: 0.1.1
 status: draft
 ---
 
@@ -18,7 +18,7 @@ In scope for v0.1:
 
 - One-command **install** that lays down the multi-Hermes runtime layout, installs the Hermes Agent foundation once, configures five per-runtime `HERMES_HOME` directories, renders systemd unit templates, runs preflight checks, and stops without starting any runtime.
 - One-command **verify** that runs the connectivity-only health invariant set and returns non-zero on failure.
-- One-command **rollback** that restores the last `state.db` backup and the last known-good runtime config tarball, then restarts units that were running prior to rollback.
+- One-command **rollback** that restores the last `operational.db` backup (the shared operational store) and the last known-good runtime config tarball, then restarts units that were running prior to rollback.
 - One-command **upgrade** that takes a state-store backup, fetches the new release, runs install in-place, runs verify, and surfaces a Founder approval prompt before activating units running the new version.
 - Three approval gates per `PRD-001.md` § 12.5: `install` (no approval), `start` (explicit Founder approval), `upgrade` (explicit Founder approval AND a state-store backup).
 - A single secrets file (`/srv/devassist/secrets/SELF-DEPLOY.env`) the install script reads and the systemd units load via `EnvironmentFile=`.
@@ -65,7 +65,8 @@ The install script lays down this layout. All paths are owned by the `devassist`
 │   │       ├── SOUL.md
 │   │       ├── memories/{MEMORY.md, USER.md}
 │   │       ├── sessions/
-│   │       ├── state.db -> /srv/devassist/state/state.db        (symlink)
+│   │       ├── state.db                                       # Hermes native sessions index (per-runtime, NOT a symlink)
+│   │       ├── operational.db -> /srv/devassist/state/operational.db  (symlink to shared operational store)
 │   │       ├── cron/
 │   │       ├── logs/
 │   │       └── skills/                        # per-runtime skills (mostly built-in references)
@@ -93,9 +94,9 @@ The install script lays down this layout. All paths are owned by the `devassist`
 │   ├── dev-assist-escalation-policy/
 │   └── dev-assist-work-queue/
 ├── state/
-│   ├── state.db                               # the SQLite operational store; mode 0640
+│   ├── operational.db                         # the SQLite operational store (shared by all five runtimes); mode 0640
 │   └── backups/                               # rotating snapshots; mode 0700
-│       └── state-YYYYMMDD-HHMMSS.db
+│       └── operational-YYYYMMDD-HHMMSS.db
 ├── secrets/
 │   └── SELF-DEPLOY.env                        # mode 0600, owner devassist:devassist
 ├── releases/
@@ -108,9 +109,10 @@ The install script lays down this layout. All paths are owned by the `devassist`
 
 Notes:
 
-- Per-runtime `HERMES_HOME` directories share the SQLite operational store via the symlink to `/srv/devassist/state/state.db`. This is the explicit mechanism that lets all five runtimes see the same `work_items` and `escalations` tables (`MULTI-HERMES-CONTRACT.md` § 6).
-- The `.env` symlink to `/srv/devassist/secrets/SELF-DEPLOY.env` makes each runtime see the same secret values (Telegram bot token, GitHub PAT, OmniRoute API key, etc.) without duplicating the secrets file.
-- Per-runtime `memories/`, `sessions/`, `cron/`, and `logs/` directories are NOT shared. Memory isolation between runtimes is physical per `ARCH-001.md` § 11.1.
+- Per-runtime `HERMES_HOME` directories share the SQLite operational store via the symlink `operational.db -> /srv/devassist/state/operational.db`. This is the explicit mechanism that lets all five runtimes see the same `work_items` and `escalations` tables (`MULTI-HERMES-CONTRACT.md` § 6, `OPERATIONAL-STATE-STORE.md` v0.2.1).
+- The per-runtime `state.db` (Hermes' native sessions index, FTS5 over JSONL transcripts) is **not** a symlink and **not** shared. It lives inside each runtime's `HERMES_HOME` directory and is owned by the Hermes runtime itself (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.5). The `state.db` and `operational.db` filename-distinction prevents the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1.
+- The `.env` symlink to `/srv/devassist/secrets/SELF-DEPLOY.env` makes each runtime see the same secret values (Telegram bot token, GitHub PAT, OmniRoute API key, etc.) without duplicating the secrets file. Although all five units load the same env file, only the Orchestrator's `config.yaml` enables `gateway.enabled: true` and loads the `telegram-gateway` skill, so non-Orchestrator runtimes cannot reach the Telegram API even though `TELEGRAM_BOT_TOKEN` is present in their environment. § 10 elaborates on this defense-in-depth pattern.
+- Per-runtime `memories/`, `sessions/`, `cron/`, and `logs/` directories are NOT shared. Memory isolation between runtimes is **filesystem-level**: enforced by distinct `HERMES_HOME` paths plus the systemd sandbox directives in § 5.2 (`ProtectHome=`, `ReadOnlyPaths=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`). All five runtimes share the `devassist` Linux uid; the isolation is conditional on correct systemd unit configuration (`ARCH-001.md` § 11.1).
 - The `releases/current` symlink is the activation surface. Upgrade flips it from the previous release to the new one **only** after the Founder approves.
 
 ## 5. systemd Units
@@ -149,7 +151,8 @@ WorkingDirectory=/srv/devassist/runtimes/<role>
 Environment=HERMES_HOME=/srv/devassist/runtimes/<role>/.hermes
 Environment=HERMES_DEVASSIST_ROLE=<role>
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
-ExecStart=/usr/local/bin/hermes gateway run
+# ExecStart is role-specific (see § 5.2.1 for the per-role table). Default below is the specialist (non-gateway) runtime.
+ExecStart=/usr/local/bin/hermes run
 Restart=on-failure
 RestartSec=10s
 StartLimitIntervalSec=300
@@ -159,18 +162,30 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/srv/devassist/runtimes/<role> /srv/devassist/state /srv/devassist/logs
 PrivateTmp=true
+# Read-only by default for everything under /srv/devassist; ReadWritePaths below override this carve-out for the runtime's own directory plus shared writable paths.
+ReadOnlyPaths=/srv/devassist
+ReadWritePaths=/srv/devassist/runtimes/<role> /srv/devassist/state /srv/devassist/logs
+# Other runtime directories and the read-only shared assets are explicitly bound read-only as defense-in-depth, even though same-uid DAC alone is acceptable in v0.1.
+BindReadOnlyPaths=/srv/devassist/repo /srv/devassist/shared-skills /srv/devassist/shared-plugins /srv/devassist/releases
 
 [Install]
 WantedBy=devassist.target
 ```
 
-Per-runtime overrides applied by the install script:
+### 5.2.1 Per-Role `ExecStart` And Overrides
 
-- Orchestrator: `ExecStart` runs the gateway in Telegram polling mode; the runtime is the only one that loads the `telegram-gateway` skill.
-- Executor and Reviewer: `Supplementary` group `docker` is added so the Hermes terminal Docker backend can talk to the local Docker socket.
-- Reviewer: read-only mount of the project repo into the Docker terminal sandbox (`HERMES-SKILL-ALLOWLIST.md` § 4.6).
+The template above defaults to the specialist (non-gateway) runtime. The install script renders one unit per role with the following exact `ExecStart` and overrides:
+
+| Role | `ExecStart` | Other overrides |
+| --- | --- | --- |
+| `orchestrator` | `/usr/local/bin/hermes gateway run` | Loads `telegram-gateway` skill (only runtime that does); `gateway.enabled: true` in `config.yaml`. |
+| `planner` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; no `telegram-gateway` skill loaded. |
+| `architect` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; no `telegram-gateway` skill loaded. |
+| `executor` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; `SupplementaryGroups=docker` so the Hermes terminal Docker backend can reach `/var/run/docker.sock`. |
+| `reviewer` | `/usr/local/bin/hermes run` | `gateway.enabled: false`; `SupplementaryGroups=docker`; Docker sandbox runs with read-only bind of the project repo (`HERMES-SKILL-ALLOWLIST.md` § 4.6). |
+
+`hermes gateway run` and `hermes run` are distinct entry points in Hermes Agent v2026.4.30 (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.6). The specialist runtimes never invoke the gateway entry point and never expose any inbound listener; they are pure tool-using agent loops driven by `dev-assist-work-queue-poll` and `cronjob`. This eliminates the ambiguity flagged in RV-SPEC-011 MAJ-2 about whether `hermes gateway run` would gracefully degrade to a non-gateway worker when `gateway.enabled: false`.
 
 The install script does NOT run `systemctl enable` for any unit by default. Auto-start on reboot is opt-in per `PRD-001.md` § 10 Q13 (default: manual). The Founder enables it later with `systemctl enable devassist.target` if and when desired.
 
@@ -210,7 +225,7 @@ After start:
 `scripts/upgrade-self.sh` runs the upgrade flow:
 
 1. Records the current release id (target of `/srv/devassist/releases/current`).
-2. Takes a state-store backup (`sqlite3 .backup ...` to `/srv/devassist/state/backups/state-<timestamp>.db`).
+2. Takes a state-store backup (`sqlite3 .backup ...` to `/srv/devassist/state/backups/operational-<timestamp>.db`).
 3. Tarballs the current `runtimes/*/.hermes/{memories,sessions}` and shared-skills, shared-plugins, model catalog, and escalation policy artifacts to `/srv/devassist/state/backups/runtime-state-<timestamp>.tar.gz`.
 4. Fetches the new release into `/srv/devassist/releases/<new-release-id>/`.
 5. Runs `scripts/install-self.sh` against the new release (idempotent; updates Hermes if needed; renders new unit files).
@@ -233,7 +248,7 @@ Per-runtime state preserved:
 
 Shared state preserved:
 
-- `/srv/devassist/state/state.db` (operational store, including `work_items`, `escalations`, project registry, scheduled progress timers, in-flight Hermes run metadata)
+- `/srv/devassist/state/operational.db` (the shared operational store, including `work_items`, `escalations`, project registry, scheduled progress timers, in-flight Hermes run metadata, errors, llm_calls, llm_calls_daily — see `OPERATIONAL-STATE-STORE.md` v0.2.1+)
 - `/srv/devassist/shared-skills/` and `/srv/devassist/shared-plugins/` (the version pinned by the previous release id)
 - `MODEL-CATALOG.md` and `ESCALATION-POLICY.md` (read from the new release; if a Founder-edited override file exists at `/srv/devassist/state/founder-overrides/`, it is preserved).
 
@@ -251,7 +266,7 @@ NOT preserved across rollback (because they belong to the failed release):
 | Telegram reachable | HTTPS GET to `https://api.telegram.org/bot<TOKEN>/getMe` returns `200 OK` | Non-zero exit, log: "Telegram getMe failed" |
 | GitHub PAT valid | HTTPS GET to `https://api.github.com/user` with `Authorization: token <PAT>` returns `200 OK` | Non-zero exit, log: "GitHub PAT invalid" |
 | OmniRoute reachable | HTTPS GET to OmniRoute health endpoint returns `200 OK` | Non-zero exit, log: "OmniRoute unreachable" |
-| State store writable | `sqlite3 /srv/devassist/state/state.db 'PRAGMA quick_check;'` returns `ok` | Non-zero exit, log: "state.db check failed" |
+| State store writable | `sqlite3 /srv/devassist/state/operational.db 'PRAGMA quick_check;'` returns `ok` | Non-zero exit, log: "operational.db check failed" |
 | Schema version | Apply migrations idempotently; final schema version equals expected | Non-zero exit, log: "schema version mismatch" |
 | Each unit active | `systemctl is-active devassist-<role>.service` returns `active` for all five | Non-zero exit, log: "<role> unit inactive" |
 | No secrets in journal | `journalctl -u devassist-*` since last verify run scanned for known secret env-var values | Non-zero exit, log: "possible secret leak in journal" (only the env-var name is logged, never the value) |
@@ -278,8 +293,8 @@ The verify script must NOT print secret values in any failure path. Failure mess
 `scripts/rollback-self.sh`:
 
 1. Stops `devassist.target` (graceful: SIGTERM with 30-second deadline, then SIGKILL).
-2. Identifies the most recent state-store backup under `/srv/devassist/state/backups/`. Aborts with non-zero exit if no backup exists.
-3. Restores `state.db` from that backup (atomic: copies to `state.db.new`, fsyncs, renames).
+2. Identifies the most recent state-store backup under `/srv/devassist/state/backups/` (file pattern `operational-<timestamp>.db`). Aborts with non-zero exit if no backup exists.
+3. Restores `operational.db` from that backup (atomic: copies to `operational.db.new`, fsyncs, renames).
 4. Identifies the corresponding runtime-state backup tarball; restores `memories/`, `sessions/`, `cron/` per runtime.
 5. Flips `releases/current` symlink back to the target of `releases/previous`.
 6. Runs `systemctl daemon-reload`.
@@ -304,14 +319,30 @@ Required env vars (the file must define all of these; missing values fail verify
 
 | Env var | Source | Used by |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | @BotFather | Orchestrator runtime |
-| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime |
+| `TELEGRAM_BOT_TOKEN` | @BotFather | Orchestrator runtime only (§ 10.1) |
+| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime only |
 | `GITHUB_TOKEN` | Founder PAT or GitHub App token | Executor runtime |
 | `OMNIROUTE_API_KEY` | OmniRoute | All runtimes |
 | `OPENROUTER_API_KEY` | OpenRouter (backup) | All runtimes; fallback chain |
 | `HERMES_DEVASSIST_REPO_URL` | Founder | All runtimes (clone target for the project repo) |
 | `HERMES_DEVASSIST_REPO_BRANCH` | Founder, default `main` | All runtimes |
-| `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` | Founder | Orchestrator runtime (escalation surface) |
+| `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` | Founder | Orchestrator runtime only (escalation surface) |
+
+### 10.1 Secret-Segregation Pattern (defense in depth)
+
+All five units load the same `EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env` because it is operationally simpler than rendering five different env files. The secret-segregation guarantee comes from **config-level skill loadout, not env-level segregation**:
+
+- `TELEGRAM_BOT_TOKEN` is technically present in every runtime's environment, but only the Orchestrator's `config.yaml` enables `gateway.enabled: true` and loads the `telegram-gateway` skill (`MULTI-HERMES-CONTRACT.md` § 4, § 5.1). A specialist runtime cannot reach the Telegram API because no skill in its loadout knows how to use the token.
+- `DEVASSIST_FOUNDER_TELEGRAM_USER_ID` is similarly available everywhere but consumed only by the Orchestrator's escalation-surface skill.
+- `GITHUB_TOKEN` is consumed only by the Executor runtime's `dev-assist-github-workflow` skill; no other runtime loads that skill.
+
+This is **not** equivalent to env-level segregation: a compromised specialist runtime that could call arbitrary Python or arbitrary HTTP could still read its own environment and reach Telegram or GitHub. Defense-in-depth is provided by:
+
+- The `HERMES-SKILL-ALLOWLIST.md` deny-by-default policy: every runtime's `config.yaml` lists exactly the skills in `MULTI-HERMES-CONTRACT.md` § 5; new tool calls outside that loadout fail at Hermes' approval-policy hook.
+- The `dev-assist-escalation-policy` plugin's deterministic rule blocking arbitrary outbound HTTP from non-Orchestrator runtimes (`ESCALATION-POLICY.md` § 4).
+- The systemd unit's `BindReadOnlyPaths=` and `ReadOnlyPaths=` (§ 5.2) preventing cross-runtime config tampering at the filesystem layer.
+
+TKT-021 includes a startup config-level check that, for non-Orchestrator runtimes, asserts the `telegram-gateway` skill is **not** in the loaded set; mismatch is a fatal-startup error.
 
 Forbidden patterns:
 
@@ -326,7 +357,7 @@ Forbidden patterns:
 | --- | --- | --- |
 | Hermes install fails mid-way | `install-self.sh` non-zero exit | Re-run install (idempotent); if the partial install is unrecoverable, run `rollback-self.sh` |
 | One runtime unit fails to start | `verify-self.sh` invariant fails | Inspect `journalctl -u devassist-<role>.service`; fix root cause; `systemctl restart devassist-<role>.service` |
-| State store corruption | `verify-self.sh` schema/quick_check fails | Run `rollback-self.sh` to restore last good `state.db` |
+| State store corruption | `verify-self.sh` schema/quick_check fails | Run `rollback-self.sh` to restore last good `operational.db` |
 | Secret missing or rotated | Verify connectivity invariant fails for Telegram/GitHub/OmniRoute | Update `/srv/devassist/secrets/SELF-DEPLOY.env`; restart affected unit; re-run verify |
 | Upgrade verify fails after staging | `upgrade-self.sh` step 6 returns non-zero | Script stops at activation gate; Founder runs `rollback-self.sh` to restore the previous release |
 | Founder rejects upgrade activation | Founder does not run `--activate` | The new release stays staged; `releases/current` still points at the previous release; Founder may inspect `/srv/devassist/releases/<new-release-id>/` and `state-<timestamp>.db` backup at leisure |
@@ -350,7 +381,7 @@ Implementation is split into TKT-020 (bootstrap, systemd, install/verify/rollbac
 - `PRD-001.md` v0.2.1 § 12, § 12.5, § 13 (product mandate)
 - `ARCH-001.md` v0.3.0 § 14 (architectural shape)
 - `MULTI-HERMES-CONTRACT.md` (per-runtime layout)
-- `OPERATIONAL-STATE-STORE.md` v0.2.0 (state.db schema baseline)
+- `OPERATIONAL-STATE-STORE.md` v0.2.1 (operational.db schema baseline including `work_items` and `escalations`)
 - `GENERATED-PROJECT-DEPLOYMENT-CONTRACT.md` v0.1.0 (distinct surface)
 - `HERMES-SKILL-ALLOWLIST.md` v0.1.0 § 3 (Hermes version pin, deployment assumptions)
 - `docs/architecture/adr/ADR-004-deployment-mechanism.md` (alternatives considered)
