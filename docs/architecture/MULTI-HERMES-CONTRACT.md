@@ -1,6 +1,6 @@
 ---
 id: MULTI-HERMES-CONTRACT
-version: 0.1.1
+version: 0.1.0
 status: draft
 ---
 
@@ -16,7 +16,7 @@ The contract is a boundary specification: it states what each runtime is, what c
 
 `PRD-001.md` § 13.2 mandates that each specialist role runs as its own full Hermes runtime with its own memory and self-learning state. The research record (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.2) established that one Hermes installation is one OS-level process: there is no native mechanism for running multiple specialist runtimes inside a single Hermes installation with isolated memory.
 
-Therefore the multi-Hermes mandate is implemented as **five separate Hermes installations** under `/srv/devassist/runtimes/<role>/.hermes/`, supervised by systemd (ADR-005). Each installation has its own `MEMORY.md`, `USER.md`, sessions database, cron jobs, skills directory, and config — **filesystem-level** isolation enforced by distinct `HERMES_HOME` paths plus the systemd sandbox directives in `SELF-DEPLOYMENT-CONTRACT.md` § 5.2 (`ProtectHome=`, `ReadOnlyPaths=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`). All five runtimes share the `devassist` Linux uid; the isolation is conditional on correct systemd unit configuration. v0.1's single-Founder threat model accepts the shared-uid limitation.
+Therefore the multi-Hermes mandate is implemented as **five separate Hermes installations** under `/srv/devassist/runtimes/<role>/.hermes/`, supervised by systemd (ADR-005). Each installation has its own `MEMORY.md`, `USER.md`, sessions database, cron jobs, skills directory, and config — physical isolation, not a custom memory broker.
 
 The five roles map 1:1 to the existing role prompts under `docs/prompts/`:
 
@@ -51,47 +51,11 @@ Each `runtimes/<role>/.hermes/config.yaml` carries:
 - `cron.enabled`: `true` for all five runtimes.
 - `memory.path`: `/srv/devassist/runtimes/<role>/.hermes/memories/` (default Hermes layout).
 - `sessions.path`: `/srv/devassist/runtimes/<role>/.hermes/sessions/`.
-- `operational_db.path`: `/srv/devassist/runtimes/<role>/.hermes/operational.db` (the symlink target points to `/srv/devassist/state/operational.db`, the **shared** operational store).
-
-The per-runtime Hermes native sessions index lives at `/srv/devassist/runtimes/<role>/.hermes/state.db` and is **not** shared and **not** a symlink — each runtime owns its own sessions index. The `state.db`/`operational.db` filename split eliminates the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1.
-
-The `ExecStart` for each runtime is specified in `SELF-DEPLOYMENT-CONTRACT.md` § 5.2.1: only the Orchestrator runs `hermes gateway run`; the other four runtimes run `hermes run` (no gateway, no inbound listener).
+- `state_db.path`: `/srv/devassist/state/state.db` (the symlink target shared by all five).
 
 Per-runtime `.env` is the symlink to `/srv/devassist/secrets/SELF-DEPLOY.env`. Per-runtime `auth.json` and `SOUL.md` are unique to each runtime and not shared.
 
 ## 5. Skills Loadout Per Role
-
-The per-role loadout below is the authoritative list of Hermes built-in skills, custom `dev-assist-*` skills, and Hermes plugins that may be loaded by each runtime. Anything outside this list is denied at config-validation time (`HERMES-SKILL-ALLOWLIST.md` § 4 deny-by-default policy).
-
-### 5.0 Custom dev-assist-* skill allowlist (extends `HERMES-SKILL-ALLOWLIST.md` § 4)
-
-The 14 custom skills referenced below are project-local skills built and reviewed inside this repository (write zone: `docs/architecture/shared-skills/` for SKILL.md authorship; the runtime tree under `/srv/devassist/shared-skills/` is the install destination). Per `HERMES-SKILL-ALLOWLIST.md` § 6 ("Project-Local Plugin Policy"), `HERMES_ENABLE_PROJECT_PLUGINS` remains `false`; these custom skills are **skills**, not plugins, and ship as content inside `/srv/devassist/shared-skills/` referenced by `skills.external_dirs`.
-
-Each custom skill must satisfy the standard allowlist fields (Name, Source URL, Version/commit, Purpose, Required credentials, Permission scope, Source review result, Sandbox mode, Dangerous operations, Rollback procedure). Until `HERMES-SKILL-ALLOWLIST.md` is updated to include each of these (TKT-021 follow-up), this contract serves as the authoritative stub:
-
-| Custom skill name | Loaded by | Source location | Version pin | Purpose | Source review status |
-| --- | --- | --- | --- | --- | --- |
-| `dev-assist-classifier` | Orchestrator | `shared-skills/dev-assist-classifier/` in this repo | git commit at release tag | Classify Telegram messages as: founder-approval response, new project intake, status query, or escalation reply | unreviewed (TKT-025 produces; TKT-021 reviews) |
-| `dev-assist-progress-report` | Orchestrator | `shared-skills/dev-assist-progress-report/` | git commit | Compose 30-60 minute progress reports from `work_items` and `escalations` rows; deliver via Telegram | unreviewed |
-| `dev-assist-escalation-surface` | Orchestrator | `shared-skills/dev-assist-escalation-surface/` | git commit | Read pending `escalations` rows, format Russian Telegram message with Founder approval prompt, mark surfaced | unreviewed |
-| `dev-assist-work-queue-write` | Orchestrator | `shared-skills/dev-assist-work-queue-write/` | git commit | Insert rows into `work_items` table on the Orchestrator only | unreviewed |
-| `dev-assist-work-queue-poll` | Planner, Architect, Executor, Reviewer | `shared-skills/dev-assist-work-queue-poll/` | git commit | Claim/complete/release `work_items` rows for the runtime's role | unreviewed |
-| `dev-assist-prd-writer` | Planner | `shared-skills/dev-assist-prd-writer/` | git commit | Compose PRD artifacts in `docs/prd/` | unreviewed |
-| `dev-assist-questions-writer` | Planner | `shared-skills/dev-assist-questions-writer/` | git commit | Compose question artifacts in `docs/questions/` | unreviewed |
-| `dev-assist-arch-writer` | Architect | `shared-skills/dev-assist-arch-writer/` | git commit | Compose ARCH-001 and contracts in `docs/architecture/` | unreviewed |
-| `dev-assist-adr-writer` | Architect | `shared-skills/dev-assist-adr-writer/` | git commit | Compose ADR artifacts in `docs/architecture/adr/` | unreviewed |
-| `dev-assist-tickets-writer` | Architect | `shared-skills/dev-assist-tickets-writer/` | git commit | Compose ticket Sections 1-9 in `docs/tickets/` | unreviewed |
-| `dev-assist-executor-discipline` | Executor | `shared-skills/dev-assist-executor-discipline/` | git commit | Encodes Executor role rules: one ticket per PR, no scope creep, all CI green | unreviewed |
-| `dev-assist-write-zone-enforcer` | Executor | `shared-skills/dev-assist-write-zone-enforcer/` | git commit | Pre-write hook denying file writes outside the ticket's allowed write zones | unreviewed |
-| `dev-assist-github-workflow` | Executor | `shared-skills/dev-assist-github-workflow/` | git commit | Wraps the project's reviewed REST API + git orchestration code (`HERMES-RUNTIME-CONTRACT.md` § 9) | unreviewed |
-| `dev-assist-reviewer-rubric` | Reviewer | `shared-skills/dev-assist-reviewer-rubric/` | git commit | Encodes RV-SPEC and RV-CODE rubric; emits one of `pass`, `pass_with_changes`, `pass_with_recommendations`, `fail` | unreviewed |
-| `dev-assist-review-writer` | Reviewer | `shared-skills/dev-assist-review-writer/` | git commit | Compose review artifacts in `docs/reviews/` | unreviewed |
-
-Version pins resolve to a specific git commit at `releases/<release-id>/` activation time (`SELF-DEPLOYMENT-CONTRACT.md` § 4). Source review (§ review-status column) is a TKT-021 acceptance criterion: each skill's `SKILL.md` plus any associated config must be reviewed against `HERMES-SKILL-ALLOWLIST.md` § 4 fields before the runtime is allowed to start in production.
-
-The two custom Hermes plugins (`dev-assist-escalation-policy`, `dev-assist-work-queue`) are listed in § 5.6.
-
-### 5.0.1 Per-Role Loadout Tables
 
 The full per-role loadout. Each runtime's `config.yaml` enables only the listed Hermes built-in skills/toolsets and loads the listed custom skills via `skills.external_dirs`. Plugins are listed separately in § 5.6.
 
@@ -156,15 +120,15 @@ Both plugins are Python packages installed once into each runtime's pip environm
 
 ## 6. SQLite Operational Store Schema (Multi-Hermes Additions)
 
-This section sketches the two new tables required by the multi-Hermes IPC layer (ADR-006). **The authoritative schema definition is `OPERATIONAL-STATE-STORE.md` v0.2.1 § 3.5 (work_items) and § 3.6 (escalations).** This section is kept for narrative continuity (claim/lease semantics, resolution semantics) but the column/type/constraint detail is now owned by OPERATIONAL-STATE-STORE so a single document is the schema source of truth. The migration ticket is TKT-022.
+This section extends `OPERATIONAL-STATE-STORE.md` v0.2.0 with the two new tables required by the multi-Hermes IPC layer (ADR-006). The actual DDL and the migration ticket are TKT-022.
 
 ### 6.1 Existing Tables (Unchanged)
 
-The v0.2.0 schema in `OPERATIONAL-STATE-STORE.md` (project_bindings, scheduled_progress, hermes_runs, _schema_meta) remains intact. The two new tables are added by the v0.2.1 migration.
+The v0.2.0 schema in `OPERATIONAL-STATE-STORE.md` (Telegram allowlist, project_bindings, scheduled_progress, hermes_runs, idempotency_keys, schema_version, etc.) remains intact. The two new tables are added in their own migration.
 
 ### 6.2 New Table: `work_items`
 
-The canonical inter-runtime IPC primitive. The Orchestrator writes work items; specialist runtimes claim, complete, or release them. Authoritative column definitions are in `OPERATIONAL-STATE-STORE.md` v0.2.1 § 3.5; the table below restates them for narrative locality:
+The canonical inter-runtime IPC primitive. The Orchestrator writes work items; specialist runtimes claim, complete, or release them.
 
 Columns:
 
@@ -203,7 +167,7 @@ Idempotency: each work item carries a deterministic dedup key in `payload_json.d
 
 ### 6.3 New Table: `escalations`
 
-Pending Founder-facing prompts produced by any runtime when the escalation-policy plugin classifies an action as needing approval. The Orchestrator polls this table and surfaces pending entries to Telegram. Authoritative column definitions are in `OPERATIONAL-STATE-STORE.md` v0.2.1 § 3.6; the table below restates them for narrative locality:
+Pending Founder-facing prompts produced by any runtime when the escalation-policy plugin classifies an action as needing approval. The Orchestrator polls this table and surfaces pending entries to Telegram.
 
 Columns:
 
@@ -244,25 +208,23 @@ Expiration: an escalation that remains `pending` or `surfaced` for longer than 7
 
 ### 6.4 Schema Migration Discipline
 
-Schema additions in this contract land via the existing `OPERATIONAL-STATE-STORE.md` § 6 migration mechanism: a new SQL migration file in `db/migrations/` with a monotonically increasing version number, applied idempotently by the install script during preflight. Rollback of a multi-Hermes upgrade preserves data in `work_items` and `escalations` (both are backed up alongside `operational.db`, the shared operational store).
+Schema additions in this contract land via the existing `OPERATIONAL-STATE-STORE.md` § 6 migration mechanism: a new SQL migration file in `db/migrations/` with a monotonically increasing version number, applied idempotently by the install script during preflight. Rollback of a multi-Hermes upgrade preserves data in `work_items` and `escalations` (both are backed up alongside `state.db`).
 
 ## 7. Memory And Self-Learning State
 
-Each runtime's memory is **filesystem-level isolated** by distinct `HERMES_HOME` paths plus the systemd sandbox directives in `SELF-DEPLOYMENT-CONTRACT.md` § 5.2:
+Each runtime's memory is physically isolated:
 
 - `runtimes/<role>/.hermes/memories/MEMORY.md`: operational memory for that role only. The Orchestrator's MEMORY.md is **not** loaded by any other runtime; the Architect's MEMORY.md is **not** loaded by any other runtime; etc.
 - `runtimes/<role>/.hermes/memories/USER.md`: per-runtime user model (the runtime's understanding of the Founder's preferences in that role's domain).
 - `runtimes/<role>/.hermes/sessions/<id>.jsonl`: full session transcripts. Used only by `session_search` queries that the runtime itself issues.
-- `runtimes/<role>/.hermes/state.db`: a Hermes-managed SQLite file holding the per-runtime FTS5 sessions index. **Per-runtime**, not shared, not a symlink. Distinct from the shared operational store at `/srv/devassist/state/operational.db` (the filename split is the CRIT-1 fix from RV-SPEC-010).
-- `runtimes/<role>/.hermes/operational.db`: a symlink to `/srv/devassist/state/operational.db`. This is the **shared** store containing `work_items`, `escalations`, project registry, scheduled progress timers, in-flight Hermes run metadata, and (per `OPERATIONAL-STATE-STORE.md` v0.3.0+) the observability tables.
+- `runtimes/<role>/.hermes/state.db` (per-runtime sessions index): a Hermes-managed SQLite file holding the FTS5 sessions index. NOT the same file as the shared operational store, despite the name collision in upstream Hermes' default layout. The install script names the per-runtime file `runtimes/<role>/.hermes/sessions.db` to avoid confusion with the shared `/srv/devassist/state/state.db` (which it symlinks separately).
 
 The PRD § 13.2 prohibition on cross-role memory leakage is enforced by:
 
-- The systemd unit's `ProtectHome=true`, `ReadOnlyPaths=/srv/devassist`, and `ReadWritePaths=/srv/devassist/runtimes/<role> /srv/devassist/state /srv/devassist/logs` (`SELF-DEPLOYMENT-CONTRACT.md` § 5.2). The `ReadOnlyPaths`/`ReadWritePaths` pair denies write access to other runtimes' directories at the kernel level even though all five runtimes share the `devassist` uid.
-- `BindReadOnlyPaths=/srv/devassist/repo /srv/devassist/shared-skills /srv/devassist/shared-plugins /srv/devassist/releases` providing read-only-by-binding for the shared assets.
-- Per-unit `PrivateTmp=true` isolating `/tmp` between runtimes.
+- The systemd unit's `ProtectHome=true`, `ReadWritePaths=` restricting each unit to its own runtime directory plus the shared state path (`SELF-DEPLOYMENT-CONTRACT.md` § 5.2).
+- The Linux DAC: each runtime's `memories/` directory is `0700` mode owned by `devassist:devassist`, but the systemd unit's `ProtectSystem=full` plus per-unit `BindReadOnlyPaths=` (added if needed by TKT-021) ensures one unit cannot read another's `memories/` even though they share the same uid.
 
-The per-unit access restriction is the primary defense; the shared uid is acceptable in v0.1 because the threat model is one trusted Founder/operator, not a hostile multi-tenant environment. A hostile intra-runtime actor (a runtime that is itself prompt-injected and chooses to attack another runtime) is out of scope; v0.2+ may revisit by giving each runtime its own uid.
+In practice, the per-unit access restriction is the primary defense; the shared uid is acceptable in v0.1 because the threat model is one trusted Founder/operator, not a hostile multi-tenant environment.
 
 ## 8. Cross-Runtime Coordination Patterns
 
@@ -315,8 +277,8 @@ If the `escalations` table accumulates many `pending` rows, the Orchestrator's s
 | --- | --- | --- |
 | Per-runtime stdout/stderr | `journalctl -u devassist-<role>.service` | Founder runs ad-hoc; CI references in TKT-020 verify scripts |
 | Per-runtime application logs | `runtimes/<role>/.hermes/logs/` | rotated daily; preserved through rollback to `/srv/devassist/logs/post-rollback/` |
-| Work-queue state | `operational.db` `work_items` table | `sqlite3 /srv/devassist/state/operational.db 'SELECT * FROM work_items WHERE status IN (...)'` |
-| Escalation state | `operational.db` `escalations` table | same |
+| Work-queue state | `state.db` `work_items` table | `sqlite3 /srv/devassist/state/state.db 'SELECT * FROM work_items WHERE status IN (...)'` |
+| Escalation state | `state.db` `escalations` table | same |
 | Aggregate runtime status | `systemctl status devassist.target` | shows all five units in one view |
 | Hermes session transcripts | `runtimes/<role>/.hermes/sessions/*.jsonl` | runtime-internal `session_search` only |
 
@@ -327,9 +289,9 @@ The Orchestrator runtime additionally surfaces `/status` to Telegram (per `ARCH-
 The five runtimes share one VPS. Empirical capacity is an open research item (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 7). Initial sizing assumption (verified before TKT-011 dispatches):
 
 - Each runtime is one Python 3.11 process plus its Docker terminal sandbox container (Executor and Reviewer only).
-- Memory: ~250-500 MB per Python process + ~200 MB per Docker container × 2 = ~1.5-3 GB total under steady state, with headroom for one active LLM streaming response per runtime. (Estimate flagged unverified in `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 5.2.1; TKT-020 dry-run captures empirical numbers.)
+- Memory: ~250-500 MB per Python process + ~200 MB per Docker container × 2 = ~1.5-3 GB total under steady state, with headroom for one active LLM streaming response per runtime.
 - CPU: bursty during LLM tool calls; idle most of the time. One vCPU with 2-4 GB RAM is the lower bound for the trial; 2 vCPU with 4-8 GB is recommended.
-- Disk: `operational.db` grows slowly (sub-MB per work item); per-runtime `state.db` (Hermes native sessions index) grows with the session count; `sessions/` JSONL grows ~100 KB per session. Rotate `sessions/` to `~/.hermes/sessions-archive/` after 90 days (TKT-021 follow-up).
+- Disk: `state.db` grows slowly (sub-MB per work item); `sessions/` JSONL grows ~100 KB per session. Rotate `sessions/` to `~/.hermes/sessions-archive/` after 90 days (TKT-021 follow-up).
 
 If the trial measures any runtime regularly hitting the memory ceiling, the Architect appends an updated sizing note here and a corresponding ADR addendum proposes paid-sandbox or split-host options (those go to "Future Possibilities" in `ARCH-001.md` § 21 because they're paid-third-party-dependent).
 
@@ -340,7 +302,7 @@ The `HERMES-SKILL-ALLOWLIST.md` controls remain in force for every runtime. Mult
 - **No unit may load skills outside its loadout in § 5.** TKT-021 includes a startup check that diff-compares the loaded skills against the per-role expected set from `MULTI-HERMES-CONTRACT.md` § 5; mismatch is a fatal-startup error.
 - **No unit may write to another unit's runtime directory.** Per § 7, the systemd `ReadWritePaths=` restriction enforces this at OS level.
 - **The `dev-assist-work-queue` plugin's `write` operation is allowed only on the Orchestrator.** Specialist runtimes have only `claim`, `complete`, `release`. The plugin enforces this by reading `HERMES_DEVASSIST_ROLE` and refusing `write` from non-Orchestrator runtimes.
-- **Telegram bot token reachability is config-level, not env-level.** All five units load the same `EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env` so `TELEGRAM_BOT_TOKEN` is technically present in every runtime's environment. The secret-segregation guarantee comes from skill loadout: only the Orchestrator's `config.yaml` enables `gateway.enabled: true` and loads the `telegram-gateway` skill (§ 4, § 5.1). Specialist runtimes have no skill that knows how to consume `TELEGRAM_BOT_TOKEN` and cannot reach the Telegram API even though the env var is in their environment. TKT-021 enforces this with a config-level check that asserts the `telegram-gateway` skill is **not** in the loaded set for non-Orchestrator runtimes; mismatch is a fatal-startup error. Defense-in-depth at the network layer is provided by the deterministic escalation rule blocking arbitrary outbound HTTP from non-Orchestrator runtimes (`ESCALATION-POLICY.md` § 4). See `SELF-DEPLOYMENT-CONTRACT.md` § 10.1 for the full secret-segregation pattern.
+- **The Telegram bot token is loaded only into the Orchestrator runtime's environment.** The systemd unit for the Orchestrator includes the secret env var via `EnvironmentFile=`; the other four units' unit files do not reference the Telegram bot token. (All five units load the same `SELF-DEPLOY.env` for convenience; the secret-segregation guarantee comes from each runtime's config not asking for it, so non-Orchestrator runtimes cannot reach the Telegram API even if their env happens to contain the token. TKT-021 enforces this with a config-level check.)
 
 ## 13. Cross-References
 

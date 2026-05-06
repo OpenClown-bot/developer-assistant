@@ -18,7 +18,7 @@ The five specialist Hermes runtimes (`MULTI-HERMES-CONTRACT.md` § 2) must coord
 
 ## Decision
 
-Use the existing SQLite operational store (`OPERATIONAL-STATE-STORE.md` v0.2.1) as the inter-runtime IPC substrate. Add two tables: `work_items` (the work queue) and `escalations` (the Founder-prompt queue), defined authoritatively in `OPERATIONAL-STATE-STORE.md` v0.2.1 § 3.5 and § 3.6. Both tables are accessed by all five runtimes through their per-runtime symlink `~/.hermes/operational.db -> /srv/devassist/state/operational.db` and through the shared `dev-assist-work-queue` Hermes plugin. The shared store is named `operational.db` (not `state.db`) to eliminate the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1 — the per-runtime Hermes-managed FTS5 sessions index keeps its native name `state.db` inside each runtime's `HERMES_HOME`.
+Use the existing SQLite operational store (`OPERATIONAL-STATE-STORE.md` v0.2.0) as the inter-runtime IPC substrate. Add two tables: `work_items` (the work queue) and `escalations` (the Founder-prompt queue). Both tables are accessed by all five runtimes through their per-runtime symlink to `/srv/devassist/state/state.db` and through the shared `dev-assist-work-queue` Hermes plugin.
 
 Inter-runtime "messages" are durable rows in these tables. There is no in-memory message bus, no network IPC, no separate broker process. The lease semantics on `work_items` (`MULTI-HERMES-CONTRACT.md` § 6.2) provide visibility timeout; periodic polling on `cronjob` (every 60 seconds for specialist runtimes; every 5 seconds for the lease-reclaim sweep) provides delivery.
 
@@ -26,15 +26,15 @@ Inter-runtime "messages" are durable rows in these tables. There is no in-memory
 
 ### Option A — SQLite-mediated work queue in the existing operational store (CHOSEN)
 
-How it works: as in the Decision section. `work_items` and `escalations` are added by the existing migration mechanism (`OPERATIONAL-STATE-STORE.md` § 6, v0.2.1 migration). All five runtimes share the same `operational.db` via a per-runtime symlink. The `dev-assist-work-queue` plugin provides `claim`, `complete`, `release`, `write` tools that wrap atomic SQL operations.
+How it works: as in the Decision section. `work_items` and `escalations` are added by the existing migration mechanism (`OPERATIONAL-STATE-STORE.md` § 6). All five runtimes share the same `state.db` via a symlink. The `dev-assist-work-queue` plugin provides `claim`, `complete`, `release`, `write` tools that wrap atomic SQL operations.
 
 Trade-offs:
 
 - + Zero new infrastructure. No broker, no network port, no extra service.
 - + ACID semantics on every operation: claim, complete, release, write are all single SQL statements with `RETURNING *`.
-- + Durable by construction: work items survive runtime restart, VPS restart, and rollback (the same backup mechanism that protects `operational.db` protects the queue).
-- + Inspectable by the Founder: `sqlite3 /srv/devassist/state/operational.db 'SELECT ...'` from any shell.
-- + Backup-aligned: the same `operational.db` backup snapshots that `SELF-DEPLOYMENT-CONTRACT.md` § 6.3 takes during upgrade also include the queue.
+- + Durable by construction: work items survive runtime restart, VPS restart, and rollback (the same backup mechanism that protects `state.db` protects the queue).
+- + Inspectable by the Founder: `sqlite3 /srv/devassist/state/state.db 'SELECT ...'` from any shell.
+- + Backup-aligned: the same `state.db` backup snapshots that `SELF-DEPLOYMENT-CONTRACT.md` § 6.3 takes during upgrade also include the queue.
 - + Idempotency-aligned: dedup keys live in `payload_json.dedup_key` and the existing `idempotency_keys` table semantics extend naturally.
 - − Polling-based delivery has higher tail latency than push-based delivery. Mitigated: 60-second polling interval is acceptable for a multi-minute workflow (intake → planning → architecture → implementation each take minutes-to-hours, so 60s polling adds <2% to wall clock).
 - − SQLite has writer-serialization. With ~5 runtimes writing infrequently this is a non-issue, but a high-frequency workload would saturate. Mitigated: WAL mode + small write rate; not a v0.1 concern.
@@ -143,7 +143,7 @@ Option A wins on every axis except tail latency, where the v0.1 load makes the d
 - `PRD-001.md` v0.2.1 § 13.2 (multi-Hermes; cross-role flow without leaking memory)
 - `ARCH-001.md` v0.3.0 § 11.2
 - `MULTI-HERMES-CONTRACT.md` § 6 (table schemas), § 8 (coordination patterns)
-- `OPERATIONAL-STATE-STORE.md` v0.2.1 (existing store; § 3.5 work_items, § 3.6 escalations — authoritative schema)
+- `OPERATIONAL-STATE-STORE.md` v0.2.0 (existing store)
 - `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.10, § 3.11, § 4, § 5.3, § 6.3
 - ADR-002 (repository state), ADR-005 (multi-Hermes runtime isolation)
 - Implementation: TKT-022 (queue schema + helpers)
