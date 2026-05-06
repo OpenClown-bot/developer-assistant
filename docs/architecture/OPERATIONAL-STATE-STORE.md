@@ -1,7 +1,7 @@
 ---
 id: OPERATIONAL-STATE-STORE
-version: 0.2.1
-status: active
+version: 0.3.0
+status: draft
 ---
 
 # Operational State Store
@@ -144,6 +144,86 @@ Indexes:
 
 Resolution semantics, expiration sweep, and the 7-day default expiration are specified in `MULTI-HERMES-CONTRACT.md` § 6.3.
 
+### 3.7 errors (added in v0.3.0)
+
+Per-runtime error rollup per `OBSERVABILITY-CONTRACT.md` v0.1.1 § 9 (FR-OBS-06). Implementation: TKT-031.
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| err_id | TEXT PK | ULID |
+| ts | TEXT NOT NULL | ISO 8601 UTC |
+| runtime | TEXT NOT NULL CHECK | one of `orchestrator`, `business-planner`, `architect`, `executor`, `reviewer`, `omniroute` |
+| work_item_id | INTEGER | nullable foreign key into `work_items.id` |
+| error_class | TEXT NOT NULL | canonical class string, e.g. `TelegramAPIError`, `SchemaValidationError`, `ProviderTimeout` |
+| message | TEXT NOT NULL | short human-readable |
+| context_json | TEXT NOT NULL DEFAULT '{}' | arbitrary JSON for stack trace, request details, etc. |
+
+Indexes:
+
+- `idx_errors_ts` on `(ts)` — drives `dev-assist-cli errors --since` queries.
+- `idx_errors_runtime_ts` on `(runtime, ts)` — drives per-runtime error timelines.
+- `idx_errors_work_item` on `(work_item_id)` — drives correlation joins with `work_items`.
+
+Population: every log line at level `>= error` writes a row. Implementation may batch-write to avoid contention; max write delay is 5 seconds. Retention is 30 days (or 90 days, per the table-level retention statement in `OBSERVABILITY-CONTRACT.md` v0.1.1 § 9, which is authoritative). Rotation cron is laid down by TKT-020 and SQL is owned by TKT-031. Telegram-delivered digest rows are retained on disk indefinitely under `/var/log/dev-assist/archive/`.
+
+### 3.8 llm_calls (added in v0.3.0)
+
+Per-call LLM cost / latency / token accounting per `OBSERVABILITY-CONTRACT.md` v0.1.1 § 10 (FR-OBS-07). Implementation: TKT-031. Population is **client-side primary** per RV-SPEC-014 M-001 fix: the runtime-side LLM client wrapper writes one row per call. The OmniRoute server-side middleware is SECONDARY/optional and only contributes parallel rows if the OmniRoute extension API is verified.
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| call_id | TEXT PK | ULID |
+| ts | TEXT NOT NULL | ISO 8601 UTC, request start |
+| runtime | TEXT NOT NULL CHECK | one of `orchestrator`, `business-planner`, `architect`, `executor`, `reviewer` |
+| work_item_id | INTEGER | nullable foreign key into `work_items.id` |
+| model | TEXT NOT NULL | catalog identifier from `MODEL-CATALOG.md` v0.2.0 § 4.1 (e.g., `glm-5.1`) |
+| routing_path | TEXT NOT NULL CHECK | one of `omniroute_endpoint`, `openrouter_endpoint` |
+| tokens_in | INTEGER NOT NULL | |
+| tokens_out | INTEGER NOT NULL | |
+| latency_ms | INTEGER NOT NULL | wall-clock |
+| rate_in_per_1m_usd | REAL NOT NULL | snapshot at call time from `MODEL-CATALOG.md` v0.2.0 § 4.3 |
+| rate_out_per_1m_usd | REAL NOT NULL | snapshot at call time |
+| cost_usd | REAL NOT NULL | computed: `(tokens_in * rate_in + tokens_out * rate_out) / 1e6` |
+| status | TEXT NOT NULL CHECK | one of `success`, `fail` |
+| error_class | TEXT | NULL on success; canonical class on `fail` |
+
+Indexes:
+
+- `idx_llm_calls_ts` on `(ts)`.
+- `idx_llm_calls_runtime_model_ts` on `(runtime, model, ts)`.
+- `idx_llm_calls_work_item` on `(work_item_id)`.
+
+The rate snapshot at call time is intentional: when catalog rates change in a future revision, historical cost remains computed against the rate that was in effect at the time of the call. The install script (TKT-026) embeds the current rates from `MODEL-CATALOG.md` § 4.3 into a static lookup at install time; runtime changes to the catalog are picked up only on the next install/upgrade run. Catalog changes go through a Founder approval pipeline anyway, so this is acceptable.
+
+Retention: rows older than 90 days are deleted by a daily cron (FR-OBS-09b per `OBSERVABILITY-CONTRACT.md` v0.1.1 § 12.2) AFTER a corresponding row exists in `llm_calls_daily` for that `(date, runtime, model)`. Aggregated daily summaries thus survive retention.
+
+### 3.9 llm_calls_daily (added in v0.3.0)
+
+Daily aggregated cost summary per `OBSERVABILITY-CONTRACT.md` v0.1.1 § 10 + § 12.2. Implementation: TKT-031.
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| day | TEXT NOT NULL | ISO 8601 date (YYYY-MM-DD) |
+| runtime | TEXT NOT NULL CHECK | one of the five role ids |
+| model | TEXT NOT NULL | catalog identifier from `MODEL-CATALOG.md` § 4.1 |
+| routing_path | TEXT NOT NULL CHECK | one of `omniroute_endpoint`, `openrouter_endpoint` |
+| call_count | INTEGER NOT NULL | |
+| call_count_success | INTEGER NOT NULL | |
+| call_count_fail | INTEGER NOT NULL | |
+| tokens_in_total | INTEGER NOT NULL | |
+| tokens_out_total | INTEGER NOT NULL | |
+| cost_usd_total | REAL NOT NULL | |
+| latency_ms_p50 | INTEGER | nullable; populated when `call_count >= 5` |
+| latency_ms_p95 | INTEGER | nullable; populated when `call_count >= 5` |
+
+Primary key: `(day, runtime, model, routing_path)`.
+
+Indexes:
+
+- `idx_llm_calls_daily_day` on `(day)` — drives `dev-assist-cli costs --since` queries.
+
+Population: a daily cron at 03:00 UTC runs `aggregate_llm_calls_daily(target_date)` per TKT-031 § 1; this is the function the FR-OBS-09b cron invokes (`OBSERVABILITY-CONTRACT.md` v0.1.1 § 12.2). Aggregation is idempotent: re-running for the same date does not duplicate rows (the function uses `INSERT OR REPLACE` on the primary key). Retention is indefinite — daily summaries survive even after the source `llm_calls` rows are pruned.
+
 ## 4. Security Constraints
 
 - **No secrets**: The schema does not store Telegram bot tokens, GitHub PATs, LLM API keys, SSH keys, or any other secret values. Secret values must remain in environment variables, Hermes-supported secret mechanisms, GitHub Actions secrets, or VPS secret storage.
@@ -197,7 +277,7 @@ The SQLite database is a single file on the VPS. Backup strategy for v0.1:
 1. The SQLite database file should be included in the VPS filesystem backup schedule.
 2. For a consistent offline backup, stop the Hermes service before copying the file, or use `sqlite3` to make a backup:
    ```
-   sqlite3 /path/to/state.db ".backup /path/to/state.db.bak"
+   sqlite3 /path/to/operational.db ".backup /path/to/operational.db.bak"
    ```
 3. Backup frequency should match VPS backup intervals. Daily is recommended for v0.1.
 
@@ -208,7 +288,7 @@ To reset operational state (e.g., after corruption or for a clean start):
 1. Stop the Hermes service to prevent in-flight writes.
 2. Back up the database file if any data should be preserved:
    ```
-   cp /path/to/state.db /path/to/state.db.pre-reset
+   cp /path/to/operational.db /path/to/operational.db.pre-reset
    ```
 3. Either remove the database file (it will be recreated on next startup) or call `reset_store(db)` to clear all data rows while preserving the schema.
 4. Restart the Hermes runtime.
@@ -237,7 +317,7 @@ This is the **shared operational store** referenced by all five runtime symlinks
 For pre-multi-Hermes (single-runtime) deployments the path is:
 
 ```
-/opt/developer-assistant/state.db
+/opt/developer-assistant/operational.db
 ```
 
 The path should be configured via environment variable or runtime configuration, not committed to the repository.
@@ -259,6 +339,9 @@ Tests use `:memory:` for transient in-process databases or `tempfile` for file-b
 | Hermes run metadata | Not in repository | `hermes_runs` table |
 | Inter-runtime work queue | Not in repository | `work_items` table (v0.2.1+) |
 | Pending Founder escalations | Not in repository | `escalations` table (v0.2.1+) |
+| Per-runtime error rollup | Not in repository | `errors` table (v0.3.0+) |
+| Per-call LLM accounting | Not in repository | `llm_calls` table (v0.3.0+) |
+| Daily cost summary | Not in repository | `llm_calls_daily` table (v0.3.0+) |
 
 If operational state contradicts repository artifacts, repository artifacts take precedence per `HERMES-RUNTIME-CONTRACT.md` Section 3.
 
@@ -280,5 +363,6 @@ For v0.1 deployments, the default rollback journal mode is acceptable because th
 - Hermes native persistence may be evaluated for conversation context in a follow-up ticket, but structured operational queries remain in SQLite.
 - Multi-tenant isolation is explicitly out of scope for v0.1.
 - A backup/restore utility script may be added in a future ticket.
-- v0.2.1 schema migration history:
+- Schema migration history:
   - v0.2.0 → v0.2.1: Add `work_items` and `escalations` tables for multi-Hermes IPC. Idempotent `CREATE TABLE IF NOT EXISTS` plus index creation. No data migration needed (both tables start empty).
+  - v0.2.1 → v0.3.0: Add `errors`, `llm_calls`, and `llm_calls_daily` tables for v0.1 observability per `OBSERVABILITY-CONTRACT.md` v0.1.1 §§ 9, 10, 12.2. Idempotent `CREATE TABLE IF NOT EXISTS` plus index creation. No data migration needed (all three tables start empty). Implementation: TKT-031.

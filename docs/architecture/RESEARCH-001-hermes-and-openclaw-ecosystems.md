@@ -53,7 +53,7 @@ What Hermes does provide inside one runtime:
 Consequences for `developer-assistant`:
 
 - Five **specialist** Hermes runtimes (Orchestrator, Business Planner, Architect, Executor, Reviewer) cannot live inside one Hermes process. They require **five separate `HERMES_HOME` directories supervised externally**.
-- Per-runtime memory isolation is therefore **physical**: each runtime has its own `~/.hermes/memories/MEMORY.md`, `USER.md`, sessions database, and skills directory. There is no implicit shared-memory accident path between runtimes.
+- Per-runtime memory isolation is therefore **filesystem-level**: each runtime has its own `~/.hermes/memories/MEMORY.md`, `USER.md`, sessions database, and skills directory. There is no implicit shared-memory accident path between runtimes through Hermes' own state. Cross-runtime read/write through normal Linux DAC is prevented by systemd sandbox directives (`ProtectHome=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`) since all five runtimes share a single Linux uid (`devassist`); the isolation guarantee is conditional on correct systemd unit configuration.
 - The Founder-facing process is one of the five (the Orchestrator runtime running the Telegram gateway). Specialist runtimes never directly face the Founder.
 
 Citation: Hermes Agent docs § Sessions, § Delegation (delegate_task), § Configuration. Confirmed by inspecting the `~/.hermes/` directory layout described in the docs and the `delegate_task` tool reference.
@@ -102,7 +102,7 @@ Memory updates are explicit: the `memory` tool has `add`, `replace`, and `remove
 
 Consequences for `developer-assistant`:
 
-- **Per-runtime memory isolation is physical**: each of the five specialist runtimes has its own `MEMORY.md`, `USER.md`, sessions database, and JSONL transcripts because they have different `HERMES_HOME` directories. There is no shared-memory accident path between runtimes.
+- **Per-runtime memory isolation is filesystem-level**: each of the five specialist runtimes has its own `MEMORY.md`, `USER.md`, sessions database, and JSONL transcripts because they have different `HERMES_HOME` directories. There is no shared-memory accident path between runtimes through Hermes itself. Cross-runtime read/write through normal Linux DAC (same uid) is prevented by systemd sandbox directives applied per unit (`ProtectHome=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`); see `MULTI-HERMES-CONTRACT.md` § 7.
 - **Operational vs governance state**: Hermes memory is operational state per `HERMES-RUNTIME-CONTRACT.md` § 3 and `OPERATIONAL-STATE-STORE.md` § 8. It must not become the only place where product, architecture, security, merge, or deployment decisions are recorded.
 - **Self-learning state**: a runtime's `MEMORY.md`, `USER.md`, sessions database, and any agent-managed skills it created at runtime are part of its self-learning state. Self-deployment rollback and upgrade must preserve these per-runtime per `SELF-DEPLOYMENT-CONTRACT.md` § 7.
 
@@ -274,6 +274,26 @@ ADR-004 selects **Option C (systemd)** for v0.1 because it minimizes new depende
 
 Citation: systemd unit documentation (`man systemd.service`, `man systemd.target`); s6-overlay documentation; Docker Compose v2 documentation; Hermes Agent docs § Deployment.
 
+### 5.2.1 Installation Time And Steady-State Resource Footprint (Unverified Estimates)
+
+Two numbers are load-bearing for v0.1 feasibility but were **not** measured during this research pass. They are recorded here as **unverified estimates** with explicit validation tasks so an implementation ticket (TKT-020) can replace them with empirical numbers before TKT-011 dispatches.
+
+**Hermes Agent installation time on a clean Ubuntu 22.04 LTS VPS** (relevant to `PRD-001.md` § 12 15-minute bound):
+
+- Estimate: **~5 minutes (300 seconds)** for the one-line installer cold-cache (~400 MB Python-package fetch over residential-grade outbound bandwidth on a 2 vCPU / 4 GB RAM VPS), based on the Hermes Agent installer's documented "large initial fetch + venv setup + first-time pip resolve" steps.
+- Citation: Hermes Agent docs § Installation describe the installer behavior; no time figure is published in the upstream docs at retrieval time. The 300 s estimate is the Architect's worst-case derivation, not a measured value.
+- Validation task: TKT-020 § Acceptance Criteria includes a dry-run on a fresh Ubuntu 22.04 LTS VPS that records the actual install time and updates `ADR-004 § Timing Feasibility` if the measured value diverges by >25% from the 300 s estimate.
+- Mitigation if measured >480 s (8 minutes): pre-stage the Hermes installer tarball into the project's `vendor/` directory at architect-pass time and replace the live one-line install with a local-file install. This eliminates the ~400 MB outbound fetch from the budget.
+
+**Steady-state per-Hermes-runtime memory footprint** (relevant to whether five runtimes fit in 4 GB RAM with headroom for Docker terminal sandboxes):
+
+- Estimate: **~300-600 MB resident per Hermes runtime** under steady state (one Python process per `HERMES_HOME`, with skills loaded but no active session). Total for five runtimes: **~1.5-3 GB**.
+- Citation: Hermes Agent docs do not publish a per-process memory figure; the 300-600 MB range is the Architect's projection from typical Python-LLM-client process sizes (Hermes uses a Python runtime with ~50-80 MB minimum baseline plus skill payload).
+- Validation task: TKT-020 § Acceptance Criteria includes capturing `systemd-cgls --memory devassist.target` output post-startup and recording it as evidence in the install verification report.
+- Mitigation if measured total >3 GB on the target VPS profile: (a) consolidate Business Planner + Architect runtimes into one (they have similar idle profiles), or (b) require a 6+ GB RAM VPS as the v0.1 minimum, or (c) defer Reviewer runtime by inlining Reviewer work into Architect runtime until v0.2.
+
+These two estimates are flagged as **assumptions, not findings**, in this research record. ADR-004 § Timing Feasibility consumes them and `MULTI-HERMES-CONTRACT.md` § 11 records the steady-state footprint figure traceably back here.
+
 ### 5.3 SQLite As An IPC Substrate
 
 - SQLite is stdlib in Python; no extra server process.
@@ -282,7 +302,7 @@ Citation: systemd unit documentation (`man systemd.service`, `man systemd.target
 
 Consequences for `developer-assistant`:
 
-- v0.1 uses SQLite (the same `state.db` already adopted by `OPERATIONAL-STATE-STORE.md`) as the work queue. Two new tables (`work_items` and `escalations`) are added in this pass and described in `MULTI-HERMES-CONTRACT.md` § 6.
+- v0.1 uses SQLite (the same `operational.db` per `OPERATIONAL-STATE-STORE.md`) as the work queue. Two new tables (`work_items` and `escalations`) are added in this pass and described in `MULTI-HERMES-CONTRACT.md` § 6.
 - Heavier alternatives (Redis, NATS, RabbitMQ) are deferred until the SQLite path proves insufficient. ADR-006 records this trade-off.
 
 Citation: SQLite docs § WAL, § RETURNING; `OPERATIONAL-STATE-STORE.md` § 9.
@@ -311,11 +331,12 @@ The following insights from the research above are the reason the design choices
 
 - Source: § 3.2.
 - Used in: `MULTI-HERMES-CONTRACT.md` § 4 (per-runtime layout), `SELF-DEPLOYMENT-CONTRACT.md` § 4 (filesystem layout), ADR-005 § Decision.
+- Resource footprint estimate: **~1.5-3 GB total resident memory** for five idle Hermes runtimes on the target VPS, flagged as unverified in § 5.2.1; validated empirically during TKT-020 dry-run.
 
-### 6.2 Memory Isolation Between Runtimes Is Already Physical
+### 6.2 Memory Isolation Between Runtimes Is Filesystem-Level (Conditional On Correct Sandboxing)
 
 - Source: § 3.5.
-- Used in: `MULTI-HERMES-CONTRACT.md` § 7 (memory and self-learning state), ADR-005 § Consequences. The PRD's strict per-role isolation (§ 13.2 and § 7 NFR) is satisfied by the natural Hermes layout, not by a custom memory broker.
+- Used in: `MULTI-HERMES-CONTRACT.md` § 7 (memory and self-learning state), ADR-005 § Consequences. The PRD's strict per-role isolation (§ 13.2 and § 7 NFR) is satisfied by the natural Hermes filesystem layout (separate `HERMES_HOME`) plus systemd sandbox directives (`ProtectHome=`, `ReadWritePaths=`, `BindReadOnlyPaths=`, `PrivateTmp=`), not by a custom memory broker. The five runtimes share a single Linux uid (`devassist`); the isolation guarantee is conditional on correct systemd unit configuration. v0.1's single-Founder threat model accepts the shared-uid limitation.
 
 ### 6.3 Cross-Runtime IPC Is Best Mediated By The Repository And The SQLite Store
 
@@ -384,3 +405,12 @@ These remain open and are intentionally not closed in this pass. They are not bl
 | `docs/architecture/adr/ADR-003-plugin-supply-chain.md` v0.2.0 | OpenClaw v0.1 deferral |
 | `docs/reviews/RV-CODE-024.md` | review-language conventions for tickets |
 | `docs/session-log/2026-05-06-session-1.md` | latest authoritative project state |
+| `https://github.com/diegosouzapw/OmniRoute` (v3.7.x README, `providerRegistry.ts`) | § 5.4, § 6.7 (routing-layer findings); ADR-011 verification gate |
+| `https://github.com/diegosouzapw/OmniRoute/issues/265` (closed 2026-03-10; mainteiner: "send the Fireworks path as model ID and OmniRoute auto-resolves it") | § 5.4 OmniRoute-supports-Fireworks binding precondition; ADR-011, ADR-009 v0.1.1, MODEL-CATALOG.md v0.2.0 § 4.2 |
+| `https://api.fireworks.ai/inference/v1` (OpenAI-compatible chat-completions endpoint; OmniRoute upstream) | § 5.4; ADR-011 Decision step 3 |
+| `https://fireworks.ai/models/fireworks/deepseek-v3p1` (Fireworks `accounts/fireworks/models/deepseek-v4-pro` → architect role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/qwen3-235b-a22b-instruct-2507` (Fireworks `accounts/fireworks/models/qwen3p6-plus` → planner role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/glm-4p5` (Fireworks `accounts/fireworks/models/glm-5p1` → executor role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/kimi-k2-instruct` (Fireworks `accounts/fireworks/models/kimi-k2p6` → reviewer role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://fireworks.ai/models/fireworks/minimax-m2` (Fireworks `accounts/fireworks/models/minimax-m2p7` → orchestrator role) | § 5.4 catalog grounding; ADR-009 v0.1.1; MODEL-CATALOG.md v0.2.0 § 4.1 |
+| `https://openrouter.ai/api/v1` (OpenRouter chat-completions endpoint; backup routing layer) | § 5.4; ADR-011 Decision step 4 |
