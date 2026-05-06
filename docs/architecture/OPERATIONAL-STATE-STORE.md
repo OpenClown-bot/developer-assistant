@@ -1,6 +1,6 @@
 ---
 id: OPERATIONAL-STATE-STORE
-version: 0.2.0
+version: 0.2.1
 status: active
 ---
 
@@ -29,7 +29,7 @@ Hermes native persistence may supplement this store for conversation context, bu
 
 ## 3. Schema
 
-Three operational tables plus one internal metadata table:
+Five operational tables plus one internal metadata table (v0.2.1: added `work_items` and `escalations` for multi-Hermes IPC per `MULTI-HERMES-CONTRACT.md` § 6 and `ADR-006`). The v0.3.0+ observability tables (`errors`, `llm_calls`, `llm_calls_daily`) ship via `OBSERVABILITY-CONTRACT.md` and are added in a subsequent migration.
 
 ### 3.1 project_bindings
 
@@ -80,6 +80,70 @@ Index: `idx_hermes_runs_idempotency` on `idempotency_key`.
 
 Currently stores `schema_version` for future migration tracking.
 
+### 3.5 work_items (added in v0.2.1)
+
+The canonical inter-runtime IPC primitive per `MULTI-HERMES-CONTRACT.md` § 6.2 and `ADR-006`. The Orchestrator runtime writes work items; specialist runtimes (planner, architect, executor, reviewer) claim, complete, or release them. Implementation: TKT-022.
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| id | INTEGER PK AUTOINCREMENT | |
+| created_at | TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP | ISO 8601 UTC |
+| updated_at | TEXT NOT NULL | ISO 8601 UTC |
+| target_role | TEXT NOT NULL CHECK | one of `planner`, `architect`, `executor`, `reviewer` |
+| kind | TEXT NOT NULL | e.g., `prd_intake`, `architect_pass`, `ticket_implementation`, `ticket_review`, `prd_question_followup` |
+| payload_json | TEXT NOT NULL | JSON: `{ project_id, ticket_id?, prompt, context_paths, allowed_files, expected_outputs, deadline_at?, dedup_key }` |
+| priority | INTEGER NOT NULL DEFAULT 50 | 0 highest, 100 lowest |
+| status | TEXT NOT NULL CHECK | one of `pending`, `claimed`, `completed`, `failed`, `released` |
+| claimed_by_runtime | TEXT | NULL until claimed; one of the five role ids |
+| claimed_at | TEXT | NULL until claimed |
+| claim_lease_until | TEXT | NULL until claimed; rolling lease, default 30 minutes |
+| completed_at | TEXT | NULL until completion |
+| result_json | TEXT | JSON output structure per `HERMES-RUNTIME-CONTRACT.md` § 5 |
+| attempt_count | INTEGER NOT NULL DEFAULT 0 | |
+| max_attempts | INTEGER NOT NULL DEFAULT 3 | |
+| originating_run_id | TEXT | foreign key into `hermes_runs.run_id` (nullable) |
+
+Indexes:
+
+- `idx_work_items_claim` on `(target_role, status, priority, id)` — drives the claim query.
+- `idx_work_items_runtime` on `(claimed_by_runtime, status)` — drives the runtime-internal "what am I working on" query.
+- `idx_work_items_lease` partial index on `(claim_lease_until)` where `status = 'claimed'` — drives the lease-reclaim sweep.
+
+Claim semantics, lease semantics, idempotency, and the dedup-key behavior are specified in `MULTI-HERMES-CONTRACT.md` § 6.2.
+
+### 3.6 escalations (added in v0.2.1)
+
+Pending Founder-facing prompts produced by any runtime when the escalation-policy plugin classifies an action as needing approval (`ESCALATION-POLICY.md` § 5, `MULTI-HERMES-CONTRACT.md` § 6.3, `ADR-006`). The Orchestrator polls this table and surfaces pending entries to Telegram.
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| id | INTEGER PK AUTOINCREMENT | |
+| created_at | TEXT NOT NULL | |
+| updated_at | TEXT NOT NULL | |
+| originating_runtime | TEXT NOT NULL CHECK | one of the five role ids |
+| originating_work_item_id | INTEGER | nullable foreign key into `work_items.id` |
+| trigger_kind | TEXT NOT NULL | `deterministic_rule:<rule_id>` or `llm_classifier:<classifier_id>` |
+| context | TEXT NOT NULL | what situation produced the question |
+| proposed_action | TEXT NOT NULL | what the runtime is about to do |
+| options_json | TEXT NOT NULL | JSON list of decision options |
+| recommended_default | TEXT NOT NULL | |
+| impact | TEXT NOT NULL | what is affected |
+| urgency | TEXT NOT NULL CHECK | one of `low`, `medium`, `high` |
+| durable_artifact_target | TEXT NOT NULL | repository path where the decision will be recorded |
+| status | TEXT NOT NULL CHECK | one of `pending`, `surfaced`, `approved`, `denied`, `expired` |
+| surfaced_at | TEXT | |
+| resolved_at | TEXT | |
+| founder_response | TEXT | normalized English decision note |
+| telegram_message_id | TEXT | the Telegram message id used to surface this escalation, for follow-up edit/reply |
+
+Indexes:
+
+- `idx_escalations_surface` on `(status, urgency, id)` — drives the Orchestrator's "what should I show next" query.
+- `idx_escalations_runtime` on `(originating_runtime, status)` — drives the runtime-internal "is my escalation resolved yet" query.
+- `idx_escalations_work_item` on `(originating_work_item_id)` — drives correlation joins with `work_items`.
+
+Resolution semantics, expiration sweep, and the 7-day default expiration are specified in `MULTI-HERMES-CONTRACT.md` § 6.3.
+
 ## 4. Security Constraints
 
 - **No secrets**: The schema does not store Telegram bot tokens, GitHub PATs, LLM API keys, SSH keys, or any other secret values. Secret values must remain in environment variables, Hermes-supported secret mechanisms, GitHub Actions secrets, or VPS secret storage.
@@ -122,6 +186,7 @@ All upsert functions use **partial-update** semantics: omitted optional fields (
 - `upsert_project_binding`: `repo_owner_name`, `workspace_path`, `phase` are preserved on conflict when `None`.
 - `upsert_scheduled_progress`: `last_report_at`, `next_report_at`, `interval_minutes` are preserved on conflict when `None`.
 - `upsert_hermes_run`: `idempotency_key` is preserved on conflict when `None` (to prevent accidental clearing of a deduplication key). Other fields (`role`, `task_type`, `status`, `in_flight_meta`, `project_key`) are full-replacement on conflict.
+- v0.2.1: `claim_work_item`, `complete_work_item`, `release_work_item`, `write_work_item`, `surface_escalation`, `resolve_escalation` are atomic single-statement operations (`UPDATE ... RETURNING *`) implemented in TKT-022 helpers; they do not follow upsert semantics.
 
 ## 6. Backup and Reset Behavior (v0.1)
 
@@ -161,16 +226,18 @@ Database loss **must not** lose canonical product, architecture, security, merge
 
 ## 7. Database Path
 
-The implementation accepts an explicit database path from the caller. It does not hardcode a production path. The recommended production path on the VPS is:
+The implementation accepts an explicit database path from the caller. It does not hardcode a production path. The recommended production path on the VPS for v0.2.1+ multi-Hermes deployments is:
+
+```
+/srv/devassist/state/operational.db
+```
+
+This is the **shared operational store** referenced by all five runtime symlinks (`SELF-DEPLOYMENT-CONTRACT.md` § 4, `MULTI-HERMES-CONTRACT.md` § 4). The filename `operational.db` (not `state.db`) was chosen to avoid the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1: each per-runtime `~/.hermes/state.db` is a Hermes-managed FTS5 sessions index distinct from this shared operational store.
+
+For pre-multi-Hermes (single-runtime) deployments the path is:
 
 ```
 /opt/developer-assistant/state.db
-```
-
-Or alongside the Hermes configuration:
-
-```
-~/.hermes/state.db
 ```
 
 The path should be configured via environment variable or runtime configuration, not committed to the repository.
@@ -190,6 +257,8 @@ Tests use `:memory:` for transient in-process databases or `tempfile` for file-b
 | Project registry | Not in repository | `project_bindings` table |
 | Scheduled progress timers | Not in repository | `scheduled_progress` table |
 | Hermes run metadata | Not in repository | `hermes_runs` table |
+| Inter-runtime work queue | Not in repository | `work_items` table (v0.2.1+) |
+| Pending Founder escalations | Not in repository | `escalations` table (v0.2.1+) |
 
 If operational state contradicts repository artifacts, repository artifacts take precedence per `HERMES-RUNTIME-CONTRACT.md` Section 3.
 
@@ -207,7 +276,9 @@ For v0.1 deployments, the default rollback journal mode is acceptable because th
 
 ## 10. Future Considerations
 
-- Schema versioning and migration: the `_schema_meta` table tracks `schema_version` for future migration support. No migration framework is implemented in v0.1.
+- Schema versioning and migration: the `_schema_meta` table tracks `schema_version` for future migration support. v0.2.1 introduces the first additive migration (`work_items`, `escalations`); v0.3.0 will add the observability tables per `OBSERVABILITY-CONTRACT.md`.
 - Hermes native persistence may be evaluated for conversation context in a follow-up ticket, but structured operational queries remain in SQLite.
 - Multi-tenant isolation is explicitly out of scope for v0.1.
 - A backup/restore utility script may be added in a future ticket.
+- v0.2.1 schema migration history:
+  - v0.2.0 → v0.2.1: Add `work_items` and `escalations` tables for multi-Hermes IPC. Idempotent `CREATE TABLE IF NOT EXISTS` plus index creation. No data migration needed (both tables start empty).
