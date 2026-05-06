@@ -47,8 +47,32 @@ class TestSchemaInitialization(unittest.TestCase):
                 self.assertIn("scheduled_progress", tables)
                 self.assertIn("hermes_runs", tables)
                 self.assertIn("_schema_meta", tables)
+                self.assertIn("work_items", tables)
+                self.assertIn("escalations", tables)
+                self.assertIn("founder_identity_bindings", tables)
+                self.assertIn("upstream_sessions", tables)
             finally:
                 conn.close()
+
+    def test_wal_mode_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "test.db")
+            conn = open_store(db_path)
+            try:
+                cur = conn.execute("PRAGMA journal_mode")
+                self.assertEqual(cur.fetchone()["journal_mode"], "wal")
+            finally:
+                conn.close()
+
+    def test_schema_version_bumped(self) -> None:
+        conn = open_store(":memory:")
+        try:
+            cur = conn.execute(
+                "SELECT value FROM _schema_meta WHERE key='schema_version'"
+            )
+            self.assertEqual(cur.fetchone()["value"], "2")
+        finally:
+            conn.close()
 
     def test_init_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -60,7 +84,7 @@ class TestSchemaInitialization(unittest.TestCase):
                 cur = conn.execute(
                     "SELECT value FROM _schema_meta WHERE key='schema_version'"
                 )
-                self.assertEqual(cur.fetchone()["value"], "1")
+                self.assertEqual(cur.fetchone()["value"], "2")
             finally:
                 conn.close()
 
