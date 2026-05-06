@@ -269,24 +269,27 @@ Detailed contract in `SELF-DEPLOYMENT-CONTRACT.md`; summary of the architectural
 
 ## 15. Escalation Policy Architecture
 
-Detailed contract in `ESCALATION-POLICY.md`; summary:
+Detailed contract in `ESCALATION-POLICY.md` v0.1.1; summary:
 
-- The PRD § 13.1 trigger pair ("deviates from concept" OR "risks breaking already-committed scope or operational state") is operationalized as two enforcement layers, both running inside the `dev-assist-escalation-policy` Hermes plugin loaded into every specialist runtime:
-  - **Deterministic rules**: a plugin-internal pattern set (force-push, hard reset, file deletion under governance directories, schema-destructive SQL, credential rotation, public endpoint exposure, paid third-party introduction, etc.). Match → escalate, no LLM consultation needed.
-  - **LLM classifier**: when a candidate action does not match a deterministic rule, the plugin asks an auxiliary classification model (one of the Founder-approved catalog entries) "does this proposed action change product scope, target user, success criteria, or constraints captured at intake? Y/N + one-sentence reason." If Y → escalate. If N → proceed.
+- The PRD § 13.1 trigger pair ("deviates from concept" OR "risks breaking already-committed scope or operational state") is operationalized as two **fully deterministic** enforcement layers, both running inside the `dev-assist-escalation-policy` Hermes plugin loaded into every specialist runtime:
+  - **Deterministic rule set** (`ESCALATION-POLICY.md` v0.1.1 § 4): a curated pattern list (force-push, hard reset, file deletion under governance directories, schema-destructive SQL, credential rotation, public endpoint exposure, paid third-party introduction, write-zone violations, PRD/ADR status flips, concept-anchor edits, etc.). Match → escalate, no further checks.
+  - **Deterministic concept-deviation classifier** (`ESCALATION-POLICY.md` v0.1.1 § 5): when no § 4 rule matches and the action is not read-only or within-catalog, the classifier compares the candidate action against a structured project-concept anchor (`PROJECT-CONCEPT.md` § 2) using a fully-specified pure-function predicate set. Same input always yields the same verdict; **no LLM call inside the decision path** (RV-SPEC-012 F3 fix).
 - Both layers run at the Hermes `pre_tool_call` hook, so they pre-empt the Hermes-level approval prompt rather than relying on it.
 - An escalation appends a row to the SQLite `escalations` table; the Orchestrator runtime polls the table and surfaces pending escalations to Telegram.
 - The Founder's response is captured back into the originating runtime's work item and into the durable artifact target the escalation declared (PRD, `docs/questions/`, ADR, or ticket).
-- ADR-008 records the classifier-mechanism choice (deterministic + LLM) and the classifier-model choice (one Founder-approved catalog entry, distinct from the runtime's primary model where possible to keep the audit independent).
+- The plugin MAY invoke the runtime's catalog main model from `MODEL-CATALOG.md` v0.1.1 § 4.1 to generate a Russian-language advisory narrative on the escalation surface (`ESCALATION-POLICY.md` v0.1.1 § 5.5). This narrative is **NOT in the decision path** — the deterministic classifier has already returned `ESCALATE` before the call is made; the call is best-effort with a deterministic English fallback narrative on timeout/failure.
+- ADR-008 v0.1.1 records the classifier-mechanism choice (deterministic rules + structured concept anchor; no LLM in the decision) and the v0.1.1 history (Option B — the v0.1.0 "deterministic + LLM classifier" design — was rejected by RV-SPEC-012 F3).
 
 ## 16. Model Catalog Architecture
 
-Detailed catalog in `MODEL-CATALOG.md`; summary:
+Detailed catalog in `MODEL-CATALOG.md` v0.1.1; summary:
 
-- The Founder pre-approved a role-model assignment on 2026-05-05 (recorded in `docs/orchestration/SESSION-STATE.md` § Current Tooling Decisions). v0.3.0 adopts that assignment as the v0.1 catalog.
-- **Within-catalog model picks proceed without escalation**. Catalog changes (adding a new model, changing a role's main, changing a role's fallback) escalate per `ESCALATION-POLICY.md` § 4.
-- Models are reached through OmniRoute (and OpenRouter as a backup), not through direct provider SDKs (`MODEL-CATALOG.md` § 5). This decouples runtime config from any single provider's API shape and keeps the v0.1 budget envelope inside the already-approved LLM API spend.
-- ADR-009 records the catalog-as-architecture-document choice and the assignment shape (main + fallback + auxiliary classifier per role).
+- The Founder pre-approved a role-model assignment on 2026-05-05 and refined it on 2026-05-06 via ADDENDUM-001, which (a) replaced the placeholder identifiers with five Fireworks-hosted models reachable through OmniRoute, (b) waived per-token cost optimization within the catalog, and (c) made the routing-layer mandate explicit (Option B). The v0.1.1 catalog encodes this set; the cost-posture rewrite ADDENDUM-001 also requires lands as v0.2.0 in PR-E.
+- **Per-role assignment, capability-only ordering** (`MODEL-CATALOG.md` v0.1.1 § 4.1): identifiers are real OmniRoute Fireworks-native paths (`accounts/fireworks/models/<slug>`), NOT placeholders. Runtimes: `orchestrator` → `minimax-m2p7`; `business-planner` → `qwen3p6-plus`; `architect` → `deepseek-v4-pro`; `executor` → `glm-5p1`; `reviewer` → `kimi-k2p6`. Each role has a 4-entry chain (main + 3 fallbacks) ordered by capability fit alone.
+- **No separate auxiliary classifier model in v0.1**: the v0.1.1 escalation classifier is deterministic (`ESCALATION-POLICY.md` v0.1.1 § 5; ADR-008 v0.1.1) with no LLM in the decision; the optional advisory narrative (§ 5.5) reuses the runtime's catalog main model.
+- **Within-catalog model picks proceed without escalation**. Catalog changes (adding a new model, changing a role's main, changing a role's fallback, changing the routing layer, switching the Fireworks backend) escalate per `ESCALATION-POLICY.md` v0.1.1 § 4.6.
+- Models are reached through OmniRoute (primary, with Fireworks as configured backend) and OpenRouter (backup); specialist runtimes never import a Fireworks SDK or hit `api.fireworks.ai` directly. This decouples runtime config from any single provider's API shape and keeps the v0.1 budget envelope inside the already-approved LLM API spend. **Verification gate**: the TKT-026 install verify script issues a 1-token completion against `http://127.0.0.1:<omniroute_port>/v1/chat/completions` for each catalog identifier at install/upgrade; failure raises `paid:third_party_external_service_not_yet_supported` with no silent fallback to direct-Fireworks (binding precondition recorded in ADR-011, lands in PR-E). OmniRoute-supports-Fireworks gate verified 2026-05-06 via OmniRoute issue [#265](https://github.com/diegosouzapw/homelab/blob/main/.github/) (closed; mainteiner confirmed: "send the Fireworks path as model ID and OmniRoute auto-resolves it").
+- ADR-009 v0.1.1 records the catalog-as-architecture-document choice (with real OmniRoute Fireworks identifiers; no auxiliary classifier model in v0.1; ADDENDUM-001 cost-posture override applied).
 
 ## 17. CI And Validation
 
