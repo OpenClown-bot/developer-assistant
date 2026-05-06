@@ -277,7 +277,7 @@ The SQLite database is a single file on the VPS. Backup strategy for v0.1:
 1. The SQLite database file should be included in the VPS filesystem backup schedule.
 2. For a consistent offline backup, stop the Hermes service before copying the file, or use `sqlite3` to make a backup:
    ```
-   sqlite3 /path/to/state.db ".backup /path/to/state.db.bak"
+   sqlite3 /path/to/operational.db ".backup /path/to/operational.db.bak"
    ```
 3. Backup frequency should match VPS backup intervals. Daily is recommended for v0.1.
 
@@ -288,7 +288,7 @@ To reset operational state (e.g., after corruption or for a clean start):
 1. Stop the Hermes service to prevent in-flight writes.
 2. Back up the database file if any data should be preserved:
    ```
-   cp /path/to/state.db /path/to/state.db.pre-reset
+   cp /path/to/operational.db /path/to/operational.db.pre-reset
    ```
 3. Either remove the database file (it will be recreated on next startup) or call `reset_store(db)` to clear all data rows while preserving the schema.
 4. Restart the Hermes runtime.
@@ -317,7 +317,7 @@ This is the **shared operational store** referenced by all five runtime symlinks
 For pre-multi-Hermes (single-runtime) deployments the path is:
 
 ```
-/opt/developer-assistant/state.db
+/opt/developer-assistant/operational.db
 ```
 
 The path should be configured via environment variable or runtime configuration, not committed to the repository.

@@ -85,7 +85,7 @@ These rules MUST escalate without LLM consultation. The rule id format is `<cate
 
 | Rule id | Trigger condition | Why escalate |
 | --- | --- | --- |
-| `state:drop_table` | SQL `DROP TABLE` against `state.db` | Schema-destructive |
+| `state:drop_table` | SQL `DROP TABLE` against `operational.db` | Schema-destructive |
 | `state:drop_database` | SQL `DROP DATABASE` against any database | Schema-destructive |
 | `state:truncate_or_delete_unbounded` | `DELETE FROM <table>` without a `WHERE` clause OR `TRUNCATE` | Wipes operational data |
 | `state:alter_table_drop_column` | SQL `ALTER TABLE ... DROP COLUMN` | Loses operational data |

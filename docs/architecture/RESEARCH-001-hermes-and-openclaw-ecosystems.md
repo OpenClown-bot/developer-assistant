@@ -302,7 +302,7 @@ These two estimates are flagged as **assumptions, not findings**, in this resear
 
 Consequences for `developer-assistant`:
 
-- v0.1 uses SQLite (the same `state.db` already adopted by `OPERATIONAL-STATE-STORE.md`) as the work queue. Two new tables (`work_items` and `escalations`) are added in this pass and described in `MULTI-HERMES-CONTRACT.md` § 6.
+- v0.1 uses SQLite (the same `operational.db` per `OPERATIONAL-STATE-STORE.md`) as the work queue. Two new tables (`work_items` and `escalations`) are added in this pass and described in `MULTI-HERMES-CONTRACT.md` § 6.
 - Heavier alternatives (Redis, NATS, RabbitMQ) are deferred until the SQLite path proves insufficient. ADR-006 records this trade-off.
 
 Citation: SQLite docs § WAL, § RETURNING; `OPERATIONAL-STATE-STORE.md` § 9.

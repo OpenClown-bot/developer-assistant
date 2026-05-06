@@ -303,7 +303,7 @@ The runtime's main model becomes unreachable. Hermes' built-in retry plus the pe
 
 ### 9.3 Operational state store unavailable
 
-`state.db` is on local disk; the only realistic outage is filesystem corruption. The escalation-policy plugin's bootstrap check fails fast on startup if the schema version mismatches, preventing a runtime from running against a state store it does not understand. If `state.db` is unreadable mid-runtime, the runtime exits with a clear error; the Founder runs `rollback-self.sh` to restore the last backup.
+`operational.db` is on local disk; the only realistic outage is filesystem corruption. The escalation-policy plugin's bootstrap check fails fast on startup if the schema version mismatches, preventing a runtime from running against a state store it does not understand. If `operational.db` is unreadable mid-runtime, the runtime exits with a clear error; the Founder runs `rollback-self.sh` to restore the last backup.
 
 ### 9.4 Escalation backlog
 
