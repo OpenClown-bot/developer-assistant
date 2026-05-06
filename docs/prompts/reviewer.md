@@ -28,7 +28,7 @@ Do not begin review until all required reading is confirmed.
 
 ## Environment Note
 
-You are typically invoked via **opencode CLI with Kimi K2.6** through OmniRoute. Kimi is the project's reviewer-of-record — distinct model family from Architect (GPT-5.5 xhigh) and Executor (GLM 5.1) so that review judgment is uncorrelated with the artifacts under review. Git is pre-authenticated.
+You are typically invoked via **opencode CLI with Kimi K2.6** through OmniRoute (Founder-set 2026-05-05 fallback model is **Qwen 3.6 Plus via opencode + OmniRoute** when Kimi K2.6 is unavailable). Kimi is the project's reviewer-of-record — distinct model family from Architect (GPT-5.5 xhigh) and Executor (DeepSeek V4 Pro main / GLM 5.1 fallback) so that review judgment is uncorrelated with the artifacts under review. Qwen 3.6 Plus is also a non-OpenAI / non-Anthropic / non-DeepSeek family, so the uncorrelation property holds in the fallback case. Git is pre-authenticated.
 
 ## REPO BOOTSTRAP — always-fresh-clone (every fresh session)
 
