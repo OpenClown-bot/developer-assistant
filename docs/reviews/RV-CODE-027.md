@@ -1,8 +1,8 @@
 ---
 id: RV-CODE-027
-version: 0.1.0
+version: 0.2.0
 status: complete
-verdict: fail
+verdict: pass_with_changes
 ---
 
 # Review: RV-CODE-027 — `dev-assist-cli` Operator CLI (TKT-027)
@@ -145,6 +145,55 @@ Additionally, H-003 (`calls` under-count for daily rows) is **not yet fixed** in
 3. Populate `last_error` in `status` by querying `errors` for the most recent row per runtime in the last 24h.
 4. Add the `--role` filter to `logs` per `OBSERVABILITY-CONTRACT.md` § 6.2, or document an explicit scope exception in the ticket.
 5. Strengthen `test_logs_recursive_with_fixture` to assert presence of child work-item IDs in the output.
+
+## 9. Iter-2 Verify (commit `8bddded`)
+
+Executor pushed iter-3 (`8bddded`) addressing iter-1 BLOCKER and IMPORTANT findings. All 41 tests pass (`python -m unittest tests.test_dev_assist_cli`). `scripts/validate_docs.py` passes.
+
+### 9.1 Findings Verification
+
+| ID | Finding | Verdict | Notes |
+|---|---|---|---|
+| H-001 | `queue_counts["escalated"]` always 0 | **RESOLVED** | Code now queries `escalations` table: `SELECT COUNT(*) FROM escalations WHERE status IN ('pending', 'surfaced')`. Test `test_status_escalated_count_from_escalations_table` confirms value > 0. |
+| H-002 | costs: no split-and-merge at 7-day boundary | **RESOLVED** | `cmd_costs` now uses `cutoff_iso = (now - timedelta(days=7)).strftime(...)`. When `since_iso < cutoff_iso`, it queries both `llm_calls` (since `cutoff_iso`) and `llm_calls_daily` (from `since` day until `cutoff_day`). Test `test_costs_7day_boundary_split_merge` asserts `tables_queried == ["llm_calls", "llm_calls_daily"]`. |
+| H-003 | `calls` counter under-reports daily rows | **RESOLVED** | Aggregation loop now does `aggregated[key]["calls"] += row.get("call_count", 1)`. For `llm_calls` rows (no `call_count` key) this defaults to 1. For `llm_calls_daily` rows it uses the actual `call_count` field. Test `test_costs_daily_call_count` verifies. |
+| H-004 | `last_error` hard-coded to `None` | **RESOLVED** | `cmd_status` now queries: `SELECT ts as ts_iso, error_class FROM errors WHERE runtime = ? AND ts >= ? ORDER BY ts DESC LIMIT 1` with a 24h window. The resulting dict (or `None`) is emitted as `last_error`. Test `test_status_last_error_from_errors_table` verifies. |
+| H-005 | missing "last error in last 5 min" → degraded | **RESOLVED** | `cmd_status` now queries `SELECT 1 FROM errors WHERE runtime = ? AND ts >= ? LIMIT 1` with a 5-minute window. If a recent error exists, `error_degraded = True`, and the state becomes `degraded` even when heartbeat is healthy. Test `test_status_error_degraded` verifies. |
+| M-001 | `logs` missing `--role` filter | **RESOLVED** | `p_logs.add_argument("--role", ...)` added. `cmd_logs` passes `-u devassist-{role}.service` to `journalctl` when `--role` is set. Test `test_logs_role_filter` verifies. |
+| F-TO-3 / REGRESSION | heartbeat threshold raised to 300s | **RESOLVED** | Reverted to `heartbeat_age_s > 60` in `8bddded`. Test `test_status_heartbeat_degraded_at_60s` verifies 61s triggers degraded and 59s stays running. |
+
+### 9.2 Outstanding (Not in Verify Scope)
+
+The following iter-1 findings were **not** addressed in iter-2/iter-3. They remain valid observations but do not block merge:
+
+- **M-002** — `logs --recursive` still resolves `parent_work_item_id` via full-table `payload_json` scan. `NOT-RESOLVED`. Still O(n) and brittle; acceptable for v0.1 small data volumes.
+- **M-003** — `test_logs_recursive_with_fixture` still asserts only `code == 0`; no child/grand-child ID presence checks. `NOT-RESOLVED`. The new test `test_logs_recursive_stderr_unresolvable_parent` covers the stderr path, but the happy-path recursive test lacks output assertions.
+- **M-004** — `down` vs `degraded` semantics gap for unreachable health endpoint remains. `NOT-RESOLVED`. Still acceptable for v0.1.
+- **L-001** — Schema files loaded but not validated by a schema engine. `NOT-RESOLVED`.
+- **L-002** — `parse_duration` accepts non-positive multipliers. `NOT-RESOLVED`.
+
+### 9.3 New Findings (iter-2/iter-3)
+
+No new High or Medium severity findings introduced by the iter-2/iter-3 changes. Code review of the delta confirms:
+
+- All new SQL queries use parameterized statements (no injection risk).
+- The `query_llm_calls_daily(..., until=cutoff_day)` boundary is correct: `day < cutoff_day` excludes the 7-day boundary day, which is fully covered by the `llm_calls` since-`cutoff_iso` query.
+- The `since_iso >= cutoff_iso` string comparison is lexicographically safe for ISO 8601 UTC strings.
+- No new network calls, secret handling, or write paths added.
+
+### 9.4 Acceptance Criteria Re-assessment
+
+| # | Criterion | Previous | Current |
+|---|---|---|---|
+| 3 | `status` JSON matches schema | PARTIAL | **PASS** | `last_error` populated, `queue.escalated` correct, degraded logic complete. |
+| 6 | `logs --recursive` parent walk | PASS | **PASS** | Stderr note for unresolvable IDs present (F-TO-4). `--role` filter added. |
+| 8 | `costs --since today` aggregated output | PARTIAL | **PASS** | Split-and-merge works, `call_count` accurate for daily rows. |
+
+### 9.5 Final Verdict for Iter-2
+
+All BLOCKER findings from iter-1 (H-001 through H-005, plus the regression F-TO-3) are **RESOLVED** in commit `8bddded`. No new High or Medium findings were introduced. Test coverage expanded from 31 to 41 tests, all passing offline.
+
+The remaining open observations (M-002, M-003, L-001, L-002) are acceptable for v0.1 and can be deferred to a future maintenance ticket. **Upgrade verdict to `pass_with_changes`.**
 
 ---
 *Reviewer model: Kimi K2.6*
