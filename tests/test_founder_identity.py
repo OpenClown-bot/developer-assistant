@@ -74,19 +74,19 @@ class TestBindFounderIdentity(unittest.TestCase):
         self.assertEqual(len(bindings), 2)
 
     def test_display_name_optional(self) -> None:
-        binding_id = bind_founder_identity(
+        bind_founder_identity(
             self.conn,
             founder_id="founder-001",
             adapter_id="telegram",
             upstream_user_id="u999999",
         )
-        row = lookup_founder_by_upstream_identity(
+        founder_id = lookup_founder_by_upstream_identity(
             self.conn,
             adapter_id="telegram",
             upstream_user_id="u999999",
         )
-        self.assertIsNotNone(row)
-        self.assertIsNone(row["display_name"])
+        self.assertIsNotNone(founder_id)
+        self.assertEqual(founder_id, "founder-001")
 
 
 class TestLookupFounderByUpstreamIdentity(unittest.TestCase):
@@ -96,7 +96,7 @@ class TestLookupFounderByUpstreamIdentity(unittest.TestCase):
     def tearDown(self) -> None:
         self.conn.close()
 
-    def test_found_returns_binding(self) -> None:
+    def test_found_returns_founder_id(self) -> None:
         bind_founder_identity(
             self.conn,
             founder_id="founder-001",
@@ -104,23 +104,21 @@ class TestLookupFounderByUpstreamIdentity(unittest.TestCase):
             upstream_user_id="u123456",
             display_name="Founder",
         )
-        row = lookup_founder_by_upstream_identity(
+        founder_id = lookup_founder_by_upstream_identity(
             self.conn,
             adapter_id="telegram",
             upstream_user_id="u123456",
         )
-        self.assertIsNotNone(row)
-        self.assertEqual(row["founder_id"], "founder-001")
-        self.assertEqual(row["adapter_id"], "telegram")
-        self.assertEqual(row["upstream_user_id"], "u123456")
+        self.assertIsNotNone(founder_id)
+        self.assertEqual(founder_id, "founder-001")
 
     def test_not_found_returns_none(self) -> None:
-        row = lookup_founder_by_upstream_identity(
+        founder_id = lookup_founder_by_upstream_identity(
             self.conn,
             adapter_id="telegram",
             upstream_user_id="u-no-such",
         )
-        self.assertIsNone(row)
+        self.assertIsNone(founder_id)
 
     def test_revoked_binding_not_found(self) -> None:
         bind_founder_identity(
@@ -134,12 +132,12 @@ class TestLookupFounderByUpstreamIdentity(unittest.TestCase):
             adapter_id="telegram",
             upstream_user_id="u123456",
         )
-        row = lookup_founder_by_upstream_identity(
+        founder_id = lookup_founder_by_upstream_identity(
             self.conn,
             adapter_id="telegram",
             upstream_user_id="u123456",
         )
-        self.assertIsNone(row)
+        self.assertIsNone(founder_id)
 
 
 class TestRevokeFounderBinding(unittest.TestCase):
@@ -162,12 +160,12 @@ class TestRevokeFounderBinding(unittest.TestCase):
             upstream_user_id="u123456",
         )
         self.assertTrue(result)
-        row = lookup_founder_by_upstream_identity(
+        founder_id = lookup_founder_by_upstream_identity(
             self.conn,
             adapter_id="telegram",
             upstream_user_id="u123456",
         )
-        self.assertIsNone(row)
+        self.assertIsNone(founder_id)
 
     def test_revoke_nonexistent_returns_false(self) -> None:
         result = revoke_founder_binding(

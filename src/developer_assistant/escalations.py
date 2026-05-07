@@ -10,6 +10,7 @@ All timestamps in UTC.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
@@ -17,10 +18,6 @@ from typing import Any, Mapping, Optional
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _seven_days_from_now() -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
 
 
 def write_escalation(
@@ -42,7 +39,7 @@ def write_escalation(
     Returns the new row id.
     """
     now = _now_iso()
-    options_json = '["' + '","'.join(o.replace('"', '\\"') for o in options) + '"]'
+    options_json = json.dumps(options)
     cur = conn.execute(
         """INSERT INTO escalations
                (created_at, updated_at, originating_runtime, originating_work_item_id,
@@ -60,15 +57,22 @@ def write_escalation(
 def read_pending_escalations(
     conn: sqlite3.Connection,
     statuses: Optional[list[str]] = None,
-    limit: int = 100,
+    limit: int = 10,
 ) -> list[Mapping[str, Any]]:
-    """Return escalations in pending/surfaced state, ordered by urgency then id."""
+    """Return escalations in pending/surfaced state, ordered by urgency then id.
+
+    Surfaced escalations are subject to a 5-minute re-surface cooldown:
+    items surfaced less than 5 minutes ago are excluded so the Founder
+    is not re-prompted immediately.
+    """
     if statuses is None:
         statuses = ["pending", "surfaced"]
     placeholders = ",".join("?" * len(statuses))
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
     cur = conn.execute(
         f"""SELECT * FROM escalations
             WHERE status IN ({placeholders})
+              AND (surfaced_at IS NULL OR surfaced_at < ?)
             ORDER BY
                 CASE urgency
                     WHEN 'high'   THEN 1
@@ -77,7 +81,7 @@ def read_pending_escalations(
                 END,
                 id
             LIMIT ?""",
-        statuses + [limit],
+        statuses + [cutoff, limit],
     )
     return [dict(r) for r in cur.fetchall()]
 
@@ -141,12 +145,15 @@ def resolve_escalation(
     return dict(row)
 
 
-def expire_old_escalations(conn: sqlite3.Connection) -> int:
-    """Expire escalations older than 7 days that remain pending or surfaced.
+def expire_old_escalations(
+    conn: sqlite3.Connection,
+    max_age_days: int = 7,
+) -> int:
+    """Expire escalations older than max_age_days that remain pending or surfaced.
 
     Returns the count of expired rows.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
     cur = conn.execute(
         """UPDATE escalations
            SET status = 'expired',

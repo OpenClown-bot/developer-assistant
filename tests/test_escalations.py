@@ -65,7 +65,7 @@ class TestWriteEscalation(unittest.TestCase):
         self.assertEqual(rows[0]["originating_runtime"], "architect")
 
     def test_related_work_item(self) -> None:
-        from developer_assistant.work_queue import write_work_item, claim_work_item
+        from developer_assistant.work_queue import write_work_item
         item_id = write_work_item(
             self.conn,
             target_role="executor",
@@ -87,6 +87,25 @@ class TestWriteEscalation(unittest.TestCase):
         )
         row = read_pending_escalations(self.conn)[0]
         self.assertEqual(row["originating_work_item_id"], item_id)
+
+    def test_options_json_uses_dumps(self) -> None:
+        import json
+        write_escalation(
+            self.conn,
+            originating_runtime="executor",
+            trigger_kind="test",
+            context='He said "hello"',
+            proposed_action="test",
+            options=['approve "now"', "deny"],
+            recommended_default="deny",
+            impact="test",
+            urgency="high",
+            durable_artifact_target="docs/tickets/TKT-999.md",
+        )
+        rows = read_pending_escalations(self.conn)
+        self.assertEqual(len(rows), 1)
+        parsed = json.loads(rows[0]["options_json"])
+        self.assertEqual(parsed, ['approve "now"', "deny"])
 
 
 class TestReadPendingEscalations(unittest.TestCase):
@@ -135,6 +154,45 @@ class TestReadPendingEscalations(unittest.TestCase):
             self._write("high")
         rows = read_pending_escalations(self.conn, limit=3)
         self.assertEqual(len(rows), 3)
+
+    def test_surfaced_cooldown_excludes_recent(self) -> None:
+        esc_id = write_escalation(
+            self.conn,
+            originating_runtime="executor",
+            trigger_kind="test",
+            context="test",
+            proposed_action="test",
+            options=["approve", "deny"],
+            recommended_default="deny",
+            impact="test",
+            urgency="high",
+            durable_artifact_target="docs/tickets/TKT-999.md",
+        )
+        mark_escalation_surfaced(self.conn, escalation_id=esc_id)
+        rows = read_pending_escalations(self.conn)
+        self.assertEqual(len(rows), 0)
+
+    def test_surfaced_cooldown_includes_old(self) -> None:
+        esc_id = write_escalation(
+            self.conn,
+            originating_runtime="executor",
+            trigger_kind="test",
+            context="test",
+            proposed_action="test",
+            options=["approve", "deny"],
+            recommended_default="deny",
+            impact="test",
+            urgency="high",
+            durable_artifact_target="docs/tickets/TKT-999.md",
+        )
+        mark_escalation_surfaced(self.conn, escalation_id=esc_id)
+        self.conn.execute(
+            "UPDATE escalations SET surfaced_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+            (esc_id,),
+        )
+        self.conn.commit()
+        rows = read_pending_escalations(self.conn)
+        self.assertEqual(len(rows), 1)
 
 
 class TestMarkEscalationSurfaced(unittest.TestCase):
@@ -328,6 +386,27 @@ class TestExpireOldEscalations(unittest.TestCase):
         )
         count = expire_old_escalations(self.conn)
         self.assertEqual(count, 0)
+
+    def test_expire_custom_max_age_days(self) -> None:
+        esc_id = write_escalation(
+            self.conn,
+            originating_runtime="executor",
+            trigger_kind="test",
+            context="test",
+            proposed_action="test",
+            options=["approve", "deny"],
+            recommended_default="deny",
+            impact="test",
+            urgency="high",
+            durable_artifact_target="docs/tickets/TKT-999.md",
+        )
+        self.conn.execute(
+            "UPDATE escalations SET created_at = '2025-12-01T00:00:00+00:00' WHERE id = ?",
+            (esc_id,),
+        )
+        self.conn.commit()
+        count_7 = expire_old_escalations(self.conn, max_age_days=7)
+        self.assertGreater(count_7, 0)
 
 
 if __name__ == "__main__":

@@ -54,20 +54,20 @@ def lookup_founder_by_upstream_identity(
     *,
     adapter_id: str,
     upstream_user_id: str,
-) -> Optional[Mapping[str, Any]]:
-    """Look up the founder binding for a given adapter + upstream identity.
+) -> Optional[str]:
+    """Look up the founder_id for a given adapter + upstream identity.
 
-    Returns the binding row dict, or None if not found or revoked.
+    Returns the founder_id string, or None if not found or revoked.
     """
     cur = conn.execute(
-        "SELECT * FROM founder_identity_bindings "
+        "SELECT founder_id FROM founder_identity_bindings "
         "WHERE adapter_id = ? AND upstream_user_id = ? AND revoked_at IS NULL",
         (adapter_id, upstream_user_id),
     )
     row = cur.fetchone()
     if row is None:
         return None
-    return dict(row)
+    return row["founder_id"]
 
 
 def revoke_founder_binding(

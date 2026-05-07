@@ -6,8 +6,11 @@ production hostnames, or bash subprocesses.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -72,9 +75,26 @@ class TestWriteWorkItem(unittest.TestCase):
             dedup_key="ticket-implementation:TKT-020",
         )
         self.assertGreater(id1, 0)
-        self.assertEqual(id2, -1)
+        self.assertEqual(id2, id1)
         rows = read_work_items_by_role(self.conn, "executor")
         self.assertEqual(len(rows), 1)
+
+    def test_no_dedup_key_allows_duplicate_rows(self) -> None:
+        id1 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="ticket_implementation",
+            payload={"ticket_id": "TKT-020"},
+        )
+        id2 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="ticket_implementation",
+            payload={"ticket_id": "TKT-020"},
+        )
+        self.assertNotEqual(id1, id2)
+        rows = read_work_items_by_role(self.conn, "executor")
+        self.assertEqual(len(rows), 2)
 
     def test_originating_run_id(self) -> None:
         state_store.upsert_project_binding(
@@ -166,6 +186,62 @@ class TestClaimWorkItem(unittest.TestCase):
         row = claim_work_item(self.conn, runtime_id="planner-02", target_role="planner")
         self.assertIsNone(row)
 
+    def test_lease_minutes_custom(self) -> None:
+        write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+        )
+        row = claim_work_item(
+            self.conn,
+            runtime_id="executor-01",
+            target_role="executor",
+            lease_minutes=60,
+        )
+        self.assertIsNotNone(row)
+
+
+class TestClaimWorkItemConcurrency(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test_concurrent.db")
+        self.conn = state_store.open_store(self.db_path)
+        write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="ticket_implementation",
+            payload={"ticket_id": "TKT-020"},
+        )
+
+    def tearDown(self) -> None:
+        self.conn.close()
+        os.unlink(self.db_path)
+        os.rmdir(self.tmpdir)
+
+    def test_only_one_thread_claims(self) -> None:
+        results: list[object] = [None, None]
+        barrier = threading.Barrier(2, timeout=5)
+
+        def claim(idx: int, runtime_id: str) -> None:
+            conn2 = state_store.open_store(self.db_path)
+            barrier.wait()
+            row = claim_work_item(conn2, runtime_id=runtime_id, target_role="executor")
+            results[idx] = row
+            conn2.close()
+
+        t1 = threading.Thread(target=claim, args=(0, "executor-01"))
+        t2 = threading.Thread(target=claim, args=(1, "executor-02"))
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        claimed = [r for r in results if r is not None]
+        nones = [r for r in results if r is None]
+        self.assertEqual(len(claimed), 1)
+        self.assertEqual(len(nones), 1)
+
 
 class TestCompleteWorkItem(unittest.TestCase):
     def setUp(self) -> None:
@@ -240,6 +316,102 @@ class TestReleaseWorkItem(unittest.TestCase):
         row = claim_work_item(self.conn, runtime_id="planner-02", target_role="planner")
         self.assertIsNotNone(row)
         self.assertEqual(row["id"], item_id)
+
+    def test_release_increment_attempts_stays_pending(self) -> None:
+        item_id = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            max_attempts=3,
+        )
+        claim_work_item(self.conn, runtime_id="executor-01", target_role="executor")
+        row = release_work_item(self.conn, item_id=item_id, increment_attempts=True)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(row["attempt_count"], 1)
+
+    def test_release_increment_attempts_reaches_failed(self) -> None:
+        item_id = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            max_attempts=1,
+        )
+        claim_work_item(self.conn, runtime_id="executor-01", target_role="executor")
+        row = release_work_item(self.conn, item_id=item_id, increment_attempts=True)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["attempt_count"], 1)
+
+
+class TestDedupKeyLifecycle(unittest.TestCase):
+    def setUp(self) -> None:
+        self.conn = state_store.open_store(":memory:")
+
+    def tearDown(self) -> None:
+        self.conn.close()
+
+    def test_dedup_key_rejected_while_claimed(self) -> None:
+        id1 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-001",
+        )
+        claim_work_item(self.conn, runtime_id="executor-01", target_role="executor")
+        id2 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-001",
+        )
+        self.assertEqual(id2, id1)
+
+    def test_dedup_key_rejected_while_failed(self) -> None:
+        id1 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-002",
+            max_attempts=1,
+        )
+        claim_work_item(self.conn, runtime_id="executor-01", target_role="executor")
+        release_work_item(self.conn, item_id=id1, increment_attempts=True)
+        id2 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-002",
+        )
+        self.assertEqual(id2, id1)
+
+    def test_dedup_key_allowed_after_completed(self) -> None:
+        id1 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-003",
+        )
+        claim_work_item(self.conn, runtime_id="executor-01", target_role="executor")
+        complete_work_item(self.conn, item_id=id1, result={})
+        id2 = write_work_item(
+            self.conn,
+            target_role="executor",
+            kind="test",
+            payload={},
+            dedup_key="dk-003",
+        )
+        self.assertNotEqual(id2, id1)
+        self.assertGreater(id2, 0)
+        rows = read_work_items_by_role(self.conn, "executor")
+        self.assertEqual(len(rows), 2)
 
 
 class TestReclaimExpiredLeases(unittest.TestCase):

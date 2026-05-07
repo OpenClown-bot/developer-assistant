@@ -19,10 +19,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _default_lease_until() -> str:
-    return (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
-
-
 def write_work_item(
     conn: sqlite3.Connection,
     *,
@@ -37,22 +33,44 @@ def write_work_item(
     """Insert a new pending work item.
 
     If dedup_key is provided and a row already exists with the same dedup_key
-    in status pending/claimed/failed, returns -1 without inserting.
+    in status pending/claimed/failed, returns the existing row id without
+    inserting.  Completed rows have their dedup_key set to NULL so the key
+    can be reused for a new insertion.
 
-    Returns the new row id.
+    Returns the new row id, or the existing row id on duplicate.
     """
+    now = _now_iso()
+    payload_json = json.dumps(payload)
+
     if dedup_key:
+        conn.execute(
+            "UPDATE work_items SET dedup_key = NULL, updated_at = ? "
+            "WHERE dedup_key = ? AND status = 'completed'",
+            (now, dedup_key),
+        )
         cur = conn.execute(
+            """INSERT INTO work_items
+                   (created_at, updated_at, target_role, kind, dedup_key, payload_json,
+                    priority, status, attempt_count, max_attempts, originating_run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+               ON CONFLICT(dedup_key) DO NOTHING
+               RETURNING id""",
+            (now, now, target_role, kind, dedup_key, payload_json,
+             priority, max_attempts, originating_run_id),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            conn.commit()
+            return row["id"]
+        cur2 = conn.execute(
             "SELECT id FROM work_items "
             "WHERE dedup_key = ? AND status IN ('pending','claimed','failed')",
             (dedup_key,),
         )
-        existing = cur.fetchone()
-        if existing is not None:
-            return -1
+        existing = cur2.fetchone()
+        conn.commit()
+        return existing["id"]
 
-    payload_json = json.dumps(payload)
-    now = _now_iso()
     cur = conn.execute(
         """INSERT INTO work_items
                (created_at, updated_at, target_role, kind, dedup_key, payload_json,
@@ -70,18 +88,19 @@ def claim_work_item(
     *,
     runtime_id: str,
     target_role: str,
+    lease_minutes: int = 30,
 ) -> Optional[Mapping[str, Any]]:
     """Atomically claim the highest-priority pending item for target_role.
 
     Updates status to 'claimed', sets claimed_by_runtime, claimed_at, and a
-    30-minute rolling lease. Returns the row dict, or None if nothing is
-    pending.
+    rolling lease of *lease_minutes* duration (default 30). Returns the row
+    dict, or None if nothing is pending.
 
     Idempotent: if the runtime already holds the lease, returns the row
     without error.
     """
     now = _now_iso()
-    lease_until = _default_lease_until()
+    lease_until = (datetime.now(timezone.utc) + timedelta(minutes=lease_minutes)).isoformat()
     cur = conn.execute(
         """UPDATE work_items
            SET status = 'claimed',
@@ -112,6 +131,7 @@ def complete_work_item(
 ) -> Optional[Mapping[str, Any]]:
     """Mark a claimed work item as completed with a result dict.
 
+    Sets dedup_key to NULL on completion so the key can be reused.
     Returns the updated row dict, or None if the row was not found or not
     currently claimed.
     """
@@ -123,6 +143,7 @@ def complete_work_item(
                completed_at = ?,
                result_json = ?,
                claim_lease_until = NULL,
+               dedup_key = NULL,
                updated_at = ?
            WHERE id = ? AND status = 'claimed'
            RETURNING *""",
@@ -139,23 +160,45 @@ def release_work_item(
     conn: sqlite3.Connection,
     *,
     item_id: int,
+    increment_attempts: bool = False,
 ) -> Optional[Mapping[str, Any]]:
     """Release a claimed work item back to pending state.
+
+    If increment_attempts is True, attempt_count is incremented; if the new
+    count reaches max_attempts, status is set to 'failed' instead of
+    'pending'.
 
     Returns the updated row dict, or None if the row was not found.
     """
     now = _now_iso()
-    cur = conn.execute(
-        """UPDATE work_items
-           SET status = 'pending',
-               claimed_by_runtime = NULL,
-               claimed_at = NULL,
-               claim_lease_until = NULL,
-               updated_at = ?
-           WHERE id = ?
-           RETURNING *""",
-        (now, item_id),
-    )
+    if increment_attempts:
+        cur = conn.execute(
+            """UPDATE work_items
+               SET status = CASE
+                       WHEN attempt_count + 1 >= max_attempts THEN 'failed'
+                       ELSE 'pending'
+                   END,
+                   claimed_by_runtime = NULL,
+                   claimed_at = NULL,
+                   claim_lease_until = NULL,
+                   attempt_count = attempt_count + 1,
+                   updated_at = ?
+               WHERE id = ?
+               RETURNING *""",
+            (now, item_id),
+        )
+    else:
+        cur = conn.execute(
+            """UPDATE work_items
+               SET status = 'pending',
+                   claimed_by_runtime = NULL,
+                   claimed_at = NULL,
+                   claim_lease_until = NULL,
+                   updated_at = ?
+               WHERE id = ?
+               RETURNING *""",
+            (now, item_id),
+        )
     row = cur.fetchone()
     conn.commit()
     if row is None:
