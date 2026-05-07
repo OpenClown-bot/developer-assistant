@@ -165,7 +165,7 @@ Actions in order:
 
 ### 8.2 OmniRoute is down, taking dependent runtimes with it
 
-`devassist-omniroute.service` is ordered before all five Hermes runtimes (`SELF-DEPLOYMENT-CONTRACT.md` § 5.3). If OmniRoute is in `failed` state, runtimes will fail their LLM calls and may saturate their fallback chains.
+`omniroute.service` is ordered before all five Hermes runtimes (`SELF-DEPLOYMENT-CONTRACT.md` § 5.3). If OmniRoute is in `failed` state, runtimes will fail their LLM calls and may saturate their fallback chains.
 
 Actions: go to § 10 (OmniRoute Unreachable).
 
@@ -200,7 +200,7 @@ OmniRoute is the routing layer per `ADR-011` Option B. All specialist-runtime LL
 
 **Diagnose**:
 
-1. `sudo systemctl status devassist-omniroute.service`. Confirm `active (running)`.
+1. `sudo systemctl status omniroute.service`. Confirm `active (running)`.
 2. `curl -fsS http://127.0.0.1:20128/health`. Should return `200 OK`.
 3. Run the verify gate: `scripts/verify-self.sh`. If `OmniRoute does not support catalog model <id>` appears, the upstream OmniRoute regressed — this is a `paid:third_party_external_service_not_yet_supported` escalation per `ADR-011` Verification Gate.
 
@@ -208,8 +208,8 @@ OmniRoute is the routing layer per `ADR-011` Option B. All specialist-runtime LL
 
 | Diagnosis | Action |
 | --- | --- |
-| Unit `failed` | `sudo systemctl restart devassist-omniroute.service`. Watch its journal: `sudo journalctl -u devassist-omniroute.service -n 100 --no-pager`. |
-| Unit `active` but `/health` does not return 200 | Restart: `sudo systemctl restart devassist-omniroute.service`. |
+| Unit `failed` | `sudo systemctl restart omniroute.service`. Watch its journal: `sudo journalctl -u omniroute.service -n 100 --no-pager`. |
+| Unit `active` but `/health` does not return 200 | Restart: `sudo systemctl restart omniroute.service`. |
 | Unit `active` and `/health` returns 200 but `verify-self.sh` says a catalog model is no longer supported | Hard-gate escalation. Do NOT silently fall back to direct-Fireworks (`ADR-011` Consequences). Notify the Founder via Telegram: include the failing model id, the OmniRoute version, the timestamp. The Founder approves the next step (catalog change, OmniRoute pin downgrade, or temporary direct-provider fallback under explicit deviation approval). |
 | Unit `active` but slow / timing out | `dev-assist-cli logs --since 10m --role omniroute --grep '"level":"error"'`. Read the recent error pattern. If it's an upstream Fireworks rate-limit, the OpenRouter backup will engage automatically; verify by checking `dev-assist-cli costs --since 10m` for `routing_path: openrouter` rows. |
 
