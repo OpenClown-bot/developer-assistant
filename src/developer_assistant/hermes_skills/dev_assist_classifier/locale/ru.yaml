@@ -1,0 +1,17 @@
+labels:
+  intake: "приём"
+  progress_query: "запрос_прогресса"
+  command: "команда"
+  freeform_chat: "свободный_чат"
+  escalation_response: "ответ_на_эскалацию"
+commands:
+  start: "/start"
+  help: "/help"
+  status: "/status"
+  projects: "/projects"
+  pause: "/pause"
+  resume: "/resume"
+errors:
+  malformed_response: "Некорректный ответ от LLM"
+  no_pending_escalation: "Нет активных эскалаций для ответа на сообщение"
+  llm_error: "Ошибка классификации: {error}"

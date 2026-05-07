@@ -1,0 +1,13 @@
+prompt:
+  header: "⚠️ Требуется решение основателя"
+  originating_runtime: "Роль: {runtime}"
+  proposed_action: "Действие: {action}"
+  trigger_kind: "Триггер: {trigger}"
+  recommended_default: "Рекомендация: {recommendation}"
+  impact: "Влияние: {impact}"
+  urgency: "Срочность: {urgency}"
+  escalation_id: "ID эскалации: {id}"
+  resolution_hint: "Ответьте /approve {id} или /deny {id}"
+errors:
+  router_error: "Ошибка отправки эскалации: {error}"
+  retry_hint: "Повторная попытка на следующем цикле"
