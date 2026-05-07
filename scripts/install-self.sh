@@ -150,7 +150,9 @@ ENVFILE
 
 install_hermes_agent() {
     local hermes_dir="${PREFIX}/usr/local/lib/hermes-agent"
-    if [ -d "$hermes_dir" ] && [ -x "${hermes_dir}/bin/hermes" ]; then
+    local hermes_repo="${hermes_dir}/src"
+    local hermes_venv="${hermes_dir}/venv"
+    if [ -x "${hermes_venv}/bin/hermes" ]; then
         log "Hermes Agent already installed at ${hermes_dir} (idempotent)"
         return 0
     fi
@@ -164,11 +166,17 @@ install_hermes_agent() {
     fi
     log "Installing Hermes Agent at ${hermes_dir}"
     mkdir -p "$hermes_dir"
-    curl -fsSL https://raw.githubusercontent.com/nousresearch/hermes-agent/main/install.sh | bash -s -- --prefix "$hermes_dir" || {
-        log "FATAL: Hermes Agent install failed"
+    git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/hermes-agent.git "$hermes_repo" || {
+        log "FATAL: Hermes Agent git clone failed"
         exit 1
     }
-    ln -sfn "${hermes_dir}/bin/hermes" /usr/local/bin/hermes
+    python3 -m venv "$hermes_venv"
+    "${hermes_venv}/bin/pip" install --quiet "$hermes_repo" || {
+        log "FATAL: Hermes Agent pip install failed"
+        exit 1
+    }
+    ln -sfn "${hermes_venv}/bin/hermes" /usr/local/bin/hermes
+    ln -sfn "${hermes_venv}/bin/hermes" "${hermes_dir}/bin/hermes" 2>/dev/null || true
     log "Hermes Agent installed"
 }
 
