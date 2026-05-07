@@ -18,7 +18,7 @@ Environment=DEVASSIST_HEALTH_PORT=8181
 Environment=XDG_STATE_HOME=/srv/devassist/runtimes/orchestrator/.local/state
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
 ExecStart=/usr/local/bin/devassist-orchestrator-runner
-Restart=on-failure
+Restart=always
 RestartSec=10s
 
 NoNewPrivileges=true

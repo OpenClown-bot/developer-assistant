@@ -18,7 +18,7 @@ Environment=HERMES_DEVASSIST_ROLE=planner
 Environment=DEVASSIST_HEALTH_PORT=8182
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
 ExecStart=/usr/local/bin/devassist-worker-runner
-Restart=on-failure
+Restart=always
 RestartSec=10s
 
 NoNewPrivileges=true
