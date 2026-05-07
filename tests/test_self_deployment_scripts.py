@@ -120,8 +120,6 @@ class TestInstallSelfIdempotent(unittest.TestCase):
             "devassist-architect.service",
             "devassist-executor.service",
             "devassist-reviewer.service",
-            "omniroute.service",
-            "devassist-web.service",
         ]
         for unit in expected_units:
             self.assertTrue(
@@ -146,7 +144,10 @@ class TestInstallSelfIdempotent(unittest.TestCase):
 
     def test_install_does_not_start_units(self) -> None:
         result = _run_script("install-self.sh", self.env)
-        self.assertNotIn("systemctl start", result.stdout)
+        output = result.stdout + result.stderr
+        for line in output.splitlines():
+            if "systemctl start devassist" in line and "To start, run:" not in line:
+                self.fail(f"install should not start units in dry-run: {line}")
 
     def test_install_creates_journald_dropin(self) -> None:
         result = _run_script("install-self.sh", self.env)
@@ -184,31 +185,15 @@ class TestSystemdUnitRender(unittest.TestCase):
         content = unit.read_text()
         self.assertIn("SupplementaryGroups=docker", content)
 
-    def test_orchestrator_runs_gateway(self) -> None:
+    def test_orchestrator_uses_runner(self) -> None:
         unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "devassist-orchestrator.service"
         content = unit.read_text()
-        self.assertIn("hermes gateway run", content)
+        self.assertIn("devassist-orchestrator-runner", content)
 
-    def test_planner_runs_hermes_run(self) -> None:
+    def test_planner_uses_worker_runner(self) -> None:
         unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "devassist-planner.service"
         content = unit.read_text()
-        self.assertIn("hermes run", content)
-        self.assertNotIn("hermes gateway run", content)
-
-    def test_omniroute_port_20128(self) -> None:
-        unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "omniroute.service"
-        content = unit.read_text()
-        self.assertIn("--port 20128", content)
-
-    def test_omniroute_runs_as_omniroute_user(self) -> None:
-        unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "omniroute.service"
-        content = unit.read_text()
-        self.assertIn("User=omniroute", content)
-
-    def test_web_service_binds_8180(self) -> None:
-        unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "devassist-web.service"
-        content = unit.read_text()
-        self.assertIn("--port 8180", content)
+        self.assertIn("devassist-worker-runner", content)
 
     def test_all_units_have_sandboxing(self) -> None:
         systemd_dir = Path(self.tmpdir) / "etc" / "systemd" / "system"
@@ -229,27 +214,19 @@ class TestSystemdUnitRender(unittest.TestCase):
             ]:
                 self.assertIn(directive, content, f"{unit_name} missing {directive}")
 
-    def test_omniroute_before_runtime_services(self) -> None:
-        unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "omniroute.service"
-        content = unit.read_text()
-        self.assertIn("Before=", content)
-        self.assertIn("devassist-orchestrator.service", content)
-
-    def test_web_after_runtime_services(self) -> None:
-        unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "devassist-web.service"
-        content = unit.read_text()
-        self.assertIn("After=", content)
-        self.assertIn("devassist-reviewer.service", content)
-
-    def test_target_wants_all_eight_units(self) -> None:
+    def test_target_wants_five_runtime_units(self) -> None:
         unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / "devassist.target"
         content = unit.read_text()
         for name in [
-            "omniroute.service",
             "devassist-orchestrator.service",
-            "devassist-web.service",
+            "devassist-planner.service",
+            "devassist-architect.service",
+            "devassist-executor.service",
+            "devassist-reviewer.service",
         ]:
             self.assertIn(name, content, f"target missing Wants for {name}")
+        self.assertNotIn("omniroute.service", content, "target should not reference omniroute (remote)")
+        self.assertNotIn("devassist-web.service", content, "target should not reference web (removed)")
 
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
@@ -283,7 +260,7 @@ class TestVerifySelf(unittest.TestCase):
             }
             _run_script("install-self.sh", env)
             result = _run_script("verify-self.sh", env)
-            self.assertIn("12/12", result.stdout)
+            self.assertIn("11/11", result.stdout)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -304,7 +281,7 @@ class TestVerifySelf(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_verify_includes_web_service_invariant(self) -> None:
+    def test_verify_includes_health_endpoint_invariant(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
         try:
             env = {
@@ -316,7 +293,7 @@ class TestVerifySelf(unittest.TestCase):
             }
             _run_script("install-self.sh", env)
             result = _run_script("verify-self.sh", env)
-            self.assertIn("web unit active", result.stdout + result.stderr)
+            self.assertIn("per-runtime health endpoints", result.stdout + result.stderr)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -414,7 +391,9 @@ class TestUpgradeSelfPrimary(unittest.TestCase):
             _run_script("install-self.sh", env)
             result = _run_script("upgrade-self.sh", env)
             output = result.stdout + result.stderr
-            self.assertNotIn("systemctl start", output)
+            for line in output.splitlines():
+                if "systemctl start devassist" in line and "To start, run:" not in line:
+                    self.fail(f"upgrade should not auto-activate units in dry-run: {line}")
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -431,10 +410,24 @@ class TestDryRunPrefixContainment(unittest.TestCase):
                 "ROLLBACK_DRY_RUN": "1",
                 "UPGRADE_DRY_RUN": "1",
             }
+            before = {}
+            for check_path in [Path("/usr/local/bin/devassist-worker-runner"),
+                               Path("/usr/local/bin/devassist-orchestrator-runner")]:
+                if check_path.exists():
+                    before[str(check_path)] = check_path.stat().st_mtime_ns
             _run_script("install-self.sh", env)
+            modified = []
+            for check_path in [Path("/usr/local/bin/devassist-worker-runner"),
+                               Path("/usr/local/bin/devassist-orchestrator-runner")]:
+                if str(check_path) in before:
+                    if check_path.stat().st_mtime_ns != before[str(check_path)]:
+                        modified.append(str(check_path))
+                else:
+                    if check_path.exists():
+                        modified.append(str(check_path))
             self.assertFalse(
-                Path("/srv/devassist").exists(),
-                "install wrote outside dry-run prefix",
+                modified,
+                f"install modified/created files outside dry-run prefix: {modified}",
             )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

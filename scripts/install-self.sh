@@ -129,6 +129,7 @@ TELEGRAM_BOT_TOKEN=test-token-placeholder
 TELEGRAM_ALLOWED_USERS=test-user-placeholder
 GITHUB_TOKEN=test-token-placeholder
 OMNIROUTE_API_KEY=test-token-placeholder
+OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1
 OPENROUTER_API_KEY=test-token-placeholder
 FIREWORKS_API_KEY=test-token-placeholder
 HERMES_DEVASSIST_REPO_URL=https://github.com/example/developer-assistant
@@ -269,7 +270,7 @@ ORCHRUNNER
 render_systemd_units() {
     mkdir -p "$SYSTEMD_DIR"
     local template_dir="${SCRIPT_DIR}/templates"
-    local units="devassist.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service devassist-web.service"
+    local units="devassist.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service "
 
     for unit in $units; do
         local src="${template_dir}/${unit}.j2"
@@ -310,7 +311,7 @@ JOURNALD
 run_verify() {
     log "Running verify-self.sh (pre-start mode)"
     VERIFY_PHASE=pre-start \
-        "${SCRIPT_DIR}/verify-self.sh"
+        bash "${SCRIPT_DIR}/verify-self.sh"
     local rc=$?
     if [ $rc -ne 0 ]; then
         log "FATAL: verify-self.sh failed (exit ${rc}); install aborted"

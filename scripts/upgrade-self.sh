@@ -110,7 +110,7 @@ run_install_in_place() {
 run_verify() {
     log "Running verify-self.sh (pre-start phase)"
     VERIFY_PHASE=pre-start \
-        "${SCRIPT_DIR}/verify-self.sh"
+        bash "${SCRIPT_DIR}/verify-self.sh"
     return $?
 }
 

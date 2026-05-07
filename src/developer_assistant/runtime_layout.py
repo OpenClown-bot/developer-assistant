@@ -16,7 +16,7 @@ import os
 from typing import Mapping
 
 _EXPECTED_SCHEMA_VERSION = "3"
-_OMNIROUTE_BASE_URL = "https://omniroute.infinitycore.space:8443/v1"
+_OMNIROUTE_BASE_URL = os.environ.get("OMNIROUTE_BASE_URL", "http://127.0.0.1:20128/v1")
 
 _ALLOWED_ROLES = frozenset({"orchestrator", "planner", "architect", "executor", "reviewer"})
 ALLOWED_ROLES = _ALLOWED_ROLES
@@ -27,7 +27,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
-            "accounts/fireworks/models/deepseek-v3p2",
+            "accounts/fireworks/models/deepseek-v4-pro",
         ),
     ),
     "planner": (
@@ -35,11 +35,11 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/minimax-m2p7",
-            "accounts/fireworks/models/deepseek-v3p2",
+            "accounts/fireworks/models/deepseek-v4-pro",
         ),
     ),
     "architect": (
-        "accounts/fireworks/models/deepseek-v3p2",
+        "accounts/fireworks/models/deepseek-v4-pro",
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/glm-5p1",
@@ -49,7 +49,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "executor": (
         "accounts/fireworks/models/glm-5p1",
         (
-            "accounts/fireworks/models/deepseek-v3p2",
+            "accounts/fireworks/models/deepseek-v4-pro",
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
         ),
@@ -57,7 +57,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "reviewer": (
         "accounts/fireworks/models/kimi-k2p6",
         (
-            "accounts/fireworks/models/deepseek-v3p2",
+            "accounts/fireworks/models/deepseek-v4-pro",
             "accounts/fireworks/models/glm-5p1",
             "accounts/fireworks/models/qwen3p6-plus",
         ),
@@ -162,7 +162,7 @@ def _render_config_yaml(
         .replace("{{fallback_1}}", model_fallbacks[0])
         .replace("{{fallback_2}}", model_fallbacks[1])
         .replace("{{fallback_3}}", model_fallbacks[2])
-        .replace("{{omniroute_port}}", omniroute_base_url)
+        .replace("{{omniroute_base_url}}", omniroute_base_url)
         .replace("{{built_in_skills}}", built_in_lines)
         .replace("{{terminal_block}}", terminal_block)
         .replace("{{gateway_enabled}}", gateway_enabled)
@@ -206,7 +206,7 @@ def render_runtime_config(
         secrets_env_path: Path to the secrets env file (e.g., /srv/devassist/secrets/SELF-DEPLOY.env).
         state_db_path: Path to the shared operational store (e.g., /srv/devassist/state/operational.db).
         repo_path: Path to the repository checkout (e.g., /srv/devassist/repo).
-        omniroute_base_url: OmniRoute base URL (default: https://omniroute.infinitycore.space:8443/v1).
+        omniroute_base_url: OmniRoute base URL (default: http://127.0.0.1:20128/v1).
 
     Returns:
         A dict mapping filename to file content (e.g., 'config.yaml' -> '...yaml content...').

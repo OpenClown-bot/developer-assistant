@@ -46,8 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--omniroute-base-url",
-        default="https://omniroute.infinitycore.space:8443/v1",
-        help="OmniRoute base URL (default: https://omniroute.infinitycore.space:8443/v1)",
+        default="http://127.0.0.1:20128/v1",
+        help="OmniRoute base URL (default: http://127.0.0.1:20128/v1)",
     )
 
     try:

@@ -3,10 +3,10 @@ set -euo pipefail
 
 SELF_DEPLOY_VERSION="0.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-https://omniroute.infinitycore.space:8443/v1}"
+OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-http://127.0.0.1:20128/v1}"
 EXPECTED_SCHEMA_VERSION="3"
 ROLES="orchestrator planner architect executor reviewer"
-MODEL_IDENTIFIERS="minimax-m2p7 kimi-k2p6 qwen3p6-plus glm-5p1 deepseek-v3p2"
+MODEL_IDENTIFIERS="minimax-m2p7 kimi-k2p6 qwen3p6-plus glm-5p1 deepseek-v4-pro"
 DRY_RUN="${INSTALL_DRY_RUN:-0}"
 FIXTURE="${VERIFY_FIXTURE_MODE:-0}"
 VERIFY_PHASE="${VERIFY_PHASE:-full}"
@@ -254,34 +254,8 @@ invariant_08_omniroute_reachable() {
     fi
 }
 
-invariant_09_web_service() {
-    local name="web unit active"
-    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
-        log "FIXTURE/DRY_RUN: devassist-web.service assumed active"
-        log "FIXTURE/DRY_RUN: web /health returning stub 200"
-        record_pass "$name"
-        return 0
-    fi
-    if [ "$VERIFY_PHASE" = "pre-start" ]; then
-        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
-        return 0
-    fi
-    local status
-    status=$(systemctl is-active devassist-web.service 2>/dev/null) || status="unknown"
-    if [ "$status" != "active" ]; then
-        record_fail "$name" "devassist-web.service inactive (${status})"
-        return 0
-    fi
-    local http_code
-    http_code=$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8180/health" 2>/dev/null) || http_code="000"
-    if [ "$http_code" = "200" ]; then
-        record_pass "$name"
-    else
-        record_fail "$name" "web /health probe returned HTTP ${http_code}"
-    fi
-}
 
-invariant_10_runtime_health_endpoints() {
+invariant_09_runtime_health_endpoints() {
     local name="per-runtime health endpoints"
     if [ "$VERIFY_PHASE" = "pre-start" ]; then
         log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
@@ -309,7 +283,7 @@ invariant_10_runtime_health_endpoints() {
     fi
 }
 
-invariant_11_journald_retention() {
+invariant_10_journald_retention() {
     local name="journald retention configured"
     local dropin="${PREFIX}/etc/systemd/journald.conf.d/dev-assist.conf"
     if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
@@ -331,7 +305,7 @@ invariant_11_journald_retention() {
     fi
 }
 
-invariant_12_no_secrets_in_journal() {
+invariant_11_no_secrets_in_journal() {
     local name="no secrets in journal"
     local secret_names="TELEGRAM_BOT_TOKEN GITHUB_TOKEN FIREWORKS_API_KEY OMNIROUTE_API_KEY OPENROUTER_API_KEY"
     if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
@@ -340,7 +314,7 @@ invariant_12_no_secrets_in_journal() {
         return 0
     fi
     local journal_out
-    journal_out=$(journalctl -u "devassist-*" -u devassist-web --since "-1 hour" --no-pager --output=json 2>/dev/null) || journal_out=""
+    journal_out=$(journalctl -u "devassist-*" --since "-1 hour" --no-pager --output=json 2>/dev/null) || journal_out=""
     local leak_found=0
     for sname in $secret_names; do
         local sval
@@ -370,10 +344,9 @@ main() {
     invariant_06_schema_version
     invariant_07_runtime_units
     invariant_08_omniroute_reachable
-    invariant_09_web_service
-    invariant_10_runtime_health_endpoints
-    invariant_11_journald_retention
-    invariant_12_no_secrets_in_journal
+    invariant_09_runtime_health_endpoints
+    invariant_10_journald_retention
+    invariant_11_no_secrets_in_journal
 
     local total=$((PASS_COUNT + FAIL_COUNT))
     echo ""

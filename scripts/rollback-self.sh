@@ -37,20 +37,6 @@ detect_running_units() {
             log "  ${unit}: ${status}"
         fi
     done
-    for unit in omniroute.service devassist-web.service; do
-        local status
-        if [ "$DRY_RUN" = "1" ]; then
-            status="active"
-        else
-            status=$(systemctl is-active "$unit" 2>/dev/null) || status="inactive"
-        fi
-        if [ "$status" = "active" ]; then
-            RUNNING_UNITS="${RUNNING_UNITS} ${unit}"
-            log "  ${unit}: ${status}"
-        else
-            log "  ${unit}: ${status}"
-        fi
-    done
 }
 
 stop_target() {
@@ -70,7 +56,7 @@ find_latest_backup() {
     LATEST_DB_BACKUP=""
     LATEST_TARBALL=""
     LATEST_DB_BACKUP=$(ls -1t "${BACKUP_DIR}"/operational-*.db 2>/dev/null | head -1)
-    LATEST_TARBALL=$(ls -1t "${BACKUP_DIR}"/runtime-state-*.tar.gz 2>/dev/null | head -1)
+    LATEST_TARBALL=$(ls -1t "${BACKUP_DIR}"/runtime-state-*.tar.gz 2>/dev/null | head -1) || LATEST_TARBALL=""
     if [ -z "$LATEST_DB_BACKUP" ]; then
         log "FATAL: no operational.db backup found in ${BACKUP_DIR}"
         echo "FATAL: no operational.db backup found. Rollback aborted."
@@ -167,7 +153,7 @@ flip_release_symlink() {
 run_verify() {
     log "Running verify-self.sh against restored release"
     VERIFY_PHASE=pre-start \
-        "${SCRIPT_DIR}/verify-self.sh"
+        bash "${SCRIPT_DIR}/verify-self.sh"
     return $?
 }
 
