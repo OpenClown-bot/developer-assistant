@@ -407,5 +407,60 @@ class TestRuleCount(unittest.TestCase):
         self.assertEqual(len(ALL_RULES), 40)
 
 
+class TestMemoryToolBypass(unittest.TestCase):
+    """Memory tools bypass ONLY for this runtime's own MEMORY.md."""
+
+    def test_memory_add_own_memory_bypasses(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}):
+            result = pre_tool_call(
+                "memory_add",
+                {"path": "/srv/devassist/runtimes/executor/.hermes/MEMORY.md", "content": "note"},
+            )
+            self.assertEqual(result["decision"], "allow")
+
+    def test_memory_replace_own_memory_bypasses(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}):
+            result = pre_tool_call(
+                "memory_replace",
+                {"path": "/srv/devassist/runtimes/executor/.hermes/MEMORY.md", "old": "x", "new": "y"},
+            )
+            self.assertEqual(result["decision"], "allow")
+
+    def test_memory_remove_own_memory_bypasses(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}):
+            result = pre_tool_call(
+                "memory_remove",
+                {"path": "/srv/devassist/runtimes/executor/.hermes/MEMORY.md", "old": "x"},
+            )
+            self.assertEqual(result["decision"], "allow")
+
+    def test_memory_add_other_runtime_does_not_bypass(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}), \
+             patch("developer_assistant.hermes_plugins.dev_assist_escalation_policy.concept_classifier._anchor", None):
+            result = pre_tool_call(
+                "memory_add",
+                {"path": "/srv/devassist/runtimes/orchestrator/.hermes/MEMORY.md", "content": "note"},
+            )
+            self.assertNotEqual(result["decision"], "allow")
+
+    def test_memory_replace_other_runtime_does_not_bypass(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}), \
+             patch("developer_assistant.hermes_plugins.dev_assist_escalation_policy.concept_classifier._anchor", None):
+            result = pre_tool_call(
+                "memory_replace",
+                {"path": "/srv/devassist/runtimes/reviewer/.hermes/MEMORY.md", "old": "x", "new": "y"},
+            )
+            self.assertNotEqual(result["decision"], "allow")
+
+    def test_memory_remove_other_runtime_does_not_bypass(self):
+        with patch.dict(os.environ, {"HERMES_DEVASSIST_ROLE": "executor"}), \
+             patch("developer_assistant.hermes_plugins.dev_assist_escalation_policy.concept_classifier._anchor", None):
+            result = pre_tool_call(
+                "memory_remove",
+                {"path": "/srv/devassist/runtimes/planner/.hermes/MEMORY.md", "old": "x"},
+            )
+            self.assertNotEqual(result["decision"], "allow")
+
+
 if __name__ == "__main__":
     unittest.main()

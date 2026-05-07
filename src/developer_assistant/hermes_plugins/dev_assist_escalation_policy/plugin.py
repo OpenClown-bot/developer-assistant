@@ -20,8 +20,7 @@ from developer_assistant.escalations import write_escalation
 from developer_assistant import state_store
 
 _READONLY_TOOLS = frozenset({
-    "read_file", "list_files", "session_search", "memory_add",
-    "memory_replace", "memory_remove", "search_files", "grep",
+    "read_file", "list_files", "session_search", "search_files", "grep",
 })
 
 _WITHIN_CATALOG_MODELS = frozenset({
@@ -40,14 +39,13 @@ def _get_role() -> str:
 
 
 def _is_read_only(tool_name: str, action_args: dict) -> bool:
-    role = _get_role()
     if tool_name in _READONLY_TOOLS:
         return True
-    if tool_name.startswith("work_queue.") or tool_name.startswith("memory_"):
-        if tool_name in ("memory_add", "memory_replace", "memory_remove"):
-            memory_path = action_args.get("path", "")
-            if f"runtimes/{role}/" in memory_path:
-                return True
+    if tool_name in ("memory_add", "memory_replace", "memory_remove"):
+        role = _get_role()
+        memory_path = action_args.get("path", "")
+        if f"runtimes/{role}/" in memory_path:
+            return True
     return False
 
 
