@@ -93,3 +93,7 @@ Architecture-changing version bumps require an ADR.
 ## Secrets
 
 Never commit secrets, including GitHub PATs, LLM API keys, VPS SSH keys, `.env` files, private repository credentials, or service tokens.
+
+## Recovery Playbook Discipline
+
+If you change a CLI subcommand, systemd unit name, port assignment, SQLite table schema, or install/verify script name, update `docs/operations/RECOVERY-PLAYBOOK.md` in the same PR. The playbook is the authoritative operator surface and CI verifies it does not drift (TKT-030 harness: `tests/test_recovery_playbook_invariants.py`).
