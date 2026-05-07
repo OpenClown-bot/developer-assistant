@@ -23,7 +23,7 @@ log() {
 
 check_deps() {
     local missing=""
-    for cmd in bash systemctl sqlite3 curl tar git mkdir ln chown chmod; do
+    for cmd in bash systemctl sqlite3 curl tar git mkdir ln chown chmod python3 npm; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing="${missing} ${cmd}"
         fi
@@ -207,6 +207,41 @@ install_omniroute() {
     log "OmniRoute installed"
 }
 
+install_dev_assist_cli() {
+    local cli_dir="${PREFIX}/opt/dev-assist"
+    local cli_venv="${cli_dir}/venv"
+    local cli_bin="${cli_dir}/bin"
+    if [ -x "${cli_bin}/dev-assist-cli" ]; then
+        log "dev-assist-cli already installed at ${cli_bin} (idempotent)"
+        return 0
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+        log "DRY_RUN: would install dev-assist-cli at ${cli_dir}"
+        mkdir -p "$cli_bin"
+        echo "#!/bin/sh" > "${cli_bin}/dev-assist-cli"
+        echo "echo 'dev-assist-cli stub (dry-run)'" >> "${cli_bin}/dev-assist-cli"
+        chmod +x "${cli_bin}/dev-assist-cli"
+        return 0
+    fi
+    log "Installing dev-assist-cli at ${cli_dir}"
+    mkdir -p "$cli_dir" "$cli_bin"
+    python3 -m venv "$cli_venv"
+    "${cli_venv}/bin/pip" install --quiet -e "${BASE}/repo/src" 2>/dev/null || {
+        log "WARN: pip install of dev-assist-cli failed; creating wrapper script"
+        cat > "${cli_bin}/dev-assist-cli" <<'CLIWrapper'
+#!/usr/bin/env python3
+import sys, os
+sys.path.insert(0, "/srv/devassist/repo/src")
+from developer_assistant.cli.dev_assist_cli import main
+main()
+CLIWrapper
+        chmod +x "${cli_bin}/dev-assist-cli"
+    }
+    ln -sfn "${cli_venv}/bin/dev-assist-cli" "${cli_bin}/dev-assist-cli" 2>/dev/null || true
+    chown -R devassist:devassist "$cli_dir"
+    log "dev-assist-cli installed"
+}
+
 render_systemd_units() {
     mkdir -p "$SYSTEMD_DIR"
     local template_dir="${SCRIPT_DIR}/templates"
@@ -273,6 +308,7 @@ main() {
     render_self_deploy_env
     install_hermes_agent
     install_omniroute
+    install_dev_assist_cli
     render_systemd_units
     write_journald_dropin
     run_verify
