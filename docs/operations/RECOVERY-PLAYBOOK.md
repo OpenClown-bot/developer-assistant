@@ -16,6 +16,8 @@ This playbook is the **first stop** when something feels wrong. It is intentiona
 
 ## 2. Quick Reference Card
 
+> **CI invariant**: Every command, unit name, port, SQL table/column, and script path referenced in this playbook is validated by `tests/test_recovery_playbook_invariants.py` (TKT-030). If you change a command surface, update this playbook in the same PR; CI will catch drift.
+
 | Question | Command | Section |
 | --- | --- | --- |
 | Is the system alive? | `dev-assist-cli status --format human` | § 3 |
