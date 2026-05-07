@@ -7,9 +7,7 @@ from pathlib import Path
 
 from developer_assistant.model_catalog import (
     CatalogViolation,
-    _CATALOG,
-    _probe_identifier,
-    get_role_assignment,
+    get_all_roles,
     paid_third_party_external_service_not_yet_supported_error,
     probe_omniroute,
     verify_runtime_config,
@@ -36,23 +34,21 @@ def _cmd_verify_runtime(args: argparse.Namespace) -> int:
 
 def _cmd_probe_omniroute(args: argparse.Namespace) -> int:
     base_url = "http://127.0.0.1:{port}".format(port=args.omniroute_port)
-    roles = [args.role] if args.role else sorted(_CATALOG.keys())
+    roles = [args.role] if args.role else get_all_roles()
 
-    results = []
+    all_results: list = []
     for role in roles:
-        assignment = get_role_assignment(role)
-        identifiers = [assignment.main]
-        if args.exhaustive:
-            identifiers = [assignment.main] + list(assignment.fallbacks)
-        for identifier in identifiers:
-            result = _probe_identifier(base_url, role, identifier)
-            results.append(result)
+        results = probe_omniroute(
+            base_url, role,
+            exhaustive=args.exhaustive,
+        )
+        all_results.extend(results)
 
     print("{role:<15} {id:<50} {ok:<8} {reason:<20} {lat}".format(
         role="Role", id="Identifier", ok="OK", reason="Reason", lat="Latency(ms)"
     ))
     print("-" * 100)
-    for r in results:
+    for r in all_results:
         ok_str = "yes" if r.ok else "no"
         lat_str = "{:.1f}".format(r.latency_ms) if r.latency_ms is not None else "N/A"
         reason_str = r.reason or ""
@@ -60,7 +56,7 @@ def _cmd_probe_omniroute(args: argparse.Namespace) -> int:
             role=r.role, id=r.identifier, ok=ok_str, reason=reason_str, lat=lat_str
         ))
 
-    failures = [r for r in results if not r.ok]
+    failures = [r for r in all_results if not r.ok]
     if failures:
         for f in failures:
             try:

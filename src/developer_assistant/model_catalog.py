@@ -167,6 +167,10 @@ def _load_catalog() -> dict[str, RoleAssignment]:
 _CATALOG: dict[str, RoleAssignment] = _load_catalog()
 
 
+def get_all_roles() -> list[str]:
+    return sorted(_CATALOG.keys())
+
+
 def get_role_assignment(role: str) -> RoleAssignment:
     assignment = _CATALOG.get(role)
     if assignment is None:
@@ -207,7 +211,7 @@ def verify_runtime_config(role: str, config: dict) -> None:
             )
 
 
-def _probe_identifier(
+def probe_identifier(
     omniroute_base_url: str,
     role: str,
     identifier: str,
@@ -229,9 +233,9 @@ def _probe_identifier(
 
     start = time.monotonic()
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout_seconds)
-        elapsed_ms = (time.monotonic() - start) * 1000.0
-        resp_body = resp.read().decode("utf-8")
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            elapsed_ms = (time.monotonic() - start) * 1000.0
+            resp_body = resp.read().decode("utf-8")
         data = json.loads(resp_body)
         resp_model = data.get("model", "")
         if resp_model == identifier:
@@ -257,6 +261,7 @@ def _probe_identifier(
             reason = "not_resolved"
         else:
             reason = "unexpected_response"
+        exc.close()
         return ProbeResult(
             ok=False,
             role=role,
@@ -306,11 +311,20 @@ def probe_omniroute(
     omniroute_base_url: str,
     role: str,
     timeout_seconds: float = 10.0,
-) -> ProbeResult:
+    exhaustive: bool = False,
+) -> list[ProbeResult]:
     assignment = get_role_assignment(role)
-    return _probe_identifier(
-        omniroute_base_url, role, assignment.main, timeout_seconds
-    )
+    identifiers = [assignment.main]
+    if exhaustive:
+        identifiers = [assignment.main] + list(assignment.fallbacks)
+    results: list[ProbeResult] = []
+    for identifier in identifiers:
+        results.append(
+            probe_identifier(
+                omniroute_base_url, role, identifier, timeout_seconds
+            )
+        )
+    return results
 
 
 def paid_third_party_external_service_not_yet_supported_error(

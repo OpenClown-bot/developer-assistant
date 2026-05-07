@@ -19,7 +19,9 @@ from developer_assistant.model_catalog import (
     RoleAssignment,
     UnknownRole,
     _parse_catalog_table,
+    get_all_roles,
     get_role_assignment,
+    probe_identifier,
     verify_runtime_config,
 )
 import developer_assistant.model_catalog as model_catalog
@@ -249,6 +251,18 @@ class TestVerifyRuntimeConfigViolations(unittest.TestCase):
 class TestNoAuxiliaryClassifierSet(unittest.TestCase):
     def test_get_auxiliary_classifier_set_not_in_public_api(self) -> None:
         self.assertNotIn("get_auxiliary_classifier_set", dir(model_catalog))
+
+
+class TestGetAllRoles(unittest.TestCase):
+    def test_returns_five_sorted_roles(self) -> None:
+        roles = get_all_roles()
+        self.assertEqual(roles, ["architect", "executor", "orchestrator", "planner", "reviewer"])
+
+
+class TestPublicProbeIdentifier(unittest.TestCase):
+    def test_probe_identifier_is_public(self) -> None:
+        self.assertIn("probe_identifier", dir(model_catalog))
+        self.assertFalse(model_catalog.probe_identifier.__name__.startswith("_"))
 
 
 if __name__ == "__main__":
