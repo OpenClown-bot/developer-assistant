@@ -1,0 +1,11 @@
+name: dev-assist-escalation-surface
+type: skill
+version: "0.1.0"
+runtime_loadout: orchestrator-only
+purpose: >
+  Surfaces pending Founder escalations via the upstream router and
+  expires stale escalations on a cron-driven cadence.
+description: >
+  Orchestrator-only Hermes custom skill per MULTI-HERMES-CONTRACT.md
+  § 5.1 and ESCALATION-POLICY.md § 7.  surface_pending every 5 s;
+  expire_old every 60 s.

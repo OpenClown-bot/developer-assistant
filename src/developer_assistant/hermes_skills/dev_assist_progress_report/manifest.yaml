@@ -1,0 +1,11 @@
+name: dev-assist-progress-report
+type: skill
+version: "0.1.0"
+runtime_loadout: orchestrator-only
+purpose: >
+  Periodic progress-report driver.  Checks active project bindings,
+  gathers PR status, formats a Russian-localized report, and dispatches
+  it via the upstream router.
+description: >
+  Orchestrator-only Hermes custom skill per MULTI-HERMES-CONTRACT.md
+  § 5.1 and ARCH-001 § 7.  Default per-project interval 60 min.
