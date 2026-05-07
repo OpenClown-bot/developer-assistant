@@ -433,6 +433,53 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve_web(args: argparse.Namespace) -> int:
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import urllib.parse
+
+    db_path = args.db_path
+    port = args.port
+    bind = args.bind
+
+    class StatusHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/health":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok","service":"devassist-web"}')
+            elif parsed.path == "/status":
+                try:
+                    db = open_db_readonly(db_path)
+                    status_data = query_status(db)
+                    db.close()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(status_data, default=str).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer((bind, port), StatusHandler)
+    print(f"devassist-web serving on {bind}:{port}")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dev-assist-cli",
@@ -483,6 +530,10 @@ def main(argv: list[str] | None = None) -> int:
     p_escalations.add_argument("--since", required=True, help="Time window (e.g. 24h, today, 1h)")
     p_escalations.add_argument("--format", choices=["json", "human"], default="json")
 
+    p_serve_web = sub.add_parser("serve-web", help="Run read-only web status surface")
+    p_serve_web.add_argument("--port", type=int, default=8180, help="Port to bind (default: 8180)")
+    p_serve_web.add_argument("--bind", default="127.0.0.1", help="Address to bind (default: 127.0.0.1)")
+
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:
@@ -498,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_costs(args)
     elif args.command == "escalations":
         return cmd_escalations(args)
+    elif args.command == "serve-web":
+        return cmd_serve_web(args)
 
     return 0
 

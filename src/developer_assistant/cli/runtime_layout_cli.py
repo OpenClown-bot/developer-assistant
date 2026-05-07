@@ -45,10 +45,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to the repository root (e.g., /srv/devassist/repo)",
     )
     parser.add_argument(
-        "--omniroute-port",
-        type=int,
-        default=20128,
-        help="OmniRoute localhost port (default: 20128)",
+        "--omniroute-base-url",
+        default="https://omniroute.infinitycore.space:8443/v1",
+        help="OmniRoute base URL (default: https://omniroute.infinitycore.space:8443/v1)",
     )
 
     try:
@@ -62,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             secrets_env_path=args.secrets_env_path,
             state_db_path=args.operational_db_path,
             repo_path=args.repo_path,
-            omniroute_port=str(args.omniroute_port),
+            omniroute_base_url=args.omniroute_base_url,
         )
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

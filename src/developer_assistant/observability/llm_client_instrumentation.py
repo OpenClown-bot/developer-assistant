@@ -26,7 +26,7 @@ class InstrumentedLLMClient:
     def __init__(
         self,
         manager: ObservabilityManager,
-        omniroute_base_url: str = "http://127.0.0.1:20128",
+        omniroute_base_url: str = "https://omniroute.infinitycore.space:8443/v1",
         openrouter_base_url: str = "https://openrouter.ai/api/v1",
         omniroute_api_key: Optional[str] = None,
         openrouter_api_key: Optional[str] = None,

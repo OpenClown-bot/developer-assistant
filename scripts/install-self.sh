@@ -23,7 +23,7 @@ log() {
 
 check_deps() {
     local missing=""
-    for cmd in bash systemctl sqlite3 curl tar git mkdir ln chown chmod python3 npm; do
+    for cmd in bash systemctl sqlite3 curl tar git mkdir ln chown chmod python3; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing="${missing} ${cmd}"
         fi
@@ -36,7 +36,7 @@ check_deps() {
 
 create_users() {
     if [ "$DRY_RUN" = "1" ]; then
-        log "DRY_RUN: would create system users devassist and omniroute"
+        log "DRY_RUN: would create system user devassist"
         return 0
     fi
     if ! id -u devassist >/dev/null 2>&1; then
@@ -45,23 +45,16 @@ create_users() {
     else
         log "User devassist already exists (idempotent)"
     fi
-    if ! id -u omniroute >/dev/null 2>&1; then
-        log "Creating system user: omniroute"
-        useradd --system --no-create-home --shell /usr/sbin/nologin omniroute
-    else
-        log "User omniroute already exists (idempotent)"
-    fi
 }
 
 create_filesystem() {
     log "Creating /srv/devassist/ filesystem layout under ${BASE}"
-    mkdir -p "${BASE}"/{repo,runtimes,state/backups,secrets,releases,omniroute/logs,web/templates,logs,shared-skills,shared-plugins}
+    mkdir -p "${BASE}"/{repo,runtimes,state/backups,secrets,releases,web/templates,logs,shared-skills,shared-plugins}
     for role in $ROLES; do
         mkdir -p "${BASE}/runtimes/${role}/.hermes"/{memories,sessions,cron,logs,skills}
     done
     if [ "$DRY_RUN" = "0" ]; then
         chown -R devassist:devassist "${BASE}"
-        chown -R omniroute:omniroute "${BASE}/omniroute"
         chmod 0700 "${BASE}/state/backups"
         chmod 0640 "${BASE}/state" 2>/dev/null || true
     fi
@@ -177,39 +170,12 @@ install_hermes_agent() {
     }
     ln -sfn "${hermes_venv}/bin/hermes" /usr/local/bin/hermes
     ln -sfn "${hermes_venv}/bin/hermes" "${hermes_dir}/bin/hermes" 2>/dev/null || true
+    "${hermes_venv}/bin/pip" install --quiet python-telegram-bot 2>/dev/null || log "WARN: python-telegram-bot install failed (Telegram gateway may not work)"
     log "Hermes Agent installed"
-}
-
-install_omniroute() {
-    local omniroute_dir="${PREFIX}/opt/omniroute"
-    if [ -d "$omniroute_dir" ] && [ -x "${omniroute_dir}/bin/omniroute" ]; then
-        log "OmniRoute already installed at ${omniroute_dir} (idempotent)"
-        return 0
-    fi
-    if [ "$DRY_RUN" = "1" ]; then
-        log "DRY_RUN: would install OmniRoute at ${omniroute_dir}"
-        mkdir -p "$omniroute_dir"/bin
-        echo "#!/bin/sh" > "${omniroute_dir}/bin/omniroute"
-        echo "echo 'omniroute stub (dry-run)'" >> "${omniroute_dir}/bin/omniroute"
-        chmod +x "${omniroute_dir}/bin/omniroute"
-        return 0
-    fi
-    log "Installing OmniRoute at ${omniroute_dir}"
-    mkdir -p "$omniroute_dir"
-    npm install -g omniroute --prefix "$omniroute_dir" 2>/dev/null || {
-        log "WARN: npm install of omniroute failed; creating stub"
-        mkdir -p "$omniroute_dir"/bin
-        echo "#!/bin/sh" > "${omniroute_dir}/bin/omniroute"
-        echo "echo 'omniroute stub'" >> "${omniroute_dir}/bin/omniroute"
-        chmod +x "${omniroute_dir}/bin/omniroute"
-    }
-    chown -R omniroute:omniroute "$omniroute_dir"
-    log "OmniRoute installed"
 }
 
 install_dev_assist_cli() {
     local cli_dir="${PREFIX}/opt/dev-assist"
-    local cli_venv="${cli_dir}/venv"
     local cli_bin="${cli_dir}/bin"
     if [ -x "${cli_bin}/dev-assist-cli" ]; then
         log "dev-assist-cli already installed at ${cli_bin} (idempotent)"
@@ -225,27 +191,85 @@ install_dev_assist_cli() {
     fi
     log "Installing dev-assist-cli at ${cli_dir}"
     mkdir -p "$cli_dir" "$cli_bin"
-    python3 -m venv "$cli_venv"
-    "${cli_venv}/bin/pip" install --quiet -e "${BASE}/repo/src" 2>/dev/null || {
-        log "WARN: pip install of dev-assist-cli failed; creating wrapper script"
-        cat > "${cli_bin}/dev-assist-cli" <<'CLIWrapper'
+    cat > "${cli_bin}/dev-assist-cli" <<'CLIWrapper'
 #!/usr/bin/env python3
 import sys, os
 sys.path.insert(0, "/srv/devassist/repo/src")
 from developer_assistant.cli.dev_assist_cli import main
-main()
+sys.exit(main())
 CLIWrapper
-        chmod +x "${cli_bin}/dev-assist-cli"
-    }
-    ln -sfn "${cli_venv}/bin/dev-assist-cli" "${cli_bin}/dev-assist-cli" 2>/dev/null || true
+    chmod +x "${cli_bin}/dev-assist-cli"
     chown -R devassist:devassist "$cli_dir"
     log "dev-assist-cli installed"
+}
+
+install_worker_runner() {
+    local worker_path="${PREFIX}/usr/local/bin/devassist-worker-runner"
+    local orch_path="${PREFIX}/usr/local/bin/devassist-orchestrator-runner"
+    if [ -x "$worker_path" ] && [ -x "$orch_path" ]; then
+        log "worker/orchestrator runners already installed (idempotent)"
+        return 0
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+        log "DRY_RUN: would install worker and orchestrator runners"
+        return 0
+    fi
+    log "Installing devassist-worker-runner and devassist-orchestrator-runner"
+    cat > "$worker_path" <<'WORKERRUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+ROLE="${HERMES_DEVASSIST_ROLE:-unknown}"
+HEALTH_PORT="${DEVASSIST_HEALTH_PORT:-0}"
+POLL_INTERVAL="${DEVASSIST_WORKER_POLL_INTERVAL:-30}"
+HERMES_BIN="/usr/local/bin/hermes"
+if [ "${HEALTH_PORT:-0}" -gt 0 ]; then
+    python3 -c "
+import http.server
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+            import os; self.wfile.write(('{\"status\":\"ok\",\"role\":\"'+os.environ.get('HERMES_DEVASSIST_ROLE','unknown')+'\"}').encode())
+        else: self.send_response(404); self.end_headers()
+    def log_message(self,*a): pass
+http.server.HTTPServer(('127.0.0.1',int('${HEALTH_PORT}')),H).serve_forever()
+" &
+fi
+trap "kill 0 2>/dev/null" EXIT
+while true; do
+    ${HERMES_BIN} chat -q "Process next work item for role ${ROLE}" --yolo --accept-hooks --quiet 2>/dev/null || true
+    sleep "$POLL_INTERVAL"
+done
+WORKERRUNNER
+    chmod +x "$worker_path"
+
+    cat > "$orch_path" <<'ORCHRUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+HEALTH_PORT="${DEVASSIST_HEALTH_PORT:-8181}"
+HERMES_BIN="/usr/local/bin/hermes"
+python3 -c "
+import http.server
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+            self.wfile.write(b'{\"status\":\"ok\",\"role\":\"orchestrator\"}')
+        else: self.send_response(404); self.end_headers()
+    def log_message(self,*a): pass
+http.server.HTTPServer(('127.0.0.1',int('${HEALTH_PORT}')),H).serve_forever()
+" &
+trap "kill 0 2>/dev/null" EXIT
+exec ${HERMES_BIN} gateway run --accept-hooks
+ORCHRUNNER
+    chmod +x "$orch_path"
+    log "worker/orchestrator runners installed"
 }
 
 render_systemd_units() {
     mkdir -p "$SYSTEMD_DIR"
     local template_dir="${SCRIPT_DIR}/templates"
-    local units="devassist.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service omniroute.service devassist-web.service"
+    local units="devassist.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service devassist-web.service"
 
     for unit in $units; do
         local src="${template_dir}/${unit}.j2"
@@ -306,8 +330,8 @@ main() {
     symlink_env_file
     render_self_deploy_env
     install_hermes_agent
-    install_omniroute
     install_dev_assist_cli
+    install_worker_runner
     render_systemd_units
     write_journald_dropin
     run_verify

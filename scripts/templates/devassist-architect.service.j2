@@ -1,7 +1,7 @@
 [Unit]
 Description=developer-assistant architect Hermes runtime
 PartOf=devassist.target
-After=network-online.target omniroute.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -11,8 +11,9 @@ Group=devassist
 WorkingDirectory=/srv/devassist/runtimes/architect
 Environment=HERMES_HOME=/srv/devassist/runtimes/architect/.hermes
 Environment=HERMES_DEVASSIST_ROLE=architect
+Environment=DEVASSIST_HEALTH_PORT=8183
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
-ExecStart=/usr/local/bin/hermes run
+ExecStart=/usr/local/bin/devassist-worker-runner
 Restart=on-failure
 RestartSec=10s
 StartLimitIntervalSec=300

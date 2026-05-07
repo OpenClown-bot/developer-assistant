@@ -1,7 +1,7 @@
 [Unit]
 Description=developer-assistant executor Hermes runtime
 PartOf=devassist.target
-After=network-online.target omniroute.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -12,8 +12,9 @@ SupplementaryGroups=docker
 WorkingDirectory=/srv/devassist/runtimes/executor
 Environment=HERMES_HOME=/srv/devassist/runtimes/executor/.hermes
 Environment=HERMES_DEVASSIST_ROLE=executor
+Environment=DEVASSIST_HEALTH_PORT=8184
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
-ExecStart=/usr/local/bin/hermes run
+ExecStart=/usr/local/bin/devassist-worker-runner
 Restart=on-failure
 RestartSec=10s
 StartLimitIntervalSec=300

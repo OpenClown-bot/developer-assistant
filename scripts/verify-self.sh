@@ -3,10 +3,10 @@ set -euo pipefail
 
 SELF_DEPLOY_VERSION="0.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OMNIROUTE_PORT=20128
+OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-https://omniroute.infinitycore.space:8443/v1}"
 EXPECTED_SCHEMA_VERSION="3"
 ROLES="orchestrator planner architect executor reviewer"
-MODEL_IDENTIFIERS="minimax-m2.7 kimi-k2.6 deepseek-v4-pro glm-5.1 qwen3.6-plus"
+MODEL_IDENTIFIERS="minimax-m2p7 kimi-k2p6 qwen3p6-plus glm-5p1 deepseek-v3p2"
 DRY_RUN="${INSTALL_DRY_RUN:-0}"
 FIXTURE="${VERIFY_FIXTURE_MODE:-0}"
 VERIFY_PHASE="${VERIFY_PHASE:-full}"
@@ -107,8 +107,8 @@ invariant_03_omniroute_models() {
         return 0
     fi
     local resp
-    resp=$(curl -fsS "http://127.0.0.1:${OMNIROUTE_PORT}/v1/models" 2>/dev/null) || {
-        record_fail "$name" "OmniRoute /v1/models unreachable on port ${OMNIROUTE_PORT}"
+    resp=$(curl -fsS "${OMNIROUTE_BASE_URL}/models" -H "Authorization: Bearer ${OMNIROUTE_API_KEY}" 2>/dev/null) || {
+        record_fail "$name" "OmniRoute /v1/models unreachable at ${OMNIROUTE_BASE_URL}"
         return 0
     }
     for mid in $MODEL_IDENTIFIERS; do
@@ -139,7 +139,7 @@ invariant_04_omniroute_probe() {
     fi
     local probe_failed=0
     for role in $ROLES; do
-        if ! python3 -m developer_assistant.cli.model_catalog_cli probe-omniroute --omniroute-port "${OMNIROUTE_PORT}" --role "$role" 2>/dev/null; then
+        if ! python3 -m developer_assistant.cli.model_catalog_cli probe-omniroute --omniroute-base-url "${OMNIROUTE_BASE_URL}" --role "$role" 2>/dev/null; then
             log "OmniRoute probe failed for role: ${role}"
             probe_failed=1
         fi
@@ -234,23 +234,23 @@ invariant_07_runtime_units() {
     fi
 }
 
-invariant_08_omniroute_unit() {
-    local name="omniroute unit active"
-    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
-        log "FIXTURE/DRY_RUN: omniroute.service assumed active"
-        record_pass "$name"
-        return 0
-    fi
+invariant_08_omniroute_reachable() {
+    local name="OmniRoute remote reachable"
     if [ "$VERIFY_PHASE" = "pre-start" ]; then
         log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
         return 0
     fi
-    local status
-    status=$(systemctl is-active omniroute.service 2>/dev/null) || status="unknown"
-    if [ "$status" = "active" ]; then
+    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+        log "FIXTURE/DRY_RUN: OmniRoute remote endpoint assumed reachable"
+        record_pass "$name"
+        return 0
+    fi
+    local http_code
+    http_code=$(curl -fsS -o /dev/null -w "%{http_code}" "${OMNIROUTE_BASE_URL}/models" -H "Authorization: Bearer ${OMNIROUTE_API_KEY}" 2>/dev/null) || http_code="000"
+    if [ "$http_code" = "200" ]; then
         record_pass "$name"
     else
-        record_fail "$name" "omniroute.service unit inactive (${status})"
+        record_fail "$name" "OmniRoute remote returned HTTP ${http_code}"
     fi
 }
 
@@ -340,7 +340,7 @@ invariant_12_no_secrets_in_journal() {
         return 0
     fi
     local journal_out
-    journal_out=$(journalctl -u "devassist-*" -u omniroute -u devassist-web --since "-1 hour" --no-pager --output=json 2>/dev/null) || journal_out=""
+    journal_out=$(journalctl -u "devassist-*" -u devassist-web --since "-1 hour" --no-pager --output=json 2>/dev/null) || journal_out=""
     local leak_found=0
     for sname in $secret_names; do
         local sval
@@ -369,7 +369,7 @@ main() {
     invariant_05_state_store_writable
     invariant_06_schema_version
     invariant_07_runtime_units
-    invariant_08_omniroute_unit
+    invariant_08_omniroute_reachable
     invariant_09_web_service
     invariant_10_runtime_health_endpoints
     invariant_11_journald_retention

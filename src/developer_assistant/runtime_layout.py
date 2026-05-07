@@ -16,7 +16,7 @@ import os
 from typing import Mapping
 
 _EXPECTED_SCHEMA_VERSION = "3"
-_OMNIROUTE_PORT = "20128"
+_OMNIROUTE_BASE_URL = "https://omniroute.infinitycore.space:8443/v1"
 
 _ALLOWED_ROLES = frozenset({"orchestrator", "planner", "architect", "executor", "reviewer"})
 ALLOWED_ROLES = _ALLOWED_ROLES
@@ -27,7 +27,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
         ),
     ),
     "planner": (
@@ -35,11 +35,11 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/minimax-m2p7",
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
         ),
     ),
     "architect": (
-        "accounts/fireworks/models/deepseek-v4-pro",
+        "accounts/fireworks/models/deepseek-v3p2",
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/glm-5p1",
@@ -49,7 +49,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "executor": (
         "accounts/fireworks/models/glm-5p1",
         (
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
         ),
@@ -57,7 +57,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "reviewer": (
         "accounts/fireworks/models/kimi-k2p6",
         (
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
             "accounts/fireworks/models/glm-5p1",
             "accounts/fireworks/models/qwen3p6-plus",
         ),
@@ -138,7 +138,7 @@ def _render_config_yaml(
     secrets_env_path: str,
     state_db_path: str,
     repo_path: str,
-    omniroute_port: str = _OMNIROUTE_PORT,
+    omniroute_base_url: str = _OMNIROUTE_BASE_URL,
 ) -> str:
     model_main, model_fallbacks = _ROLE_MODEL_ASSIGNMENT[role]
     built_in_skills, custom_skills = _ROLE_SKILLS[role]
@@ -162,7 +162,7 @@ def _render_config_yaml(
         .replace("{{fallback_1}}", model_fallbacks[0])
         .replace("{{fallback_2}}", model_fallbacks[1])
         .replace("{{fallback_3}}", model_fallbacks[2])
-        .replace("{{omniroute_port}}", omniroute_port)
+        .replace("{{omniroute_port}}", omniroute_base_url)
         .replace("{{built_in_skills}}", built_in_lines)
         .replace("{{terminal_block}}", terminal_block)
         .replace("{{gateway_enabled}}", gateway_enabled)
@@ -197,7 +197,7 @@ def render_runtime_config(
     secrets_env_path: str,
     state_db_path: str,
     repo_path: str,
-    omniroute_port: str = _OMNIROUTE_PORT,
+    omniroute_base_url: str = _OMNIROUTE_BASE_URL,
 ) -> dict[str, str]:
     """Render per-runtime Hermes configuration files.
 
@@ -206,7 +206,7 @@ def render_runtime_config(
         secrets_env_path: Path to the secrets env file (e.g., /srv/devassist/secrets/SELF-DEPLOY.env).
         state_db_path: Path to the shared operational store (e.g., /srv/devassist/state/operational.db).
         repo_path: Path to the repository checkout (e.g., /srv/devassist/repo).
-        omniroute_port: OmniRoute localhost port (default: 20128).
+        omniroute_base_url: OmniRoute base URL (default: https://omniroute.infinitycore.space:8443/v1).
 
     Returns:
         A dict mapping filename to file content (e.g., 'config.yaml' -> '...yaml content...').
@@ -222,7 +222,7 @@ def render_runtime_config(
         )
 
     return {
-        "config.yaml": _render_config_yaml(role, secrets_env_path, state_db_path, repo_path, omniroute_port),
+        "config.yaml": _render_config_yaml(role, secrets_env_path, state_db_path, repo_path, omniroute_base_url),
         "auth.json": _render_auth_json(role, repo_path),
         "SOUL.md": _render_soul_md(role, repo_path),
     }
