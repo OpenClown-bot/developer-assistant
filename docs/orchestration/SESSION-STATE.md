@@ -1,6 +1,6 @@
 ---
 id: SESSION-STATE
-version: 0.1.2
+version: 0.2.0
 status: active
 updated: 2026-05-07
 ---
@@ -16,15 +16,19 @@ updated: 2026-05-07
 
 ## Current Phase
 
-Architecture revision ARCH-001 v0.3.0 is complete and merged (PRs #86-#90). 12 implementation tickets (TKT-020..031) are promoted to `ready` for Executor dispatch. TKT-020 (self-deployment bootstrap) is merged (PR #98, commit f2be262) but merge-safe is BLOCKED: 29 unittest errors in test_self_deployment_scripts.py (bash not available on Windows; CI will fail). Fix required before CI passes. TKT-021, TKT-022 can be dispatched in parallel (no shared interfaces). TKT-011 remains blocked until self-deployment tickets are implemented and the assistant runs on VPS with live credentials.
+Architecture revision ARCH-001 v0.3.0 merged. All implementation tickets TKT-020..030 and TKT-031 merged to main. TKT-011 is UNBLOCKED. Remaining: Architect fix for `devassist-omniroute.service` naming inconsistency (detected by TKT-030 harness), then TKT-011 integration trial. BACKLOG items from TKT-027 (TKT-NEW-A..G), TKT-029 (paginate_text prefix), and prior tickets remain deferred.
 
 ## Process Variant
 
 Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation -> CI -> automated PR review -> Reviewer LLM -> user-approved merge.
 
+**Mandatory pipeline rule (enforced 2026-05-07):** Every TKT cycle MUST produce exactly 2 PRs: (1) Executor implementation PR and (2) Reviewer artifact PR (`docs/reviews/RV-CODE-NNN.md`). Both must be merged to `main`. A cycle that omits the Reviewer PR is a pipeline integrity violation. The Reviewer PR contains the durable review record; without it in `main`, the review does not exist in the docs-as-code history.
+
 ## Current Active PRs
 
-- PR #73 (Devin): carry-over practices audit + pipeline model assignments + self-deployment Architect-pass directive. Not reviewed through project pipeline.
+- PR #111 (TKT-029 Executor): merge-safe, awaiting Founder merge.
+- PR #112 (RV-CODE-029): retroactive Reviewer artifact, awaiting Founder merge.
+- PR #113 (RV-CODE-030): retroactive Reviewer artifact, awaiting Founder merge.
 
 ## Current Active Tickets
 
@@ -40,20 +44,29 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-010`: done in PR #26; reviewed in PR #27.
 - `TKT-006`: done in PR #35; reviewed in PR #36.
 - `TKT-008`: done in PR #41; reviewed in PR #42 / `RV-CODE-008.md` with verdict `pass`.
-- `TKT-011`: ready in PR #64; reviewed in PR #65 / `RV-SPEC-006.md` with verdict `pass`; iter-1 blocked in PR #67 because no ready implementation ticket existed as trial target; first Telegram-to-PR orchestration trial remains pending.
+- `TKT-011`: ready in PR #64; reviewed in PR #65 / `RV-SPEC-006.md` with verdict `pass`; iter-1 blocked in PR #67 because no ready implementation ticket existed as trial target; iter-2 used TKT-018 as trial vehicle (pass); iter-3 used TKT-019 as trial vehicle (pass_with_recommendations); UNBLOCKED — all prerequisite tickets (TKT-020..030, TKT-031) merged. Awaiting Architect fix for omniroute naming inconsistency, then integration trial.
 - `TKT-014`: done in PR #32; reviewed in PR #33.
 - `TKT-015`: done in PR #47; reviewed in PR #48 / `RV-CODE-019.md` with verdict `pass`.
 - `TKT-016`: done in PR #53; reviewed in PR #54 / `RV-CODE-020.md` with verdict `pass`.
 - `TKT-017`: done in PR #60; reviewed in PR #61 / `RV-CODE-021.md` with verdict `pass`.
 - `TKT-018`: done in PR #72; reviewed in PR #74 / `RV-CODE-023.md` with verdict `pass`; served as TKT-011 iter-2 trial vehicle.
 - `TKT-019`: done in PR #79; reviewed in PR #81 / `RV-CODE-024.md` with verdict `pass_with_recommendations`; progress scheduling persistence helper, TKT-011 iter-3 trial vehicle.
-- `TKT-020`: merged in PR #98 (commit f2be262); self-deployment bootstrap scripts (install, rollback, upgrade, verify) + 8 systemd units + tests; merge-safe BLOCKED (29 unittest errors on Windows; bash unavailable; fix required). Process boundary violation: TO merged PR and committed session-log without SO hand-back or Founder approval.
+- `TKT-020`: merged PR #98. CI fix: 9296dfa.
+- `TKT-021`: merged PR #101. Multi-Hermes runtime layout.
+- `TKT-022`: merged PR #100. Work-queue + escalations schema.
+- `TKT-023`: merged PR #103. Escalation-policy + work-queue plugins.
+- `TKT-024`: merged PR #104. Upstream-adapter scaffolding.
+- `TKT-025`: merged PR #105. Custom Hermes skills + allowlist §5.
+- `TKT-026`: merged PR #102. Model-catalog enforcement.
+- `TKT-027`: merged PR #108. Operator CLI `dev-assist-cli`. RV-CODE-027 PR #109, verdict pass_with_changes. BACKLOG: TKT-NEW-A..G.
+- `TKT-028`: merged PR #107. Structured logging + work_item_id propagation.
+- `TKT-029`: Executor PR #111 merge-safe; RV-CODE-029 PR #112 retroactive. Daily digest + Telegram /status handler + status_query shared module.
+- `TKT-030`: merged PR #110. RV-CODE-030 PR #113 retroactive. Recovery playbook drift harness + contributor convention. Known issue: `devassist-omniroute.service` vs `omniroute.service` — Architect fix required before TKT-011.
+- `TKT-031`: merged PR #106. Errors/llm_calls tables, health endpoints, ObservabilityManager.
 
 ## Current Blockers
 
-- GitHub repository was renamed from `OpenClown-bot/assistant-developer` to `OpenClown-bot/developer-assistant`.
-- Local git remote `origin` points to `https://github.com/OpenClown-bot/developer-assistant.git`.
-- Temporary GitHub PAT is configured in the current environment for this session.
+- `devassist-omniroute.service` vs `omniroute.service` naming inconsistency in RECOVERY-PLAYBOOK.md §10 (detected by TKT-030 harness). Architect must reconcile before TKT-011 dispatch. Not a code blocker — the harness correctly flags it.
 - GitHub CLI `gh` is available and authenticated in the current SO environment, but future sessions must still verify `gh auth status`.
 
 ## Current Architectural Decisions
@@ -103,4 +116,4 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Next Recommended Action
 
-TKT-020 is merged but CI fails (29 errors from test_self_deployment_scripts.py — bash-on-Windows platform constraint; fix required). Meanwhile: dispatch TKT-021 (multi-Hermes runtime layout) and TKT-022 (work_items + escalations schema) in parallel (no shared interfaces; both are immediate per session-3 §8). After TKT-020 CI fix lands and passes: dispatch TKT-026 (model-catalog CLI). TKT-011 remains blocked until TKT-020..026 plus TKT-027 are merged.
+Merge PR #111 (TKT-029 Executor), PR #112 (RV-CODE-029), PR #113 (RV-CODE-030) in order. Then: Architect fix for `devassist-omniroute.service` naming in RECOVERY-PLAYBOOK.md (small clerical PR). Then: dispatch TKT-011 integration trial. BACKLOG items remain deferred across all tickets.
