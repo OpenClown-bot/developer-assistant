@@ -284,9 +284,8 @@ JOURNALD
 }
 
 run_verify() {
-    log "Running verify-self.sh (offline dry-run mode)"
-    INSTALL_DRY_RUN=1 VERIFY_FIXTURE_MODE=1 ROLLBACK_DRY_RUN=1 UPGRADE_DRY_RUN=1 \
-        INSTALL_DRY_RUN_PREFIX="${PREFIX}" \
+    log "Running verify-self.sh (pre-start mode)"
+    VERIFY_PHASE=pre-start \
         "${SCRIPT_DIR}/verify-self.sh"
     local rc=$?
     if [ $rc -ne 0 ]; then
