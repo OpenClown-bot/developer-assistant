@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["since_iso", "totals", "by_role_model"],
+  "properties": {
+    "since_iso": {"type": "string"},
+    "totals": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "estimated_usd"],
+      "properties": {
+        "tokens_in": {"type": "number"},
+        "tokens_out": {"type": "number"},
+        "estimated_usd": {"type": "number"}
+      }
+    },
+    "by_role_model": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "model", "calls", "tokens_in", "tokens_out", "estimated_usd"],
+        "properties": {
+          "role": {"type": "string"},
+          "model": {"type": "string"},
+          "calls": {"type": "integer"},
+          "tokens_in": {"type": "integer"},
+          "tokens_out": {"type": "integer"},
+          "estimated_usd": {"type": "number"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["ts_iso", "runtimes", "queue", "recent_escalations", "today_token_totals"],
+  "properties": {
+    "ts_iso": {"type": "string"},
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "state", "health_endpoint"],
+        "properties": {
+          "role": {"type": "string"},
+          "state": {"type": "string", "enum": ["running", "degraded", "down", "unknown"]},
+          "uptime_s": {},
+          "last_error": {},
+          "current_model": {},
+          "current_work_item_id": {},
+          "heartbeat_age_s": {},
+          "health_endpoint": {"type": "string"},
+          "health_endpoint_status": {}
+        }
+      }
+    },
+    "queue": {
+      "type": "object",
+      "required": ["pending", "in_progress", "escalated", "failed"],
+      "properties": {
+        "pending": {"type": "integer"},
+        "in_progress": {"type": "integer"},
+        "escalated": {"type": "integer"},
+        "failed": {"type": "integer"}
+      }
+    },
+    "recent_escalations": {"type": "array"},
+    "today_token_totals": {"type": "array"}
+  }
+}
