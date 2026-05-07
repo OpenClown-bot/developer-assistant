@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["id", "created_at", "originating_runtime", "trigger_kind", "status", "urgency"],
+    "properties": {
+      "id": {"type": "integer"},
+      "created_at": {"type": "string"},
+      "updated_at": {"type": "string"},
+      "originating_runtime": {"type": "string"},
+      "originating_work_item_id": {},
+      "trigger_kind": {"type": "string"},
+      "context": {"type": "string"},
+      "proposed_action": {"type": "string"},
+      "options_json": {"type": "string"},
+      "recommended_default": {"type": "string"},
+      "impact": {"type": "string"},
+      "urgency": {"type": "string"},
+      "durable_artifact_target": {"type": "string"},
+      "status": {"type": "string"},
+      "surfaced_at": {},
+      "resolved_at": {},
+      "founder_response": {},
+      "telegram_message_id": {}
+    }
+  }
+}
