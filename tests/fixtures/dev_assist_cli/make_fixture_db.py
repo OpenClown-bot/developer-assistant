@@ -32,6 +32,11 @@ def _days_ago(d: int) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _minutes_ago(m: float) -> str:
+    dt = datetime.now(timezone.utc) - timedelta(minutes=m)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
 def _day_ago(d: int) -> str:
     dt = datetime.now(timezone.utc) - timedelta(days=d)
     return dt.strftime("%Y-%m-%d")
@@ -254,6 +259,16 @@ def _seed_errors(conn: sqlite3.Connection) -> None:
         (err_id, ts, runtime, work_item_id, error_class, message, context_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)""",
         ("err_old", _days_ago(2), "executor", "1", "OldError", "Old message", "{}"))
+    # A recent error within last 5 minutes (for degraded-on-recent-error test)
+    conn.execute("""INSERT INTO errors
+        (err_id, ts, runtime, work_item_id, error_class, message, context_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("err_recent", _minutes_ago(2), "executor", "1", "RecentError", "Recent error for degraded test", "{}"))
+    # An error within last 24h but older than 5 min (for last_error test)
+    conn.execute("""INSERT INTO errors
+        (err_id, ts, runtime, work_item_id, error_class, message, context_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        ("err_24h", _hours_ago(6), "executor", "1", "ErrorIn24h", "Error within last 24h", "{}"))
 
 
 def _seed_llm_calls(conn: sqlite3.Connection) -> None:

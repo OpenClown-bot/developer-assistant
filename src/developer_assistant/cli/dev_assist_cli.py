@@ -168,22 +168,40 @@ def cmd_status(args: argparse.Namespace) -> int:
                 current_work_item_id = body.get("current_work_item_id")
                 heartbeat_age_s = body.get("heartbeat_age_s", 0)
 
-                if heartbeat_age_s and heartbeat_age_s > 300:
+                now = datetime.now(timezone.utc)
+                recent_err = conn.execute(
+                    "SELECT 1 FROM errors WHERE runtime = ? AND ts >= ? LIMIT 1",
+                    (role, (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+                ).fetchone()
+                last_err_row = conn.execute(
+                    "SELECT ts as ts_iso, error_class FROM errors "
+                    "WHERE runtime = ? AND ts >= ? ORDER BY ts DESC LIMIT 1",
+                    (role, (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+                ).fetchone()
+                last_error = dict(last_err_row) if last_err_row else None
+
+                heartbeat_degraded = heartbeat_age_s and heartbeat_age_s > 60
+                error_degraded = recent_err is not None
+                if heartbeat_degraded or error_degraded:
                     state = "degraded"
                 else:
                     state = "running"
+                last_error_val = last_error
             elif systemctl_state == "active":
                 state = "degraded"
+                last_error_val = None
             elif systemctl_state == "inactive":
                 state = "down"
+                last_error_val = None
             else:
                 state = "unknown"
+                last_error_val = None
 
             runtimes.append({
                 "role": role,
                 "state": state,
                 "uptime_s": health.get("body", {}).get("uptime_s") if health["ok"] else None,
-                "last_error": None,
+                "last_error": last_error_val,
                 "current_model": health.get("body", {}).get("current_model") if health["ok"] else None,
                 "current_work_item_id": health.get("body", {}).get("current_work_item_id") if health["ok"] else None,
                 "heartbeat_age_s": health.get("body", {}).get("heartbeat_age_s") if health["ok"] else None,
@@ -314,16 +332,22 @@ def cmd_logs(args: argparse.Namespace) -> int:
         lines = _read_journal_fixture(fixture_path)
     else:
         since_str = parse_duration(args.since) if args.since else "today"
+        log_role = getattr(args, "role", None)
         cmd = [
             "journalctl",
             "--output=json", "--no-pager",
             "--since", since_str,
-            "-u", "devassist-orchestrator.service",
-            "-u", "devassist-planner.service",
-            "-u", "devassist-architect.service",
-            "-u", "devassist-executor.service",
-            "-u", "devassist-reviewer.service",
         ]
+        if log_role:
+            cmd.extend(["-u", f"devassist-{log_role}.service"])
+        else:
+            cmd.extend([
+                "-u", "devassist-orchestrator.service",
+                "-u", "devassist-planner.service",
+                "-u", "devassist-architect.service",
+                "-u", "devassist-executor.service",
+                "-u", "devassist-reviewer.service",
+            ])
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
@@ -343,16 +367,19 @@ def cmd_logs(args: argparse.Namespace) -> int:
             return 1
 
     filtered = []
-    for line in lines:
-        try:
-            entry = json.loads(line)
-            msg = json.loads(entry.get("MESSAGE", "{}"))
-            if msg.get("work_item_id") == work_item_id or str(msg.get("work_item_id")) == str(work_item_id):
-                filtered.append(entry)
-        except (json.JSONDecodeError, AttributeError):
-            continue
+    if work_item_id is not None:
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                msg = json.loads(entry.get("MESSAGE", "{}"))
+                if msg.get("work_item_id") == work_item_id or str(msg.get("work_item_id")) == str(work_item_id):
+                    filtered.append(entry)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+    else:
+        filtered = lines
 
-    if args.recursive:
+    if args.recursive and work_item_id is not None:
         db_path = args.db_path
         if os.path.exists(db_path):
             try:
@@ -507,6 +534,7 @@ def cmd_costs(args: argparse.Namespace) -> int:
                     "tokens_in": r.get("tokens_in_total", 0),
                     "tokens_out": r.get("tokens_out_total", 0),
                     "cost_usd": r.get("cost_usd_total", 0),
+                    "call_count": r.get("call_count", 1),
                 })
     finally:
         conn.close()
@@ -525,7 +553,7 @@ def cmd_costs(args: argparse.Namespace) -> int:
                 "tokens_out": 0,
                 "estimated_usd": 0.0,
             }
-        aggregated[key]["calls"] += 1
+        aggregated[key]["calls"] += row.get("call_count", 1)
         aggregated[key]["tokens_in"] += int(row.get("tokens_in", 0))
         aggregated[key]["tokens_out"] += int(row.get("tokens_out", 0))
         aggregated[key]["estimated_usd"] += float(row.get("cost_usd", 0))
@@ -652,8 +680,9 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="Per-runtime system state summary")
     p_status.add_argument("--format", choices=["json", "human"], default="json")
 
-    p_logs = sub.add_parser("logs", help="Fetch journald logs for a work item")
-    p_logs.add_argument("--work-item", required=True, help="Work item ID to filter by")
+    p_logs = sub.add_parser("logs", help="Fetch journald logs for a work item or role")
+    p_logs.add_argument("--work-item", default=None, help="Work item ID to filter by")
+    p_logs.add_argument("--role", default=None, choices=list(_HEALTH_PORTS.keys()), help="Filter to a single runtime")
     p_logs.add_argument("--recursive", action="store_true", help="Follow parent_work_item_id chain")
     p_logs.add_argument("--since", default="today", help="Time window (e.g. 1h, 30m, today)")
 

@@ -496,10 +496,10 @@ class TestIter2Fixes(unittest.TestCase):
             self.assertGreater(data["queue"]["escalated"], 0)
 
     # T4
-    def test_status_heartbeat_degraded_at_300s(self):
+    def test_status_heartbeat_degraded_at_60s(self):
         with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
              patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
-            mock_health.return_value = self._mock_health(heartbeat_age_s=301)
+            mock_health.return_value = self._mock_health(heartbeat_age_s=61)
             mock_sysctl.return_value = "active"
 
             args = MagicMock()
@@ -520,10 +520,10 @@ class TestIter2Fixes(unittest.TestCase):
                     self.assertEqual(rt["state"], "degraded")
 
     # T4b
-    def test_status_heartbeat_running_at_299s(self):
+    def test_status_heartbeat_running_at_59s(self):
         with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
              patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
-            mock_health.return_value = self._mock_health(heartbeat_age_s=299)
+            mock_health.return_value = self._mock_health(heartbeat_age_s=59)
             mock_sysctl.return_value = "active"
 
             args = MagicMock()
@@ -539,9 +539,12 @@ class TestIter2Fixes(unittest.TestCase):
 
             self.assertEqual(code, 0)
             data = json.loads(output)
+            not_degraded = False
             for rt in data["runtimes"]:
-                if rt["role"] == "executor" and rt["health_endpoint_status"] == 200:
-                    self.assertEqual(rt["state"], "running")
+                if rt["role"] in ("planner", "architect") and rt["health_endpoint_status"] == 200:
+                    if rt["state"] == "running":
+                        not_degraded = True
+            self.assertTrue(not_degraded, "At least one runtime without recent errors should be running at 59s heartbeat")
 
     # T2
     def test_costs_7day_boundary_split_merge(self):
@@ -607,6 +610,94 @@ class TestIter2Fixes(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("parent_work_item_id 9999", stderr_out)
             self.assertIn("not found", stderr_out)
+
+    # Iter-3 T1: daily call_count
+    def test_costs_daily_call_count(self):
+        args = MagicMock()
+        args.db_path = self.db_path
+        args.since = "14d"
+        args.role = None
+        args.model = None
+        args.format = "json"
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            code = cmd_costs(args)
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertEqual(code, 0)
+        data = json.loads(output)
+        executor_entry = next((e for e in data["by_role_model"] if e["role"] == "executor"), None)
+        self.assertIsNotNone(executor_entry)
+        self.assertGreater(executor_entry["calls"], 1)
+
+    # Iter-3 T3: last_error from errors table
+    def test_status_last_error_from_errors_table(self):
+        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            mock_health.return_value = self._mock_health()
+            mock_sysctl.return_value = "active"
+
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.format = "json"
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                code = cmd_status(args)
+            finally:
+                output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            self.assertEqual(code, 0)
+            data = json.loads(output)
+            for rt in data["runtimes"]:
+                if rt["role"] == "executor" and rt["health_endpoint_status"] == 200:
+                    self.assertIsNotNone(rt["last_error"])
+                    self.assertIn("ts_iso", rt["last_error"])
+                    self.assertIn("error_class", rt["last_error"])
+
+    # Iter-3 T4: degraded on recent error
+    def test_status_degraded_on_recent_error(self):
+        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            mock_health.return_value = self._mock_health(heartbeat_age_s=12)
+            mock_sysctl.return_value = "active"
+
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.format = "json"
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                code = cmd_status(args)
+            finally:
+                output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            self.assertEqual(code, 0)
+            data = json.loads(output)
+            for rt in data["runtimes"]:
+                if rt["role"] == "executor" and rt["health_endpoint_status"] == 200:
+                    self.assertEqual(rt["state"], "degraded")
+
+    # Iter-3 T5: logs --role filter
+    def test_logs_role_filter(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            args = MagicMock()
+            args.work_item = None
+            args.role = "executor"
+            args.recursive = False
+            args.since = "today"
+            cmd_logs(args)
+            mock_run.assert_called_once()
+            called_cmd = mock_run.call_args[0][0]
+            self.assertIn("-u", called_cmd)
+            self.assertIn("devassist-executor.service", called_cmd)
+            self.assertNotIn("devassist-planner.service", called_cmd)
 
 
 class TestMainAndHelp(unittest.TestCase):
