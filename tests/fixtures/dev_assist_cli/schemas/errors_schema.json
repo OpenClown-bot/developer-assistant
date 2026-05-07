@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["err_id", "ts", "runtime", "error_class", "message"],
+    "properties": {
+      "err_id": {"type": "string"},
+      "ts": {"type": "string"},
+      "runtime": {"type": "string"},
+      "work_item_id": {},
+      "error_class": {"type": "string"},
+      "message": {"type": "string"},
+      "context_json": {"type": "string"}
+    }
+  }
+}
