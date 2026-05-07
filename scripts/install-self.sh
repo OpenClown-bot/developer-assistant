@@ -5,6 +5,7 @@ SELF_DEPLOY_VERSION="0.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OMNIROUTE_PORT=20128
 OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-http://127.0.0.1:20128/v1}"
+OMNIROUTE_API_KEY="${OMNIROUTE_API_KEY:-test-token-placeholder}"
 EXPECTED_SCHEMA_VERSION="3"
 ROLES="orchestrator planner architect executor reviewer"
 
@@ -192,6 +193,7 @@ render_runtime_configs() {
         content=$(echo "$content" | sed "s|{{fallback_2}}|${fb_2}|g")
         content=$(echo "$content" | sed "s|{{fallback_3}}|${fb_3}|g")
         content=$(echo "$content" | sed "s|{{omniroute_base_url}}|${OMNIROUTE_BASE_URL}|g")
+        content=$(echo "$content" | sed "s|{{omniroute_api_key}}|${OMNIROUTE_API_KEY}|g")
         content=$(echo "$content" | sed "s|{{gateway_enabled}}|${gateway_enabled}|g")
         content=$(echo "$content" | sed "s|{{role}}|${role}|g")
         content=$(echo "$content" | sed "s|{{repo_path}}|${repo_path}|g")

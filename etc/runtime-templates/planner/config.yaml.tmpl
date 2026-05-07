@@ -6,6 +6,11 @@ agent:
     - {{fallback_3}}
   base_url: {{omniroute_base_url}}
 
+custom_providers:
+  - name: OmniRoute
+    base_url: {{omniroute_base_url}}
+    api_key: {{omniroute_api_key}}
+
 gateway:
   enabled: {{gateway_enabled}}
 
