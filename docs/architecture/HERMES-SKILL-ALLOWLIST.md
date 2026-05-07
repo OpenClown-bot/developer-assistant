@@ -1,6 +1,6 @@
 ---
 id: HERMES-SKILL-ALLOWLIST
-version: 0.1.0
+version: 0.1.1
 status: draft
 ---
 
@@ -23,8 +23,8 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | Unreviewed project-local plugins are disabled | `HERMES_ENABLE_PROJECT_PLUGINS` must remain `false` |
 | Community/optional skills/plugins must not receive credentials until source-reviewed | Source review result must be `passed` before credential-bearing use |
 | All enabled entries must be pinned to version or commit | No floating `@main` or `@latest` references |
-| Credential-bearing capabilities must use least-privilege scoped credentials | See Section 7 |
-| Dangerous operations require founder approval | See Section 8 |
+| Credential-bearing capabilities must use least-privilege scoped credentials | See Section 8 |
+| Dangerous operations require founder approval | See Section 9 |
 
 ## 3. Runtime Deployment Assumptions
 
@@ -171,7 +171,41 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | Dangerous operations | Can store and recall information that may influence agent behavior; memory content may contain prompt injection if not properly sanitized |
 | Rollback procedure | (1) Clear memory via `memory` tool or delete `~/.hermes/memories/` files; (2) Restart Hermes session; (3) Repository artifacts remain authoritative — re-read required context paths |
 
-## 5. Deferred Or Prohibited Skills/Plugins
+## 5. Custom Project-Local Skills
+
+The following project-local custom skills are developed and maintained within the `developer-assistant` repository. They are loaded only by the Orchestrator Hermes runtime and are not installed from the Skills Hub or any marketplace source. Each skill carries its own `manifest.yaml` with a pinned version and an explicit `runtime_loadout: orchestrator-only` declaration.
+
+### 5.1 `dev-assist-classifier`
+
+| Field | Detail |
+| --- | --- |
+| Purpose | Classifies inbound Telegram messages into `intake`, `progress_query`, `command`, `freeform_chat`, or `escalation_response` and extracts an intent payload |
+| Runtime loadout | Orchestrator-only (`MULTI-HERMES-CONTRACT.md` § 5.1) |
+| Rationale | Required by `UPSTREAM-ADAPTER-CONTRACT.md` § 9; enables the Orchestrator to route every Founder message to the correct processing path without hardcoding a finite set of keywords. The LLM dispatcher is dependency-injected — the skill never calls provider SDKs directly or hardcodes a model path |
+| Version | 0.1.0, pinned at repo commit |
+| Source | `src/developer_assistant/hermes_skills/dev_assist_classifier/` |
+
+### 5.2 `dev-assist-progress-report`
+
+| Field | Detail |
+| --- | --- |
+| Purpose | Periodically checks active project bindings, gathers PR status, and dispatches a Russian-localized progress report via the upstream router |
+| Runtime loadout | Orchestrator-only (`MULTI-HERMES-CONTRACT.md` § 5.1) |
+| Rationale | Implements the periodic reporting requirement in `ARCH-001` § 7. Uses `is_report_due` / `mark_report_sent` from `progress_scheduling.py` (TKT-019) and calls the upstream router for dispatch — both are dependency-injected for offline testing. Default interval 60 min |
+| Version | 0.1.0, pinned at repo commit |
+| Source | `src/developer_assistant/hermes_skills/dev_assist_progress_report/` |
+
+### 5.3 `dev-assist-escalation-surface`
+
+| Field | Detail |
+| --- | --- |
+| Purpose | Reads pending escalations from the operational state store and surfaces each to the Founder via the upstream router; expires stale escalations |
+| Runtime loadout | Orchestrator-only (`MULTI-HERMES-CONTRACT.md` § 5.1) |
+| Rationale | Required by `ESCALATION-POLICY.md` § 7 and `MULTI-HERMES-CONTRACT.md` § 5.6; translates an internal `escalations` row into a Founder-readable prompt with all seven required fields. Router dispatch is dependency-injected — the skill never hardcodes a Telegram chat id or API token |
+| Version | 0.1.0, pinned at repo commit |
+| Source | `src/developer_assistant/hermes_skills/dev_assist_escalation_surface/` |
+
+## 6. Deferred Or Prohibited Skills/Plugins
 
 The following capabilities are explicitly deferred or prohibited in v0.1:
 
@@ -193,7 +227,7 @@ The following capabilities are explicitly deferred or prohibited in v0.1:
 | Any `optional-skills/` from Hermes repo | Deferred | Optional official skills are not auto-enabled; each requires individual review before inclusion |
 | External skill directories | Prohibited | Not configured in v0.1; `skills.external_dirs` remains unset |
 
-## 6. Marketplace And Project-Local Plugin Policy
+## 7. Marketplace And Project-Local Plugin Policy
 
 ### Marketplace Auto-Installation
 
@@ -215,9 +249,9 @@ Project-local plugins under `.hermes/plugins/` are **disabled** by default in He
 
 Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by default. Every enabled plugin must be listed in `plugins.enabled` in `config.yaml`. This allowlist is the governance document that justifies each entry.
 
-## 7. Credential Scope Requirements
+## 8. Credential Scope Requirements
 
-### 7.1 Telegram Bot Token
+### 8.1 Telegram Bot Token
 
 | Property | Requirement |
 | --- | --- |
@@ -228,7 +262,7 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | Storage | `~/.hermes/.env` with `chmod 600`; never committed to repository |
 | Rotation | Revoke old token via @BotFather; generate new token; update `~/.hermes/.env`; restart gateway |
 
-### 7.2 GitHub Token
+### 8.2 GitHub Token
 
 | Property | Requirement |
 | --- | --- |
@@ -240,7 +274,7 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | Rotation | Revoke old token via GitHub Settings > Developer settings; generate new scoped token; update `~/.hermes/.env`; restart Hermes |
 | Separation | GitHub token must be separate from LLM provider keys, Telegram bot token, and VPS credentials |
 
-### 7.3 LLM Provider Keys
+### 8.3 LLM Provider Keys
 
 | Property | Requirement |
 | --- | --- |
@@ -249,7 +283,7 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | Passthrough | Not forwarded into Docker containers via `docker_forward_env` unless a specific skill requires it and is allowlisted |
 | Separation | Separate from GitHub token, Telegram bot token, and VPS credentials |
 
-### 7.4 VPS Credentials
+### 8.4 VPS Credentials
 
 | Property | Requirement |
 | --- | --- |
@@ -258,7 +292,7 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | Prohibition | VPS SSH keys must not appear in `docker_forward_env`, `env_passthrough`, or any Hermes configuration |
 | Separation | Completely separate from GitHub, Telegram, and LLM credentials |
 
-### 7.5 Credential Isolation Summary
+### 8.5 Credential Isolation Summary
 
 | Credential | Shared with | Isolation |
 | --- | --- | --- |
@@ -267,9 +301,9 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | LLM provider key | LLM API calls only | Not forwarded to Docker; not in `env_passthrough` |
 | VPS SSH key | Operator only | Never in Hermes configuration |
 
-## 8. Sandboxing And Dangerous Operation Controls
+## 9. Sandboxing And Dangerous Operation Controls
 
-### 8.1 Sandbox Configuration
+### 9.1 Sandbox Configuration
 
 | Setting | Value | Rationale |
 | --- | --- | --- |
@@ -285,7 +319,7 @@ Per Hermes `v2026.4.30`, all plugins are opt-in: discovered but not enabled by d
 | `security.tirith_enabled` | `true` | Enable pre-execution security scanning |
 | `security.tirith_fail_open` | `false` | Block commands when tirith is unavailable in production |
 
-### 8.2 Dangerous Operation Approval Rules
+### 9.2 Dangerous Operation Approval Rules
 
 The following operations require explicit founder approval before execution, aligned with HERMES-RUNTIME-CONTRACT.md Section 11 and ADR-003:
 
@@ -300,7 +334,7 @@ The following operations require explicit founder approval before execution, ali
 
 Hermes built-in dangerous command approval handles shell-level dangerous patterns (recursive delete, pipe-to-shell, system config modification, etc.). The approval rules above extend to semantic operations that may not trigger pattern-based approval but are policy-level dangerous for `developer-assistant`.
 
-### 8.3 Hermes Hardline Blocklist
+### 9.3 Hermes Hardline Blocklist
 
 The Hermes hardline blocklist (always-on floor) prevents catastrophic commands regardless of approval mode or YOLO mode:
 
@@ -312,7 +346,7 @@ The Hermes hardline blocklist (always-on floor) prevents catastrophic commands r
 
 This blocklist is built into Hermes and cannot be overridden. It provides an additional safety layer beyond the policy-level approval rules.
 
-## 9. Rollback Procedure
+## 10. Rollback Procedure
 
 When a skill, plugin, or capability causes harm or behaves unexpectedly, follow these steps in order:
 
@@ -347,7 +381,7 @@ When a skill, plugin, or capability causes harm or behaves unexpectedly, follow 
 
 Rollback steps are documented above but not yet tested in a live Hermes deployment. Follow-up ticket required for end-to-end rollback verification once the runtime adapter is implemented.
 
-## 10. Source Review Notes
+## 11. Source Review Notes
 
 ### Review Status Summary
 
@@ -372,7 +406,7 @@ Rollback steps are documented above but not yet tested in a live Hermes deployme
 
 Minimal source review has cleared only the Telegram gateway for credential-bearing production use, and only under the constraints documented in Section 4.1. GitHub credential-bearing bundled skills remain blocked; production GitHub automation must use a project-specific reviewed path until a later source-review ticket clears a hardened upstream or custom capability. Development and testing with dedicated, scoped, non-sensitive credentials remains acceptable.
 
-## 11. Validation
+## 12. Validation
 
 The following validation requirements apply to this allowlist:
 
@@ -381,7 +415,7 @@ The following validation requirements apply to this allowlist:
 - Concrete runtime config syntax validation (YAML schema, `config.yaml` structural checks) is deferred unless a config file is added to the repository.
 - The allowlist content should be manually reviewed against ADR-003 required fields to confirm completeness.
 
-## 12. Follow-Up Tickets
+## 13. Follow-Up Tickets
 
 The following follow-up tickets are needed:
 
@@ -392,5 +426,5 @@ The following follow-up tickets are needed:
 | Enforcement tests | Once the Hermes runtime adapter is implemented, create a ticket for automated tests verifying: allowlisted skills only are enabled, marketplace install is blocked, project-local plugins are disabled, approval mode is `manual` |
 | Docker image pinning | Pin the Docker terminal image to a specific SHA256 digest and document the verification procedure |
 | Subagent isolation verification | Verify that `delegate_task` subagents cannot access credentials not forwarded via `docker_forward_env` |
-| Rollback procedure testing | End-to-end test of the rollback procedure documented in Section 9 |
+| Rollback procedure testing | End-to-end test of the rollback procedure documented in Section 10 |
 | Operational state store selection | Decide between Hermes native persistence and SQLite per HERMES-RUNTIME-CONTRACT.md Section 6 |

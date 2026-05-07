@@ -1,0 +1,15 @@
+report:
+  header: "Отчёт о прогрессе"
+  project_name: "Проект: {project_name}"
+  pr_list_header: "Активные PR:"
+  no_prs: "Активных PR нет"
+  pr_item: "  - {title} ({status})"
+  last_completed: "Последняя завершённая работа: {summary}"
+  no_completed: "Завершённых работ нет"
+  blocked_header: "Заблокировано:"
+  blocked_item: "  - {item}"
+  no_progress: "Прогресс отсутствует"
+  footer: "Следующий отчёт через {interval} мин."
+errors:
+  github_unreachable: "GitHub недоступен, отчёт по проекту {project} пропущен"
+  router_error: "Ошибка отправки отчёта: {error}"

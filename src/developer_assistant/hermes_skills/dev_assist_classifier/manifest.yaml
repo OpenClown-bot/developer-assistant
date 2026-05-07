@@ -1,0 +1,13 @@
+name: dev-assist-classifier
+type: skill
+version: "0.1.0"
+runtime_loadout: orchestrator-only
+purpose: >
+  Classifies inbound Telegram messages into intake, progress_query,
+  command, freeform_chat, or escalation_response.  Returns the
+  classification kind plus an extracted intent payload.
+description: >
+  Orchestrator-only Hermes custom skill per MULTI-HERMES-CONTRACT.md
+  § 5.1 and UPSTREAM-ADAPTER-CONTRACT.md § 9.  Calls the Orchestrator
+  runtime's main LLM via the runtime tool dispatcher; does not call
+  provider SDKs directly.
