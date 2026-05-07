@@ -4,8 +4,21 @@ set -euo pipefail
 SELF_DEPLOY_VERSION="0.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OMNIROUTE_PORT=20128
+OMNIROUTE_BASE_URL="${OMNIROUTE_BASE_URL:-http://127.0.0.1:20128/v1}"
 EXPECTED_SCHEMA_VERSION="3"
 ROLES="orchestrator planner architect executor reviewer"
+
+MODEL_MAIN_ORCHESTRATOR="accounts/fireworks/models/minimax-m2p7"
+MODEL_MAIN_PLANNER="accounts/fireworks/models/qwen3p6-plus"
+MODEL_MAIN_ARCHITECT="accounts/fireworks/models/deepseek-v4-pro"
+MODEL_MAIN_EXECUTOR="accounts/fireworks/models/glm-5p1"
+MODEL_MAIN_REVIEWER="accounts/fireworks/models/kimi-k2p6"
+
+FALLBACK_ORCHESTRATOR="accounts/fireworks/models/kimi-k2p6,accounts/fireworks/models/qwen3p6-plus,accounts/fireworks/models/deepseek-v4-pro"
+FALLBACK_PLANNER="accounts/fireworks/models/kimi-k2p6,accounts/fireworks/models/minimax-m2p7,accounts/fireworks/models/deepseek-v4-pro"
+FALLBACK_ARCHITECT="accounts/fireworks/models/kimi-k2p6,accounts/fireworks/models/glm-5p1,accounts/fireworks/models/qwen3p6-plus"
+FALLBACK_EXECUTOR="accounts/fireworks/models/deepseek-v4-pro,accounts/fireworks/models/kimi-k2p6,accounts/fireworks/models/qwen3p6-plus"
+FALLBACK_REVIEWER="accounts/fireworks/models/deepseek-v4-pro,accounts/fireworks/models/glm-5p1,accounts/fireworks/models/qwen3p6-plus"
 DRY_RUN="${INSTALL_DRY_RUN:-0}"
 PREFIX=""
 if [ "$DRY_RUN" = "1" ]; then
@@ -117,25 +130,114 @@ symlink_env_file() {
     done
 }
 
+render_runtime_configs() {
+    local template_dir="${SCRIPT_DIR}/../etc/runtime-templates"
+    for role in $ROLES; do
+        local tmpl="${template_dir}/${role}/config.yaml.tmpl"
+        local dst="${BASE}/runtimes/${role}/.hermes/config.yaml"
+        if [ ! -f "$tmpl" ]; then
+            log "FATAL: runtime config template ${tmpl} not found"
+            exit 1
+        fi
+
+        local model_main=""
+        local fallbacks=""
+        local gateway_enabled="false"
+        local repo_path="${BASE}/repo"
+        local built_in_skills="    - chat\n    - file\n    - code"
+        local prompt_file=""
+        local terminal_block=""
+
+        case "$role" in
+            orchestrator)
+                model_main="$MODEL_MAIN_ORCHESTRATOR"
+                fallbacks="$FALLBACK_ORCHESTRATOR"
+                gateway_enabled="true"
+                built_in_skills="    - chat\n    - file\n    - code\n    - telegram_gateway"
+                prompt_file="orchestrator.md"
+                ;;
+            planner)
+                model_main="$MODEL_MAIN_PLANNER"
+                fallbacks="$FALLBACK_PLANNER"
+                prompt_file="business_planner.md"
+                ;;
+            architect)
+                model_main="$MODEL_MAIN_ARCHITECT"
+                fallbacks="$FALLBACK_ARCHITECT"
+                prompt_file="architect.md"
+                ;;
+            executor)
+                model_main="$MODEL_MAIN_EXECUTOR"
+                fallbacks="$FALLBACK_EXECUTOR"
+                prompt_file="executor.md"
+                terminal_block="\nterminal:\n  backend: docker"
+                ;;
+            reviewer)
+                model_main="$MODEL_MAIN_REVIEWER"
+                fallbacks="$FALLBACK_REVIEWER"
+                prompt_file="reviewer.md"
+                terminal_block="\nterminal:\n  backend: docker"
+                ;;
+        esac
+
+        local fb_1 fb_2 fb_3
+        fb_1=$(echo "$fallbacks" | cut -d',' -f1)
+        fb_2=$(echo "$fallbacks" | cut -d',' -f2)
+        fb_3=$(echo "$fallbacks" | cut -d',' -f3)
+
+        local content
+        content=$(cat "$tmpl")
+        content=$(echo "$content" | sed "s|{{model_main}}|${model_main}|g")
+        content=$(echo "$content" | sed "s|{{fallback_1}}|${fb_1}|g")
+        content=$(echo "$content" | sed "s|{{fallback_2}}|${fb_2}|g")
+        content=$(echo "$content" | sed "s|{{fallback_3}}|${fb_3}|g")
+        content=$(echo "$content" | sed "s|{{omniroute_base_url}}|${OMNIROUTE_BASE_URL}|g")
+        content=$(echo "$content" | sed "s|{{gateway_enabled}}|${gateway_enabled}|g")
+        content=$(echo "$content" | sed "s|{{role}}|${role}|g")
+        content=$(echo "$content" | sed "s|{{repo_path}}|${repo_path}|g")
+        content=$(echo "$content" | sed "s|{{prompt_file}}|${prompt_file}|g")
+        content=$(echo "$content" | sed "s|{{built_in_skills}}|${built_in_skills}|g")
+        content=$(echo "$content" | sed "s|{{terminal_block}}|${terminal_block}|g")
+
+        echo "$content" > "$dst"
+        if [ "$DRY_RUN" = "0" ]; then
+            chown devassist:devassist "$dst"
+        fi
+        log "Rendered config.yaml for ${role}"
+    done
+}
+
 render_self_deploy_env() {
     local env_file="${BASE}/secrets/SELF-DEPLOY.env"
     if [ -f "$env_file" ] && grep -q "TELEGRAM_BOT_TOKEN" "$env_file" 2>/dev/null; then
         log "SELF-DEPLOY.env already exists with required keys (idempotent)"
         return 0
     fi
-    log "Rendering ${env_file} with placeholder values"
-    cat > "$env_file" <<'ENVFILE'
-TELEGRAM_BOT_TOKEN=test-token-placeholder
-TELEGRAM_ALLOWED_USERS=test-user-placeholder
-GITHUB_TOKEN=test-token-placeholder
-OMNIROUTE_API_KEY=test-token-placeholder
-OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1
-OPENROUTER_API_KEY=test-token-placeholder
-FIREWORKS_API_KEY=test-token-placeholder
-HERMES_DEVASSIST_REPO_URL=https://github.com/example/developer-assistant
-HERMES_DEVASSIST_REPO_BRANCH=main
-DEVASSIST_FOUNDER_TELEGRAM_USER_ID=test-user-placeholder
-ENVFILE
+    log "Rendering ${env_file} with values from environment (or placeholders)"
+
+    local tbt="${TELEGRAM_BOT_TOKEN:-test-token-placeholder}"
+    local tau="${TELEGRAM_ALLOWED_USERS:-test-user-placeholder}"
+    local gt="${GITHUB_TOKEN:-test-token-placeholder}"
+    local oak="${OMNIROUTE_API_KEY:-test-token-placeholder}"
+    local obu="${OMNIROUTE_BASE_URL:-http://127.0.0.1:20128/v1}"
+    local ork="${OPENROUTER_API_KEY:-test-token-placeholder}"
+    local fak="${FIREWORKS_API_KEY:-test-token-placeholder}"
+    local hru="${HERMES_DEVASSIST_REPO_URL:-https://github.com/example/developer-assistant}"
+    local hrb="${HERMES_DEVASSIST_REPO_BRANCH:-main}"
+    local dfuid="${DEVASSIST_FOUNDER_TELEGRAM_USER_ID:-test-user-placeholder}"
+
+    cat > "$env_file" <<EOF
+TELEGRAM_BOT_TOKEN=${tbt}
+TELEGRAM_ALLOWED_USERS=${tau}
+GITHUB_TOKEN=${gt}
+OMNIROUTE_API_KEY=${oak}
+OMNIROUTE_BASE_URL=${obu}
+OPENROUTER_API_KEY=${ork}
+FIREWORKS_API_KEY=${fak}
+HERMES_DEVASSIST_REPO_URL=${hru}
+HERMES_DEVASSIST_REPO_BRANCH=${hrb}
+DEVASSIST_FOUNDER_TELEGRAM_USER_ID=${dfuid}
+EOF
     if [ "$DRY_RUN" = "0" ]; then
         chmod 0600 "$env_file"
         chown devassist:devassist "$env_file"
@@ -223,6 +325,7 @@ ROLE="${HERMES_DEVASSIST_ROLE:-unknown}"
 HEALTH_PORT="${DEVASSIST_HEALTH_PORT:-0}"
 POLL_INTERVAL="${DEVASSIST_WORKER_POLL_INTERVAL:-30}"
 HERMES_BIN="/usr/local/bin/hermes"
+export HOME="${HOME:-/srv/devassist/runtimes/${ROLE}}"
 if [ "${HEALTH_PORT:-0}" -gt 0 ]; then
     python3 -c "
 import http.server
@@ -247,8 +350,9 @@ WORKERRUNNER
     cat > "$orch_path" <<'ORCHRUNNER'
 #!/usr/bin/env bash
 set -euo pipefail
-HEALTH_PORT="${DEVASSIST_HEALTH_PORT:-8181}"
+HEALTH_PORT="${DEVASSIST_HEALTH_PORT:-0}"
 HERMES_BIN="/usr/local/bin/hermes"
+export HOME="${HOME:-/srv/devassist/runtimes/orchestrator}"
 python3 -c "
 import http.server
 class H(http.server.BaseHTTPRequestHandler):
@@ -330,6 +434,7 @@ main() {
     symlink_operational_db
     symlink_env_file
     render_self_deploy_env
+    render_runtime_configs
     install_hermes_agent
     install_dev_assist_cli
     install_worker_runner

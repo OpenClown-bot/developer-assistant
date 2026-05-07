@@ -133,9 +133,12 @@ class TestInstallSelfIdempotent(unittest.TestCase):
         env_file = Path(self.tmpdir) / "srv" / "devassist" / "secrets" / "SELF-DEPLOY.env"
         self.assertTrue(env_file.is_file(), "SELF-DEPLOY.env not created")
         content = env_file.read_text()
-        self.assertIn("TELEGRAM_BOT_TOKEN=test-token-placeholder", content)
-        self.assertIn("GITHUB_TOKEN=test-token-placeholder", content)
-        self.assertIn("FIREWORKS_API_KEY=test-token-placeholder", content)
+        self.assertIn("TELEGRAM_BOT_TOKEN=", content)
+        self.assertIn("GITHUB_TOKEN=", content)
+        self.assertIn("FIREWORKS_API_KEY=", content)
+        self.assertIn("OMNIROUTE_BASE_URL=", content)
+        self.assertIn("TELEGRAM_ALLOWED_USERS=", content)
+        self.assertIn("DEVASSIST_FOUNDER_TELEGRAM_USER_ID=", content)
 
     def test_install_idempotent_second_run(self) -> None:
         _run_script("install-self.sh", self.env)
@@ -228,9 +231,98 @@ class TestSystemdUnitRender(unittest.TestCase):
         self.assertNotIn("omniroute.service", content, "target should not reference omniroute (remote)")
         self.assertNotIn("devassist-web.service", content, "target should not reference web (removed)")
 
+    def test_start_limit_in_unit_section(self) -> None:
+        for role in ["orchestrator", "planner", "architect", "executor", "reviewer"]:
+            unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / f"devassist-{role}.service"
+            content = unit.read_text()
+            in_unit = False
+            in_service = False
+            for line in content.splitlines():
+                if line.strip() == "[Unit]":
+                    in_unit = True
+                    in_service = False
+                elif line.strip() == "[Service]":
+                    in_service = True
+                    in_unit = False
+                if line.startswith("StartLimitIntervalSec") or line.startswith("StartLimitBurst"):
+                    self.assertTrue(in_unit, f"StartLimit* in [Service] for {role}")
+                    self.assertFalse(in_service, f"StartLimit* in [Service] for {role}")
+
+    def test_home_env_in_all_services(self) -> None:
+        for role in ["orchestrator", "planner", "architect", "executor", "reviewer"]:
+            unit = Path(self.tmpdir) / "etc" / "systemd" / "system" / f"devassist-{role}.service"
+            content = unit.read_text()
+            self.assertIn(f"HOME=/srv/devassist/runtimes/{role}", content, f"HOME not set for {role}")
+
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
-class TestVerifySelf(unittest.TestCase):
+class TestRuntimeConfigRender(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+            "ROLLBACK_DRY_RUN": "1",
+            "UPGRADE_DRY_RUN": "1",
+        }
+        _run_script("install-self.sh", self.env)
+
+    def test_config_yaml_rendered_for_all_roles(self) -> None:
+        for role in ["orchestrator", "planner", "architect", "executor", "reviewer"]:
+            cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / role / ".hermes" / "config.yaml"
+            self.assertTrue(cfg.is_file(), f"config.yaml not rendered for {role}")
+
+    def test_no_template_placeholders_in_config(self) -> None:
+        for role in ["orchestrator", "planner", "architect", "executor", "reviewer"]:
+            cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / role / ".hermes" / "config.yaml"
+            content = cfg.read_text()
+            self.assertNotIn("{{", content, f"Unsubstituted template placeholder in {role} config")
+            self.assertNotIn("}}", content, f"Unsubstituted template placeholder in {role} config")
+
+    def test_orchestrator_config_has_gateway_enabled(self) -> None:
+        cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / "orchestrator" / ".hermes" / "config.yaml"
+        content = cfg.read_text()
+        self.assertIn("gateway:", content)
+        self.assertIn("enabled: true", content)
+
+    def test_worker_configs_have_gateway_disabled(self) -> None:
+        for role in ["planner", "architect", "executor", "reviewer"]:
+            cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / role / ".hermes" / "config.yaml"
+            content = cfg.read_text()
+            self.assertIn("enabled: false", content, f"{role} should have gateway disabled")
+
+    def test_executor_has_terminal_block(self) -> None:
+        for role in ["executor", "reviewer"]:
+            cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / role / ".hermes" / "config.yaml"
+            content = cfg.read_text()
+            self.assertIn("terminal:", content, f"{role} missing terminal block")
+            self.assertIn("backend: docker", content, f"{role} missing docker backend")
+
+    def test_config_has_omniroute_base_url(self) -> None:
+        cfg = Path(self.tmpdir) / "srv" / "devassist" / "runtimes" / "orchestrator" / ".hermes" / "config.yaml"
+        content = cfg.read_text()
+        self.assertIn("base_url:", content)
+
+    def test_env_file_reads_from_environment(self) -> None:
+        tmpdir2 = tempfile.mkdtemp(prefix="devassist-test-")
+        try:
+            env = {
+                "INSTALL_DRY_RUN": "1",
+                "INSTALL_DRY_RUN_PREFIX": tmpdir2,
+                "VERIFY_FIXTURE_MODE": "1",
+                "ROLLBACK_DRY_RUN": "1",
+                "UPGRADE_DRY_RUN": "1",
+                "FIREWORKS_API_KEY": "fw-test-key-123",
+                "TELEGRAM_ALLOWED_USERS": "12345",
+            }
+            _run_script("install-self.sh", env)
+            env_file = Path(tmpdir2) / "srv" / "devassist" / "secrets" / "SELF-DEPLOY.env"
+            content = env_file.read_text()
+            self.assertIn("FIREWORKS_API_KEY=fw-test-key-123", content)
+            self.assertIn("TELEGRAM_ALLOWED_USERS=12345", content)
+        finally:
+            shutil.rmtree(tmpdir2, ignore_errors=True)
     def test_verify_passes_in_fixture_mode(self) -> None:
         tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
         try:

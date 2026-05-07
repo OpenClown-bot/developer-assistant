@@ -3,6 +3,8 @@ Description=developer-assistant orchestrator Hermes runtime (Telegram gateway)
 PartOf=devassist.target
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -10,6 +12,7 @@ User=devassist
 Group=devassist
 WorkingDirectory=/srv/devassist/runtimes/orchestrator
 Environment=HERMES_HOME=/srv/devassist/runtimes/orchestrator/.hermes
+Environment=HOME=/srv/devassist/runtimes/orchestrator
 Environment=HERMES_DEVASSIST_ROLE=orchestrator
 Environment=DEVASSIST_HEALTH_PORT=8181
 Environment=XDG_STATE_HOME=/srv/devassist/runtimes/orchestrator/.local/state
@@ -17,8 +20,6 @@ EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
 ExecStart=/usr/local/bin/devassist-orchestrator-runner
 Restart=on-failure
 RestartSec=10s
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 NoNewPrivileges=true
 ProtectSystem=full
