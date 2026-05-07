@@ -247,14 +247,7 @@ def validate_dev_assist_cli(raw: str) -> Verdict:
             f"(found: {sorted(CLI_SUBCOMMANDS)})")
 
 
-KNOWN_PLAYBOOK_INCONSISTENCIES = {
-    "devassist-omniroute.service": (
-        "omniroute.service",
-        "SELF-DEPLOYMENT-CONTRACT.md \u00a75.3 defines the OmniRoute unit as "
-        "'omniroute.service', not 'devassist-omniroute.service'. The playbook "
-        "uses the incorrect prefixed name. Requires Architect fix."
-    ),
-}
+KNOWN_PLAYBOOK_INCONSISTENCIES = {}
 
 
 def _check_known_inconsistency(unit: str) -> Verdict | None:
