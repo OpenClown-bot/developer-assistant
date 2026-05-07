@@ -1,0 +1,1 @@
+from developer_assistant.hermes_plugins.dev_assist_work_queue.plugin import register

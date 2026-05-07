@@ -1,0 +1,9 @@
+name: dev-assist-work-queue
+version: "0.1.1"
+hermes_plugin_contract_version: "1"
+entry_point: developer_assistant.hermes_plugins.dev_assist_work_queue.plugin
+tools:
+  - work_queue.claim
+  - work_queue.complete
+  - work_queue.release
+  - work_queue.write
