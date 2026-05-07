@@ -1,0 +1,6 @@
+name: dev-assist-escalation-policy
+version: "0.1.1"
+hermes_plugin_contract_version: "1"
+entry_point: developer_assistant.hermes_plugins.dev_assist_escalation_policy.plugin
+hooks:
+  - pre_tool_call

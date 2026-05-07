@@ -1,0 +1,1 @@
+from developer_assistant.hermes_plugins.dev_assist_escalation_policy.plugin import register
