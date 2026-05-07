@@ -1,0 +1,49 @@
+agent:
+  model: {{model_main}}
+  fallback_models:
+    - {{fallback_1}}
+    - {{fallback_2}}
+    - {{fallback_3}}
+  base_url: http://127.0.0.1:{{omniroute_port}}/v1
+
+gateway:
+  enabled: {{gateway_enabled}}
+
+skills:
+  built_in:
+{{built_in_skills}}
+  external_dirs:
+    - /srv/devassist/shared-skills/
+  delegate_task:
+    enabled: false
+  skill_manage:
+    enabled: false
+
+plugins:
+  dev-assist-escalation-policy:
+    enabled: true
+  dev-assist-work-queue:
+    enabled: true
+
+approvals:
+  mode: manual
+
+system_prompt:
+  path: {{repo_path}}/{{prompt_file}}
+
+memory:
+  path: /srv/devassist/runtimes/{{role}}/.hermes/memories/
+
+sessions:
+  path: /srv/devassist/runtimes/{{role}}/.hermes/sessions/
+
+operational_db:
+  path: /srv/devassist/runtimes/{{role}}/.hermes/operational.db
+
+cron:
+  enabled: true
+
+env:
+  HERMES_DEVASSIST_ROLE: {{role}}
+  HERMES_HOME: /srv/devassist/runtimes/{{role}}/.hermes/
+{{terminal_block}}
