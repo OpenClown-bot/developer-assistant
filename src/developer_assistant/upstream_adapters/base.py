@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional
 
 
 @dataclass
@@ -20,7 +20,7 @@ class InboundMessageInput:
     message_id: str
     received_at: str
     reply_to_message_id: Optional[str] = None
-    attachments: list = field(default_factory=list)
+    attachments: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -70,7 +70,7 @@ class ApprovalPromptInput:
     recommended_default: str = ""
     impact: str = ""
     urgency: str = "low"
-    response_modes: List[str] = field(
+    response_modes: list[str] = field(
         default_factory=lambda: ["slash_command", "inline_buttons", "free_text"]
     )
 
@@ -123,7 +123,7 @@ class UpstreamAdapter(ABC):
     @abstractmethod
     def inbound_message(
         self, inp: InboundMessageInput
-    ) -> Union[InboundMessageResult, DroppedInboundResult]:
+    ) -> InboundMessageResult | DroppedInboundResult:
         ...
 
     @abstractmethod
