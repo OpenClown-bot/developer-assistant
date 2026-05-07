@@ -1,0 +1,42 @@
+-- Fixture: expected errors table schema for observability migration tests
+-- This file documents the expected column structure for test assertions.
+
+-- errors table columns:
+-- err_id        TEXT PRIMARY KEY
+-- ts            TEXT NOT NULL
+-- runtime       TEXT NOT NULL CHECK (runtime IN ('orchestrator', 'business-planner', 'architect', 'executor', 'reviewer', 'omniroute'))
+-- work_item_id  TEXT
+-- error_class   TEXT NOT NULL
+-- message       TEXT NOT NULL
+-- context_json  TEXT NOT NULL DEFAULT '{}'
+
+-- llm_calls table columns:
+-- call_id            TEXT PRIMARY KEY
+-- ts                 TEXT NOT NULL
+-- runtime            TEXT NOT NULL CHECK (runtime IN ('orchestrator', 'business-planner', 'architect', 'executor', 'reviewer'))
+-- work_item_id       TEXT
+-- model              TEXT NOT NULL
+-- routing_path       TEXT NOT NULL CHECK (routing_path IN ('omniroute_endpoint', 'openrouter_endpoint'))
+-- tokens_in          INTEGER NOT NULL
+-- tokens_out         INTEGER NOT NULL
+-- latency_ms         INTEGER NOT NULL
+-- rate_in_per_1m_usd REAL NOT NULL
+-- rate_out_per_1m_usd REAL NOT NULL
+-- cost_usd           REAL NOT NULL
+-- status             TEXT NOT NULL CHECK (status IN ('success', 'fail'))
+-- error_class        TEXT
+
+-- llm_calls_daily table columns:
+-- day               TEXT NOT NULL
+-- runtime           TEXT NOT NULL CHECK
+-- model             TEXT NOT NULL
+-- routing_path      TEXT NOT NULL CHECK
+-- call_count        INTEGER NOT NULL
+-- call_count_success INTEGER NOT NULL
+-- call_count_fail   INTEGER NOT NULL
+-- tokens_in_total   INTEGER NOT NULL
+-- tokens_out_total  INTEGER NOT NULL
+-- cost_usd_total    REAL NOT NULL
+-- latency_ms_p50    INTEGER (nullable)
+-- latency_ms_p95    INTEGER (nullable)
+-- PK: (day, runtime, model, routing_path)
