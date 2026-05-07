@@ -52,11 +52,13 @@ class ClassifierSkill:
         self,
         llm_dispatcher: Callable[[str], str],
         locale: Optional[dict[str, Any]] = None,
+        escalation_lookup: Optional[Callable[[str], Optional[int]]] = None,
     ) -> None:
         self._llm = llm_dispatcher
         if locale is None:
             locale = load_locale_yaml(_PACKAGE_DIR)
         self._locale = locale
+        self._escalation_lookup = escalation_lookup
 
     def classify(
         self,
@@ -85,11 +87,13 @@ class ClassifierSkill:
                 intent=escalation_intent,
             )
 
+        most_recent_id = self._resolve_most_recent_escalation_id(founder_id)
+
         try:
             llm_response = self._llm(
-                self._build_classification_prompt(stripped)
+                self._build_classification_prompt(stripped, most_recent_id)
             )
-            parsed = self._validate_and_parse(llm_response)
+            parsed = self._validate_and_parse(llm_response, most_recent_id)
             return parsed
         except Exception:
             return ClassificationResult(
@@ -97,18 +101,42 @@ class ClassifierSkill:
                 intent={"text": text},
             )
 
-    def _build_classification_prompt(self, text: str) -> str:
+    def _resolve_most_recent_escalation_id(
+        self, founder_id: str
+    ) -> Optional[int]:
+        """Return the most recent surfaced escalation id for *founder_id*.
+
+        Returns None if no escalation_lookup is configured or if the
+        lookup callable returns None.
+        """
+        if self._escalation_lookup is None:
+            return None
+        try:
+            return self._escalation_lookup(founder_id)
+        except Exception:
+            return None
+
+    def _build_classification_prompt(
+        self, text: str, most_recent_id: Optional[int] = None
+    ) -> str:
         labels = self._locale.get("labels", {})
         kind_names = "\n".join(
             f"  - {v}" for v in labels.values()
         )
-        return (
+        prompt = (
             f"Классифицируй следующее сообщение в одно из намерений:\n"
             f"{kind_names}\n\n"
             f"Ответь строго в JSON формате:\n"
             f'{{"kind": "<намерение>", "details": {{}}}}\n\n'
-            f"Сообщение: {text}"
         )
+        if most_recent_id is not None:
+            prompt += (
+                f"Контекст: активна эскалация #{most_recent_id}, ожидающая ответа.\n"
+                f"Если это ответ на эскалацию #{most_recent_id}, установи "
+                f"kind=ответ_на_эскалацию и details.escalation_id={most_recent_id}.\n\n"
+            )
+        prompt += f"Сообщение: {text}"
+        return prompt
 
     @staticmethod
     def _try_match_command(text: str) -> Optional[str]:
@@ -133,7 +161,9 @@ class ClassifierSkill:
             }
         return None
 
-    def _validate_and_parse(self, raw: str) -> ClassificationResult:
+    def _validate_and_parse(
+        self, raw: str, most_recent_id: Optional[int] = None
+    ) -> ClassificationResult:
         try:
             data = json.loads(raw.strip())
         except json.JSONDecodeError:
@@ -150,5 +180,9 @@ class ClassifierSkill:
         intent = data.get("details", {})
         if not isinstance(intent, dict):
             intent = {}
+
+        if kind == "escalation_response" and not intent.get("escalation_id"):
+            if most_recent_id is not None:
+                intent["escalation_id"] = most_recent_id
 
         return ClassificationResult(kind=kind, intent=intent, raw=raw)

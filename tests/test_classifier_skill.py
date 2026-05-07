@@ -242,6 +242,99 @@ class ClassifierDispatcherErrorTests(unittest.TestCase):
         self.assertEqual(result.kind, "freeform_chat")
 
 
+class ClassifierFreeTextEscalationResponseTests(unittest.TestCase):
+    def setUp(self):
+        self.lookup_calls: list[int] = []
+
+    def _make_lookup(self, return_id: Optional[int]) -> object:
+        def lookup(founder_id: str) -> Optional[int]:
+            self.lookup_calls.append(return_id)
+            return return_id
+        return lookup
+
+    def test_free_text_reply_injects_escalation_id_from_lookup(self):
+        skill = ClassifierSkill(
+            llm_dispatcher=_make_dispatcher([
+                json.dumps({
+                    "kind": "escalation_response",
+                    "details": {"text": "Yes, go ahead"},
+                }),
+            ]),
+            escalation_lookup=self._make_lookup(42),
+        )
+        result = skill.classify(
+            "Yes, go ahead", founder_id="founder-1"
+        )
+        self.assertEqual(result.kind, "escalation_response")
+        self.assertEqual(result.intent["escalation_id"], 42)
+        self.assertIn("text", result.intent)
+
+    def test_llm_includes_escalation_id_from_prompt_hint(self):
+        skill = ClassifierSkill(
+            llm_dispatcher=_make_dispatcher([
+                json.dumps({
+                    "kind": "escalation_response",
+                    "details": {"text": "Let's do it", "escalation_id": 42},
+                }),
+            ]),
+            escalation_lookup=self._make_lookup(42),
+        )
+        result = skill.classify(
+            "Let's do it", founder_id="founder-1"
+        )
+        self.assertEqual(result.kind, "escalation_response")
+        self.assertEqual(result.intent["escalation_id"], 42)
+
+    def test_no_surfaced_escalation_escalation_response_without_id(self):
+        skill = ClassifierSkill(
+            llm_dispatcher=_make_dispatcher([
+                json.dumps({
+                    "kind": "escalation_response",
+                    "details": {"text": "Just do it"},
+                }),
+            ]),
+            escalation_lookup=self._make_lookup(None),
+        )
+        result = skill.classify(
+            "Just do it", founder_id="founder-1"
+        )
+        self.assertEqual(result.kind, "escalation_response")
+        self.assertNotIn("escalation_id", result.intent)
+
+    def test_no_lookup_configured_preserves_original_behavior(self):
+        skill = ClassifierSkill(
+            llm_dispatcher=_make_dispatcher([
+                json.dumps({
+                    "kind": "escalation_response",
+                    "details": {"text": "Reply text"},
+                }),
+            ]),
+        )
+        result = skill.classify(
+            "Reply text", founder_id="founder-1"
+        )
+        self.assertEqual(result.kind, "escalation_response")
+        self.assertNotIn("escalation_id", result.intent)
+
+    def test_lookup_exception_falls_back_gracefully(self):
+        def broken_lookup(founder_id: str) -> Optional[int]:
+            raise RuntimeError("DB down")
+        skill = ClassifierSkill(
+            llm_dispatcher=_make_dispatcher([
+                json.dumps({
+                    "kind": "escalation_response",
+                    "details": {"text": "OK"},
+                }),
+            ]),
+            escalation_lookup=broken_lookup,
+        )
+        result = skill.classify(
+            "OK", founder_id="founder-1"
+        )
+        self.assertEqual(result.kind, "escalation_response")
+        self.assertNotIn("escalation_id", result.intent)
+
+
 class ClassifierRuntimeLoadoutTests(unittest.TestCase):
     def test_runtime_loadout_is_orchestrator_only(self):
         skill = ClassifierSkill(
