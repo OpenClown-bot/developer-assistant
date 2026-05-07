@@ -85,8 +85,8 @@ class TestStatusCommand(unittest.TestCase):
         return args
 
     def test_status_json_output(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = {
                 "ok": True, "status_code": 200,
                 "body": {
@@ -116,8 +116,8 @@ class TestStatusCommand(unittest.TestCase):
             self.assertGreaterEqual(len(data["runtimes"]), 5)
 
     def test_status_human_output(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = {
                 "ok": True, "status_code": 200,
                 "body": {
@@ -141,8 +141,8 @@ class TestStatusCommand(unittest.TestCase):
             self.assertIn("Queue:", output)
 
     def test_status_health_unreachable(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = {"ok": False, "error": "Connection refused"}
             mock_sysctl.return_value = "unknown"
 
@@ -473,8 +473,8 @@ class TestIter2Fixes(unittest.TestCase):
 
     # T1
     def test_status_escalated_count_from_escalations_table(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = self._mock_health()
             mock_sysctl.return_value = "active"
 
@@ -497,8 +497,8 @@ class TestIter2Fixes(unittest.TestCase):
 
     # T4
     def test_status_heartbeat_degraded_at_60s(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = self._mock_health(heartbeat_age_s=61)
             mock_sysctl.return_value = "active"
 
@@ -521,8 +521,8 @@ class TestIter2Fixes(unittest.TestCase):
 
     # T4b
     def test_status_heartbeat_running_at_59s(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = self._mock_health(heartbeat_age_s=59)
             mock_sysctl.return_value = "active"
 
@@ -635,8 +635,8 @@ class TestIter2Fixes(unittest.TestCase):
 
     # Iter-3 T3: last_error from errors table
     def test_status_last_error_from_errors_table(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = self._mock_health()
             mock_sysctl.return_value = "active"
 
@@ -661,8 +661,8 @@ class TestIter2Fixes(unittest.TestCase):
 
     # Iter-3 T4: degraded on recent error
     def test_status_degraded_on_recent_error(self):
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = self._mock_health(heartbeat_age_s=12)
             mock_sysctl.return_value = "active"
 
@@ -717,8 +717,8 @@ class TestMainAndHelp(unittest.TestCase):
 
     def test_status_subcommand_in_main(self):
         with patch.dict(os.environ, {"DEV_ASSIST_DB_PATH": ":memory:"}):
-            with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-                 patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+                 patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
                 mock_health.return_value = {
                     "ok": True, "status_code": 200,
                     "body": {
@@ -787,8 +787,8 @@ class TestJsonSchemas(unittest.TestCase):
 
     def test_status_matches_schema(self):
         schema = self._load_schema("status_schema.json")
-        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
-             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+        with patch("developer_assistant.observability.status_query._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.observability.status_query._check_systemctl_unit") as mock_sysctl:
             mock_health.return_value = {
                 "ok": True, "status_code": 200,
                 "body": {
