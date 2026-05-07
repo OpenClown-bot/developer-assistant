@@ -70,7 +70,7 @@ class TestSchemaInitialization(unittest.TestCase):
             cur = conn.execute(
                 "SELECT value FROM _schema_meta WHERE key='schema_version'"
             )
-            self.assertEqual(cur.fetchone()["value"], "2")
+            self.assertEqual(cur.fetchone()["value"], "3")
         finally:
             conn.close()
 
@@ -84,7 +84,7 @@ class TestSchemaInitialization(unittest.TestCase):
                 cur = conn.execute(
                     "SELECT value FROM _schema_meta WHERE key='schema_version'"
                 )
-                self.assertEqual(cur.fetchone()["value"], "2")
+                self.assertEqual(cur.fetchone()["value"], "3")
             finally:
                 conn.close()
 

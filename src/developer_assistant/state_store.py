@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _CREATE_PROJECT_BINDINGS = """
 CREATE TABLE IF NOT EXISTS project_bindings (
@@ -86,30 +86,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _migration_path() -> Path:
-    """Return the path to the migration SQL file.
+_MIGRATIONS: list[tuple[int, str]] = [
+    (2, "004_work_queue_and_escalations.sql"),
+    (3, "005_observability_tables.sql"),
+]
 
-    Resolves from state_store.py (src/developer_assistant/) three levels up
-    to the repository root, then into db/migrations/.
-    """
+
+def _migrations_dir() -> Path:
     repo_root = Path(__file__).resolve().parent.parent.parent
-    return repo_root / "db" / "migrations" / "004_work_queue_and_escalations.sql"
+    return repo_root / "db" / "migrations"
 
 
-def _apply_migration(db: sqlite3.Connection) -> None:
-    """Apply the v0.2.1 migration if not yet applied."""
+def _apply_migrations(db: sqlite3.Connection) -> None:
     cur = db.execute(
         "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
     )
     row = cur.fetchone()
     current_version = int(row["value"]) if row else 0
-    if current_version >= 2:
-        return
 
-    migration_file = _migration_path()
-    sql = migration_file.read_text(encoding="utf-8")
-    db.executescript(sql)
-    db.commit()
+    mdir = _migrations_dir()
+    for target_version, filename in _MIGRATIONS:
+        if current_version >= target_version:
+            continue
+        sql = (mdir / filename).read_text(encoding="utf-8")
+        db.executescript(sql)
+        db.commit()
 
 
 def init_schema(db: sqlite3.Connection) -> None:
@@ -122,7 +123,7 @@ def init_schema(db: sqlite3.Connection) -> None:
         ("schema_version", "1"),
     )
     db.commit()
-    _apply_migration(db)
+    _apply_migrations(db)
 
 
 def open_store(db_path: str) -> sqlite3.Connection:
