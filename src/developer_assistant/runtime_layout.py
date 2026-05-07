@@ -27,7 +27,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
         ),
     ),
     "planner": (
@@ -35,11 +35,11 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/minimax-m2p7",
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
         ),
     ),
     "architect": (
-        "accounts/fireworks/models/deepseek-v4-pro",
+        "accounts/fireworks/models/deepseek-v3p2",
         (
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/glm-5p1",
@@ -49,7 +49,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "executor": (
         "accounts/fireworks/models/glm-5p1",
         (
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
             "accounts/fireworks/models/kimi-k2p6",
             "accounts/fireworks/models/qwen3p6-plus",
         ),
@@ -57,7 +57,7 @@ _ROLE_MODEL_ASSIGNMENT: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "reviewer": (
         "accounts/fireworks/models/kimi-k2p6",
         (
-            "accounts/fireworks/models/deepseek-v4-pro",
+            "accounts/fireworks/models/deepseek-v3p2",
             "accounts/fireworks/models/glm-5p1",
             "accounts/fireworks/models/qwen3p6-plus",
         ),

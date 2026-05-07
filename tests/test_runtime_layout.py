@@ -121,14 +121,14 @@ class TestRenderRuntimeConfig(unittest.TestCase):
         self.assertIn("terminal:", cfg)
         self.assertIn("backend: docker", cfg)
 
-    def test_architect_model_is_deepseek_v4_pro(self) -> None:
+    def test_architect_model_is_deepseek_v3p2(self) -> None:
         result = render_runtime_config(
             role="architect",
             secrets_env_path=self.secrets_path,
             state_db_path=self.state_db_path,
             repo_path=self.repo_path,
         )
-        self.assertIn("accounts/fireworks/models/deepseek-v4-pro", result["config.yaml"])
+        self.assertIn("accounts/fireworks/models/deepseek-v3p2", result["config.yaml"])
 
     def test_orchestrator_model_is_minimax_m2p7(self) -> None:
         result = render_runtime_config(
@@ -348,7 +348,7 @@ class TestGetRoleModelAssignment(unittest.TestCase):
 
     def test_architect_main_model(self) -> None:
         main, _ = get_role_model_assignment("architect")
-        self.assertEqual(main, "accounts/fireworks/models/deepseek-v4-pro")
+        self.assertEqual(main, "accounts/fireworks/models/deepseek-v3p2")
 
     def test_unknown_role_raises(self) -> None:
         with self.assertRaises(ValueError):
