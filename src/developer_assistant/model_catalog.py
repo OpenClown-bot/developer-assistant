@@ -327,6 +327,33 @@ def probe_omniroute(
     return results
 
 
+_MODEL_RATES: dict[str, tuple[float, float]] = {
+    "accounts/fireworks/models/deepseek-v4-pro": (0.50, 2.19),
+    "accounts/fireworks/models/kimi-k2p6": (0.60, 2.50),
+    "accounts/fireworks/models/minimax-m2p7": (0.27, 1.10),
+    "accounts/fireworks/models/glm-5p1": (0.40, 1.60),
+    "accounts/fireworks/models/qwen3p6-plus": (0.40, 1.60),
+}
+
+
+@dataclass
+class RateSnapshot:
+    rate_in_per_1m_usd: float
+    rate_out_per_1m_usd: float
+
+
+def get_rate_for_model(model_id: str) -> tuple[float, float]:
+    rates = _MODEL_RATES.get(model_id)
+    if rates is None:
+        return (0.0, 0.0)
+    return rates
+
+
+def get_rate_snapshot(model_id: str) -> RateSnapshot:
+    r = get_rate_for_model(model_id)
+    return RateSnapshot(rate_in_per_1m_usd=r[0], rate_out_per_1m_usd=r[1])
+
+
 def paid_third_party_external_service_not_yet_supported_error(
     role: str,
     identifier: str,
