@@ -155,7 +155,7 @@ flip_release_symlink() {
         return 0
     fi
     local prev_target
-    prev_target=$(readlink -f "$previous" 2>/dev/null) || {
+    if ! prev_target=$(readlink -f "$previous" 2>/dev/null); then
         log "WARN: cannot read releases/previous target"
         return 0
     fi
@@ -166,8 +166,7 @@ flip_release_symlink() {
 
 run_verify() {
     log "Running verify-self.sh against restored release"
-    INSTALL_DRY_RUN=1 VERIFY_FIXTURE_MODE=1 ROLLBACK_DRY_RUN=1 UPGRADE_DRY_RUN=1 \
-        INSTALL_DRY_RUN_PREFIX="${PREFIX}" \
+    VERIFY_PHASE=pre-start \
         "${SCRIPT_DIR}/verify-self.sh"
     return $?
 }
