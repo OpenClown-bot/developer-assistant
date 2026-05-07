@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _CREATE_PROJECT_BINDINGS = """
 CREATE TABLE IF NOT EXISTS project_bindings (
@@ -85,6 +86,32 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _migration_path() -> Path:
+    """Return the path to the migration SQL file.
+
+    Resolves from state_store.py (src/developer_assistant/) three levels up
+    to the repository root, then into db/migrations/.
+    """
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    return repo_root / "db" / "migrations" / "004_work_queue_and_escalations.sql"
+
+
+def _apply_migration(db: sqlite3.Connection) -> None:
+    """Apply the v0.2.1 migration if not yet applied."""
+    cur = db.execute(
+        "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
+    )
+    row = cur.fetchone()
+    current_version = int(row["value"]) if row else 0
+    if current_version >= 2:
+        return
+
+    migration_file = _migration_path()
+    sql = migration_file.read_text(encoding="utf-8")
+    db.executescript(sql)
+    db.commit()
+
+
 def init_schema(db: sqlite3.Connection) -> None:
     """Create all tables and indexes if they do not exist."""
     cur = db.cursor()
@@ -92,9 +119,10 @@ def init_schema(db: sqlite3.Connection) -> None:
         cur.execute(ddl)
     cur.execute(
         "INSERT OR IGNORE INTO _schema_meta (key, value) VALUES (?, ?)",
-        ("schema_version", str(_SCHEMA_VERSION)),
+        ("schema_version", "1"),
     )
     db.commit()
+    _apply_migration(db)
 
 
 def open_store(db_path: str) -> sqlite3.Connection:
@@ -111,6 +139,7 @@ def open_store(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     init_schema(conn)
     return conn
 
