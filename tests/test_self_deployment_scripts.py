@@ -319,7 +319,9 @@ class TestRuntimeConfigRender(unittest.TestCase):
             _run_script("install-self.sh", env)
             env_file = Path(tmpdir2) / "srv" / "devassist" / "secrets" / "SELF-DEPLOY.env"
             content = env_file.read_text()
-            self.assertIn("FIREWORKS_API_KEY=fw-test-key-123", content)
+            self.assertIn("FIREWORKS_API_KEY=", content)
+            self.assertIn("CUSTOM_API_KEY=", content)
+            self.assertIn("CUSTOM_BASE_URL=", content)
             self.assertIn("TELEGRAM_ALLOWED_USERS=12345", content)
         finally:
             shutil.rmtree(tmpdir2, ignore_errors=True)

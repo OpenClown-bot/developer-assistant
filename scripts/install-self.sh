@@ -181,17 +181,13 @@ render_runtime_configs() {
                 ;;
         esac
 
-        local fb_1 fb_2 fb_3
+        local fb_1
         fb_1=$(echo "$fallbacks" | cut -d',' -f1)
-        fb_2=$(echo "$fallbacks" | cut -d',' -f2)
-        fb_3=$(echo "$fallbacks" | cut -d',' -f3)
 
         local content
         content=$(cat "$tmpl")
         content=$(echo "$content" | sed "s|{{model_main}}|${model_main}|g")
         content=$(echo "$content" | sed "s|{{fallback_1}}|${fb_1}|g")
-        content=$(echo "$content" | sed "s|{{fallback_2}}|${fb_2}|g")
-        content=$(echo "$content" | sed "s|{{fallback_3}}|${fb_3}|g")
         content=$(echo "$content" | sed "s|{{omniroute_base_url}}|${OMNIROUTE_BASE_URL}|g")
         content=$(echo "$content" | sed "s|{{omniroute_api_key}}|${OMNIROUTE_API_KEY}|g")
         content=$(echo "$content" | sed "s|{{gateway_enabled}}|${gateway_enabled}|g")
@@ -234,8 +230,13 @@ TELEGRAM_ALLOWED_USERS=${tau}
 GITHUB_TOKEN=${gt}
 OMNIROUTE_API_KEY=${oak}
 OMNIROUTE_BASE_URL=${obu}
-OPENROUTER_API_KEY=${ork}
-FIREWORKS_API_KEY=${fak}
+CUSTOM_BASE_URL=${obu}
+CUSTOM_API_KEY=${oak}
+OPENROUTER_API_KEY=
+FIREWORKS_API_KEY=
+ANTHROPIC_API_KEY=
+GLM_API_KEY=
+KIMI_API_KEY=
 HERMES_DEVASSIST_REPO_URL=${hru}
 HERMES_DEVASSIST_REPO_BRANCH=${hrb}
 DEVASSIST_FOUNDER_TELEGRAM_USER_ID=${dfuid}

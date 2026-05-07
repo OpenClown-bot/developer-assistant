@@ -133,6 +133,18 @@ def _load_template(role: str, filename: str) -> str:
         return fh.read()
 
 
+def _read_env_var(env_path: str, key: str) -> str:
+    try:
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith(f"{key}="):
+                    return line.split("=", 1)[1]
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
 def _render_config_yaml(
     role: str,
     secrets_env_path: str,
@@ -154,15 +166,15 @@ def _render_config_yaml(
     gateway_enabled = "true" if role == "orchestrator" else "false"
 
     tmpl = _load_template(role, "config.yaml.tmpl")
+    omniroute_api_key = _read_env_var(secrets_env_path, "OMNIROUTE_API_KEY")
     return (
         tmpl.replace("{{role}}", role)
         .replace("{{repo_path}}", repo_path)
         .replace("{{prompt_file}}", prompt_file)
         .replace("{{model_main}}", model_main)
         .replace("{{fallback_1}}", model_fallbacks[0])
-        .replace("{{fallback_2}}", model_fallbacks[1])
-        .replace("{{fallback_3}}", model_fallbacks[2])
         .replace("{{omniroute_base_url}}", omniroute_base_url)
+        .replace("{{omniroute_api_key}}", omniroute_api_key)
         .replace("{{built_in_skills}}", built_in_lines)
         .replace("{{terminal_block}}", terminal_block)
         .replace("{{gateway_enabled}}", gateway_enabled)
