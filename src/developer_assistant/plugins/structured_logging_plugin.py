@@ -60,11 +60,24 @@ class _StubCatalogParser:
 
 
 def dequeue_wrapper(work_item_id: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Sync dequeue: set work_item context, call fn, then clear."""
     if _manager is not None:
         _manager.set_work_item_context(work_item_id)
     with work_item(work_item_id):
         try:
             return fn(*args, **kwargs)
+        finally:
+            if _manager is not None:
+                _manager.clear_work_item_context()
+
+
+async def async_dequeue_wrapper(work_item_id: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Async dequeue: set work_item context, await fn, then clear."""
+    if _manager is not None:
+        _manager.set_work_item_context(work_item_id)
+    with work_item(work_item_id):
+        try:
+            return await fn(*args, **kwargs)
         finally:
             if _manager is not None:
                 _manager.clear_work_item_context()

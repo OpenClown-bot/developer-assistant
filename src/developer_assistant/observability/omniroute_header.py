@@ -23,6 +23,7 @@ _HEADER_NAME = "X-DEVASSIST-Work-Item-Id"
 
 
 def inject_work_item_header(request: Any) -> None:
+    """Sync httpx request event hook; valid for both sync and async clients."""
     wid = _WORK_ITEM_ID.get()
     if wid is not None:
         request.headers[_HEADER_NAME] = wid
@@ -31,6 +32,7 @@ def inject_work_item_header(request: Any) -> None:
 def build_headers_with_work_item(
     headers: MutableMapping[str, str],
 ) -> MutableMapping[str, str]:
+    """Return headers dict with X-DEVASSIST-Work-Item-Id added when contextvar is set."""
     wid = _WORK_ITEM_ID.get()
     if wid is not None:
         headers[_HEADER_NAME] = wid

@@ -11,6 +11,21 @@ Public API:
   instrument_llm_call(model_id) – decorator for LLM call functions
   init_runtime_logger()         – one-time root-logger init
   dispatch_in_thread(fn, ...)   – contextvars-aware thread helper
+
+Extra-field convention:
+  Callers pass extra={"event": "some.event", "_extra_payload": {key: val}}
+  to include additional fields in the JSON log line.  Fields in
+  _extra_payload that match mandatory field names override defaults;
+  other fields are appended as-is.  Do NOT place structured data
+  directly in extra={} as Python logging reserves certain attribute
+  names and will silently drop them.
+
+Note on runtime_role default:
+  When DEVASSIST_RUNTIME_ROLE is unset this module defaults to "unknown",
+  while ObservabilityManager.from_env() defaults to "executor".  This
+  intentional discrepancy means a JSON log line and a SQLite row may
+  disagree on runtime_role when the env var is missing; "unknown" is
+  preferred here because it accurately signals misconfiguration.
 """
 
 from __future__ import annotations
@@ -73,9 +88,8 @@ def _get_runtime_role() -> str:
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        ts_iso = datetime.datetime.now(datetime.timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%S."
-        ) + f"{datetime.datetime.now(datetime.timezone.utc).microsecond // 1000:03d}Z"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        ts_iso = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
         level = record.levelname.lower()
         if level == "warning":
