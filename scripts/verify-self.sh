@@ -9,12 +9,26 @@ ROLES="orchestrator planner architect executor reviewer"
 MODEL_IDENTIFIERS="minimax-m2.7 kimi-k2.6 deepseek-v4-pro glm-5.1 qwen3.6-plus"
 DRY_RUN="${INSTALL_DRY_RUN:-0}"
 FIXTURE="${VERIFY_FIXTURE_MODE:-0}"
+VERIFY_PHASE="${VERIFY_PHASE:-full}"
 PREFIX=""
 if [ "$DRY_RUN" = "1" ]; then
     PREFIX="${INSTALL_DRY_RUN_PREFIX:-/tmp/devassist-dry-run}"
 fi
 BASE="${PREFIX}/srv/devassist"
 LOG_FILE="${BASE}/logs/self-deploy.log"
+ENV_FILE="${BASE}/secrets/SELF-DEPLOY.env"
+
+if [ -f "$ENV_FILE" ]; then
+    while IFS="=" read -r env_key env_val; do
+        case "$env_key" in
+            TELEGRAM_BOT_TOKEN|GITHUB_TOKEN|PROJECT_GITHUB_PAT|OMNIROUTE_API_KEY|OPENROUTER_API_KEY|FIREWORKS_API_KEY)
+                if [ -n "$env_key" ] && [ -z "${!env_key:-}" ]; then
+                    export "$env_key=$env_val"
+                fi
+                ;;
+        esac
+    done < "$ENV_FILE"
+fi
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -83,6 +97,10 @@ invariant_02_github() {
 
 invariant_03_omniroute_models() {
     local name="OmniRoute /v1/models"
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
+        return 0
+    fi
     if [ "$FIXTURE" = "1" ]; then
         log "FIXTURE: OmniRoute /v1/models returning stub JSON with 5 model identifiers"
         record_pass "$name"
@@ -104,6 +122,10 @@ invariant_03_omniroute_models() {
 
 invariant_04_omniroute_probe() {
     local name="OmniRoute model probe"
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
+        return 0
+    fi
     local cli_path="src/developer_assistant/cli/model_catalog_cli.py"
     if [ ! -f "$cli_path" ]; then
         log "WARN: model_catalog_cli not yet implemented, skipping model probe invariant"
@@ -187,6 +209,10 @@ check_unit_active() {
 
 invariant_07_runtime_units() {
     local name="each runtime unit active"
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
+        return 0
+    fi
     local failed_roles=""
     for role in $ROLES; do
         local unit="devassist-${role}.service"
@@ -209,7 +235,23 @@ invariant_07_runtime_units() {
 }
 
 invariant_08_omniroute_unit() {
-    check_unit_active "omniroute.service" "omniroute unit active"
+    local name="omniroute unit active"
+    if [ "$FIXTURE" = "1" ] || [ "$DRY_RUN" = "1" ]; then
+        log "FIXTURE/DRY_RUN: omniroute.service assumed active"
+        record_pass "$name"
+        return 0
+    fi
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
+        return 0
+    fi
+    local status
+    status=$(systemctl is-active omniroute.service 2>/dev/null) || status="unknown"
+    if [ "$status" = "active" ]; then
+        record_pass "$name"
+    else
+        record_fail "$name" "omniroute.service unit inactive (${status})"
+    fi
 }
 
 invariant_09_web_service() {
@@ -218,6 +260,10 @@ invariant_09_web_service() {
         log "FIXTURE/DRY_RUN: devassist-web.service assumed active"
         log "FIXTURE/DRY_RUN: web /health returning stub 200"
         record_pass "$name"
+        return 0
+    fi
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
         return 0
     fi
     local status
@@ -237,6 +283,10 @@ invariant_09_web_service() {
 
 invariant_10_runtime_health_endpoints() {
     local name="per-runtime health endpoints"
+    if [ "$VERIFY_PHASE" = "pre-start" ]; then
+        log "SKIP: ${name} (VERIFY_PHASE=pre-start)"
+        return 0
+    fi
     local port=8181
     local failed=""
     for role in $ROLES; do
@@ -310,7 +360,7 @@ invariant_12_no_secrets_in_journal() {
 }
 
 main() {
-    log "verify-self.sh v${SELF_DEPLOY_VERSION} starting (FIXTURE=${FIXTURE}, DRY_RUN=${DRY_RUN})"
+    log "verify-self.sh v${SELF_DEPLOY_VERSION} starting (FIXTURE=${FIXTURE}, DRY_RUN=${DRY_RUN}, VERIFY_PHASE=${VERIFY_PHASE})"
 
     invariant_01_telegram
     invariant_02_github
