@@ -168,7 +168,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 current_work_item_id = body.get("current_work_item_id")
                 heartbeat_age_s = body.get("heartbeat_age_s", 0)
 
-                if heartbeat_age_s and heartbeat_age_s > 60:
+                if heartbeat_age_s and heartbeat_age_s > 300:
                     state = "degraded"
                 else:
                     state = "running"
@@ -208,6 +208,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                 queue_counts["in_progress"] = row["cnt"]
             elif row["status"] == "failed":
                 queue_counts["failed"] = row["cnt"]
+
+        esc_count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM escalations WHERE status IN ('pending', 'surfaced')"
+        ).fetchone()
+        queue_counts["escalated"] = esc_count["cnt"] if esc_count else 0
 
         esc_rows = conn.execute("""
             SELECT created_at as ts_iso, trigger_kind as rule, status as disposition
@@ -357,6 +362,14 @@ def cmd_logs(args: argparse.Namespace) -> int:
                     seen = set(queue)
                     while queue:
                         pid = queue.pop(0)
+                        exists = conn.execute(
+                            "SELECT 1 FROM work_items WHERE id = ?", (pid,)
+                        ).fetchone()
+                        if not exists:
+                            print(
+                                f"parent_work_item_id {pid} referenced but not found in work_items",
+                                file=sys.stderr,
+                            )
                         children = _get_work_item_id(pid, conn)
                         for child_id in children:
                             if child_id not in seen:
@@ -456,24 +469,38 @@ def cmd_costs(args: argparse.Namespace) -> int:
 
         now = datetime.now(timezone.utc)
         since_dt = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
-        diff_days = (now - since_dt).days
+        cutoff_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00.000Z")
+        cutoff_day = (now - timedelta(days=7)).strftime("%Y-%m-%d")
 
         tables_used = []
 
         rows: list[dict] = []
-        if diff_days <= 7:
+        if since_iso >= cutoff_iso:
             tables_used.append("llm_calls")
             rows = query_llm_calls(
                 conn, since=since_iso,
                 runtime_role=role, model=model_filter,
             )
-        elif diff_days > 7:
-            tables_used.append("llm_calls_daily")
-            raw = query_llm_calls_daily(
-                conn, since=since_iso.split("T")[0],
+        else:
+            tables_used = ["llm_calls", "llm_calls_daily"]
+            recent = query_llm_calls(
+                conn, since=cutoff_iso,
                 runtime_role=role, model=model_filter,
             )
-            for r in raw:
+            for r in recent:
+                rows.append({
+                    "runtime": r.get("runtime"),
+                    "model": r.get("model"),
+                    "tokens_in": r.get("tokens_in", 0),
+                    "tokens_out": r.get("tokens_out", 0),
+                    "cost_usd": r.get("cost_usd", 0),
+                })
+            daily_rows = query_llm_calls_daily(
+                conn, since=since_iso.split("T")[0],
+                until=cutoff_day,
+                runtime_role=role, model=model_filter,
+            )
+            for r in daily_rows:
                 rows.append({
                     "runtime": r.get("runtime"),
                     "model": r.get("model"),

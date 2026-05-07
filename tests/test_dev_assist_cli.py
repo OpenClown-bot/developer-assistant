@@ -16,6 +16,7 @@ import tempfile
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -445,6 +446,167 @@ class TestEscalationsCommand(unittest.TestCase):
             sys.stdout = old_stdout
 
         self.assertEqual(code, 0)
+
+
+class TestIter2Fixes(unittest.TestCase):
+    """Iter-2 regression tests for BLOCKER and IMPORTANT fixes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp()
+        cls.db_path = _build_fixture_db(cls.tmpdir)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def _mock_health(self, heartbeat_age_s=12):
+        return {
+            "ok": True, "status_code": 200,
+            "body": {
+                "role": "executor", "state": "running", "uptime_s": 86400,
+                "current_model": "glm-5.1", "current_work_item_id": "1",
+                "heartbeat_age_s": heartbeat_age_s,
+            }
+        }
+
+    # T1
+    def test_status_escalated_count_from_escalations_table(self):
+        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            mock_health.return_value = self._mock_health()
+            mock_sysctl.return_value = "active"
+
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.format = "json"
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                code = cmd_status(args)
+            finally:
+                output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            self.assertEqual(code, 0)
+            data = json.loads(output)
+            self.assertIn("queue", data)
+            self.assertIn("escalated", data["queue"])
+            self.assertGreater(data["queue"]["escalated"], 0)
+
+    # T4
+    def test_status_heartbeat_degraded_at_300s(self):
+        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            mock_health.return_value = self._mock_health(heartbeat_age_s=301)
+            mock_sysctl.return_value = "active"
+
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.format = "json"
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                code = cmd_status(args)
+            finally:
+                output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            self.assertEqual(code, 0)
+            data = json.loads(output)
+            for rt in data["runtimes"]:
+                if rt["role"] == "executor" and rt["health_endpoint_status"] == 200:
+                    self.assertEqual(rt["state"], "degraded")
+
+    # T4b
+    def test_status_heartbeat_running_at_299s(self):
+        with patch("developer_assistant.cli.dev_assist_cli._check_health_endpoint") as mock_health, \
+             patch("developer_assistant.cli.dev_assist_cli._check_systemctl_unit") as mock_sysctl:
+            mock_health.return_value = self._mock_health(heartbeat_age_s=299)
+            mock_sysctl.return_value = "active"
+
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.format = "json"
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                code = cmd_status(args)
+            finally:
+                output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            self.assertEqual(code, 0)
+            data = json.loads(output)
+            for rt in data["runtimes"]:
+                if rt["role"] == "executor" and rt["health_endpoint_status"] == 200:
+                    self.assertEqual(rt["state"], "running")
+
+    # T2
+    def test_costs_7day_boundary_split_merge(self):
+        args = MagicMock()
+        args.db_path = self.db_path
+        args.since = "8d"
+        args.role = None
+        args.model = None
+        args.format = "json"
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            code = cmd_costs(args)
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertEqual(code, 0)
+        data = json.loads(output)
+        self.assertIn("tables_queried", data)
+        self.assertEqual(data["tables_queried"], ["llm_calls", "llm_calls_daily"])
+        self.assertIn("totals", data)
+        self.assertGreater(data["totals"]["tokens_in"], 0)
+        self.assertGreater(data["totals"]["estimated_usd"], 0)
+        self.assertIn("by_role_model", data)
+        self.assertIsInstance(data["by_role_model"], list)
+
+    # T3
+    def test_costs_7day_boundary_split_merge_fixture(self):
+        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            recent = conn.execute(
+                "SELECT COUNT(*) as cnt FROM llm_calls WHERE ts >= ?",
+                ((datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00.000Z"),)
+            ).fetchone()
+            older = conn.execute(
+                "SELECT COUNT(*) as cnt FROM llm_calls_daily WHERE day < ?",
+                ((datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d"),)
+            ).fetchone()
+            self.assertGreater(recent["cnt"], 0, "Fixture must have llm_calls rows <= 7 days old")
+            self.assertGreater(older["cnt"], 0, "Fixture must have llm_calls_daily rows > 7 days old")
+        finally:
+            conn.close()
+
+    # T5
+    def test_logs_recursive_stderr_unresolvable_parent(self):
+        fixture_path = str(FIXTURES_DIR / "journal_fixture.jsonl")
+        with patch.dict(os.environ, {"DEV_ASSIST_CLI_JOURNAL_FIXTURE": fixture_path}):
+            args = MagicMock()
+            args.db_path = self.db_path
+            args.work_item = "9999"
+            args.recursive = True
+            args.since = "today"
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                code = cmd_logs(args)
+            finally:
+                stderr_out = sys.stderr.getvalue()
+                sys.stderr = old_stderr
+
+            self.assertEqual(code, 0)
+            self.assertIn("parent_work_item_id 9999", stderr_out)
+            self.assertIn("not found", stderr_out)
 
 
 class TestMainAndHelp(unittest.TestCase):

@@ -203,6 +203,13 @@ def _seed_work_items(conn: sqlite3.Connection) -> None:
         (created_at, updated_at, target_role, kind, payload_json, priority, status)
         VALUES (?, ?, 'architect', 'architect_pass', '{}', 50, 'failed')""", (now, now))
 
+    # Orphan work item — references non-existent parent_work_item_id
+    orphan_payload = json.dumps({"ticket_id": "TKT-099", "description": "orphan test", "parent_work_item_id": 9999})
+    conn.execute("""INSERT INTO work_items
+        (created_at, updated_at, target_role, kind, payload_json, priority, status)
+        VALUES (?, ?, 'executor', 'ticket_implementation', ?, 50, 'pending')""",
+        (now, now, orphan_payload))
+
 
 def _seed_escalations(conn: sqlite3.Connection) -> None:
     now = _now_iso()
@@ -267,6 +274,17 @@ def _seed_llm_calls(conn: sqlite3.Connection) -> None:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (f"call_{idx:03d}", f"{today}T10:00:00.000Z", role, "1", model, rp,
              tin, tout, 500, 0.5, 1.5, cost, "success", None))
+
+    # Calls at 5-6 days ago (recent portion of the 7-day boundary, for split-merge testing)
+    for d in (5, 6):
+        day = _day_ago(d)
+        conn.execute("""INSERT INTO llm_calls
+            (call_id, ts, runtime, work_item_id, model, routing_path,
+             tokens_in, tokens_out, latency_ms, rate_in_per_1m_usd, rate_out_per_1m_usd,
+             cost_usd, status, error_class)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (f"call_rec_{d}", f"{day}T12:00:00.000Z", "architect", "1", "deepseek-v4-pro",
+             "omniroute_endpoint", 2000, 800, 300, 0.5, 1.5, 0.07, "success", None))
 
     # Old calls for daily rollup
     for d in range(8, 15):
