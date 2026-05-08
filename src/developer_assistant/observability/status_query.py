@@ -30,7 +30,7 @@ _HEALTH_PORTS = {
     "executor": 8184,
     "reviewer": 8185,
 }
-_ROLE_ORDER = ["orchestrator", "planner", "architect", "executor", "reviewer", "omniroute"]
+_ROLE_ORDER = ["orchestrator", "planner", "architect", "executor", "reviewer"]
 
 
 def open_db_readonly(db_path: str) -> sqlite3.Connection:

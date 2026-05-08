@@ -10,6 +10,7 @@ runtime's own process.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Optional
 
@@ -26,7 +27,7 @@ class InstrumentedLLMClient:
     def __init__(
         self,
         manager: ObservabilityManager,
-        omniroute_base_url: str = "http://127.0.0.1:20128",
+        omniroute_base_url: str = os.environ.get("OMNIROUTE_BASE_URL", "http://127.0.0.1:20128/v1"),
         openrouter_base_url: str = "https://openrouter.ai/api/v1",
         omniroute_api_key: Optional[str] = None,
         openrouter_api_key: Optional[str] = None,

@@ -1,10 +1,17 @@
-agent:
-  model: {{model_main}}
-  fallback_models:
-    - {{fallback_1}}
-    - {{fallback_2}}
-    - {{fallback_3}}
-  base_url: http://127.0.0.1:{{omniroute_port}}/v1
+model:
+  default: {{model_main}}
+  provider: custom
+  api_key: {{omniroute_api_key}}
+  base_url: {{omniroute_base_url}}
+  fallback:
+    model: {{fallback_1}}
+    on_errors:
+    - timeout
+    - rate_limit
+    - server_error
+
+providers: {}
+fallback_providers: []
 
 gateway:
   enabled: {{gateway_enabled}}
