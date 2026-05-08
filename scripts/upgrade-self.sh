@@ -108,10 +108,9 @@ run_install_in_place() {
 }
 
 run_verify() {
-    log "Running verify-self.sh (offline dry-run mode)"
-    INSTALL_DRY_RUN=1 VERIFY_FIXTURE_MODE=1 ROLLBACK_DRY_RUN=1 UPGRADE_DRY_RUN=1 \
-        INSTALL_DRY_RUN_PREFIX="${PREFIX}" \
-        "${SCRIPT_DIR}/verify-self.sh"
+    log "Running verify-self.sh (pre-start phase)"
+    VERIFY_PHASE=pre-start \
+        bash "${SCRIPT_DIR}/verify-self.sh"
     return $?
 }
 

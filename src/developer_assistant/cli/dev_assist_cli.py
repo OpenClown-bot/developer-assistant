@@ -30,7 +30,7 @@ from developer_assistant.state.observability_store import (
 )
 
 _DEFAULT_DB_PATH = "/srv/devassist/state/operational.db"
-_ROLE_ORDER = ["orchestrator", "planner", "architect", "executor", "reviewer", "omniroute"]
+_ROLE_ORDER = ["orchestrator", "planner", "architect", "executor", "reviewer"]
 
 
 def parse_duration(value: str) -> str:
@@ -431,6 +431,7 @@ def cmd_escalations(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(rows, indent=2))
     return 0
+
 
 
 def main(argv: list[str] | None = None) -> int:
