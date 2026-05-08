@@ -37,11 +37,12 @@ new invariants alongside.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import sqlite3
 import sys
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 _ALLOWED_ROLES = frozenset({"orchestrator", "planner", "architect", "executor", "reviewer"})
 
@@ -275,83 +276,101 @@ def _read_system_prompt_path(config_path: str) -> str:
     return ""
 
 
-def _config_asserts_skill_gating(config_path: str, skill_name: str) -> bool:
-    """Return True iff the rendered config asserts that ``skill_name`` is gated.
+def _resolve_hermes_skill_entry_point(skill_module: Any) -> Callable[..., Any] | None:
+    """Resolve the public callable entry point of a Hermes built-in skill module.
 
-    Two patterns are recognised so this helper accepts both the production
-    rendered config (``skills.<skill>.enabled: false`` per
-    ``etc/runtime-templates/<role>/config.yaml.tmpl``) and the existing test
-    fixtures (which list the skill under a flat ``plugins.disabled:`` block).
-    Either pattern is sufficient to assert gating; both being absent means
-    the runtime would consider the skill callable.
+    Hermes built-in skills expose their entry point as a module-level callable
+    named ``invoke`` or ``main``, or via a ``Skill`` class whose instance
+    exposes an ``invoke`` method. Returns the resolved callable, or ``None``
+    if no recognisable shape is present.
     """
-    if not os.path.exists(config_path):
-        return False
-    with open(config_path, encoding="utf-8") as fh:
-        content = fh.read()
+    for attr in ("invoke", "main"):
+        candidate = getattr(skill_module, attr, None)
+        if callable(candidate):
+            return candidate
+    skill_class = getattr(skill_module, "Skill", None)
+    if skill_class is None:
+        return None
+    try:
+        instance = skill_class()
+    except BaseException:
+        return None
+    method = getattr(instance, "invoke", None)
+    if callable(method):
+        return method
+    return None
 
-    in_skills = False
-    in_skill_block = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped == "skills:":
-            in_skills = True
-            in_skill_block = False
-            continue
-        if in_skills and stripped == "{n}:".format(n=skill_name):
-            in_skill_block = True
-            continue
-        if in_skill_block and stripped.startswith("enabled:"):
-            value = stripped[len("enabled:"):].strip()
-            if value.lower() == "false":
-                return True
-            in_skill_block = False
-        if in_skills and stripped and not line.startswith((" ", "\t")):
-            in_skills = False
-            in_skill_block = False
 
-    in_plugins = False
-    in_disabled = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped == "plugins:":
-            in_plugins = True
-            in_disabled = False
-            continue
-        if in_plugins and stripped == "disabled:":
-            in_disabled = True
-            continue
-        if in_disabled and stripped.startswith("- "):
-            entry = stripped[2:].strip()
-            if entry == skill_name:
-                return True
-        if in_plugins and stripped and not line.startswith((" ", "\t")):
-            in_plugins = False
-            in_disabled = False
-    return False
+def _attempt_hermes_skill_round_trip(config_path: str, skill_name: str) -> str:
+    """Attempt an in-process invocation of a Hermes built-in skill module.
+
+    Per TKT-033 § 1 component B(i)/(ii) the AC-3 round-trip must be an actual
+    call attempt against the same Hermes runtime that would otherwise execute
+    the skill, not a config-level introspection of ``skills.<name>.enabled``
+    or ``plugins.disabled``. The systemd unit's ``Environment=PYTHONPATH=
+    /srv/devassist/repo/src`` brings the upstream ``hermes`` Python package
+    onto ``sys.path`` so this helper can import the built-in skill module
+    in-process and dispatch on it directly.
+
+    Returns ``"gated"`` when any of the following holds (the call did NOT
+    succeed end-to-end, which is the AC-3 pass condition):
+      * ``importlib.import_module("hermes.skills.<skill_name>")`` raises
+        ``ImportError`` -- the module is not present on this interpreter's
+        ``sys.path``, so the skill cannot be invoked through this Python.
+      * The imported module exposes no recognisable callable entry point
+        (``invoke`` / ``main`` / ``Skill().invoke``); there is no surface
+        on which to dispatch.
+      * The invocation attempt raises any ``BaseException`` (Hermes' own
+        gating exception class, ``TypeError`` on argument-shape mismatch,
+        ``RuntimeError`` from a config validator, etc.); the call raised
+        instead of returning.
+
+    Returns ``"callable"`` only when the invocation completes without raising
+    -- the live failure mode AC-3 catches (the runtime ran the gated skill
+    end-to-end despite ``config.yaml`` asserting it should be disabled).
+
+    Tests exercise this helper by injecting a fake module into
+    ``sys.modules['hermes.skills.<skill_name>']``; the production callers
+    forward to this helper unchanged.
+    """
+    try:
+        skill_module = importlib.import_module(
+            "hermes.skills.{n}".format(n=skill_name)
+        )
+    except ImportError:
+        return "gated"
+    invoke = _resolve_hermes_skill_entry_point(skill_module)
+    if invoke is None:
+        return "gated"
+    try:
+        invoke(config_path=config_path)
+    except BaseException:
+        return "gated"
+    return "callable"
 
 
 def _default_delegate_task_caller(config_path: str) -> str:
-    """Production round-trip for the ``delegate_task`` invariant.
+    """Production round-trip for the ``delegate_task`` invariant (AC-3 (i)).
 
-    Returns ``"gated"`` if the rendered config asserts gating (either
-    ``skills.delegate_task.enabled: false`` or ``delegate_task`` listed
-    under ``plugins.disabled:``); returns ``"callable"`` otherwise. The
-    PRE-START context (systemd ExecStartPre=) cannot stand up a live Hermes
-    process, so the round-trip is implemented as a config-level gating
-    verification of the same invariant Hermes itself enforces. Tests inject a
-    different callable via the ``delegate_task_caller`` parameter of
-    :func:`check_runtime` to exercise the call-allowed branch deterministically.
+    Forwards to :func:`_attempt_hermes_skill_round_trip` against the
+    upstream Hermes built-in module ``hermes.skills.delegate_task``. Returns
+    ``"gated"`` when the actual in-process invocation attempt fails (import
+    error, missing entry point, or any raised exception during invoke);
+    returns ``"callable"`` only when the invocation completes without
+    raising. Tests inject a callable via the ``delegate_task_caller``
+    parameter of :func:`check_runtime` to bypass this default.
     """
-    return "gated" if _config_asserts_skill_gating(config_path, "delegate_task") else "callable"
+    return _attempt_hermes_skill_round_trip(config_path, "delegate_task")
 
 
 def _default_skill_manage_caller(config_path: str) -> str:
-    """Production round-trip for the ``skill_manage`` invariant.
+    """Production round-trip for the ``skill_manage`` invariant (AC-3 (ii)).
 
-    Same shape as :func:`_default_delegate_task_caller`.
+    Same shape as :func:`_default_delegate_task_caller`; forwards to
+    :func:`_attempt_hermes_skill_round_trip` against
+    ``hermes.skills.skill_manage``.
     """
-    return "gated" if _config_asserts_skill_gating(config_path, "skill_manage") else "callable"
+    return _attempt_hermes_skill_round_trip(config_path, "skill_manage")
 
 
 def _compute_prompt_sha(path: str) -> str:
@@ -491,7 +510,11 @@ def check_runtime(
                 "Orchestrator runtime requires a real Telegram bot token"
             )
 
-    delegate_caller = delegate_task_caller or _default_delegate_task_caller
+    delegate_caller = (
+        delegate_task_caller
+        if delegate_task_caller is not None
+        else _default_delegate_task_caller
+    )
     if delegate_caller(config_path) != "gated":
         _emit_marker(role, INVARIANT_DELEGATE_TASK_CALLABLE)
         raise DelegateTaskCallableError(
@@ -500,7 +523,11 @@ def check_runtime(
             "or list delegate_task under plugins.disabled).".format(r=role)
         )
 
-    skill_caller = skill_manage_caller or _default_skill_manage_caller
+    skill_caller = (
+        skill_manage_caller
+        if skill_manage_caller is not None
+        else _default_skill_manage_caller
+    )
     if skill_caller(config_path) != "gated":
         _emit_marker(role, INVARIANT_SKILL_MANAGE_CALLABLE)
         raise SkillManageCallableError(

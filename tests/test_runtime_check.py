@@ -29,6 +29,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -59,6 +60,7 @@ from developer_assistant.runtime_check import (
     SkillsMismatchError,
     TelegramGatewayLoadedError,
     TelegramTokenMissingError,
+    _attempt_hermes_skill_round_trip,
     check_runtime,
 )
 
@@ -653,10 +655,13 @@ class TestDelegateTaskCallable(unittest.TestCase):
         )
 
     def test_gated_passes_via_default_caller(self) -> None:
-        # The default caller derives "gated" from the rendered config (which
-        # _write_minimal_config writes with delegate_task under
-        # plugins.disabled). The test confirms the production round-trip path
-        # is wired up correctly.
+        # The default caller forwards to ``_attempt_hermes_skill_round_trip``
+        # which calls ``importlib.import_module("hermes.skills.delegate_task")``.
+        # The upstream Hermes package is not installed in the offline test
+        # environment, so the import raises ImportError and the helper
+        # returns "gated". The test confirms the production round-trip
+        # default path is wired up and reaches the gating branch on a
+        # vanilla offline interpreter.
         with tempfile.TemporaryDirectory() as td:
             cfg = os.path.join(td, "config.yaml")
             db = os.path.join(td, "operational.db")
@@ -697,6 +702,10 @@ class TestSkillManageCallable(unittest.TestCase):
         )
 
     def test_gated_passes_via_default_caller(self) -> None:
+        # Same shape as the delegate_task counterpart: in the offline test
+        # environment ``import hermes.skills.skill_manage`` raises
+        # ImportError, so ``_attempt_hermes_skill_round_trip`` returns
+        # "gated" and the invariant passes.
         with tempfile.TemporaryDirectory() as td:
             cfg = os.path.join(td, "config.yaml")
             db = os.path.join(td, "operational.db")
@@ -709,6 +718,197 @@ class TestSkillManageCallable(unittest.TestCase):
                 env={},
                 prompt_manifest_path="",
             )
+
+
+class TestHermesRoundTripDefault(unittest.TestCase):
+    """AC-3 (i)/(ii) Path A: ``_attempt_hermes_skill_round_trip`` actually
+    imports ``hermes.skills.<skill_name>`` and dispatches on the resolved
+    callable entry point, rather than inferring gating from the rendered
+    config. Tests inject a fake module into
+    ``sys.modules['hermes.skills.<skill_name>']`` to exercise each branch
+    deterministically without requiring the upstream ``hermes`` package
+    to be installed in the offline test environment.
+    """
+
+    SKILL_NAME = "fixture_skill"
+    MODULE_KEY = "hermes.skills." + SKILL_NAME
+
+    def setUp(self) -> None:
+        self._added_module_keys: list[str] = []
+        sys.modules.pop(self.MODULE_KEY, None)
+
+    def tearDown(self) -> None:
+        sys.modules.pop(self.MODULE_KEY, None)
+        for key in self._added_module_keys:
+            sys.modules.pop(key, None)
+
+    def _inject_fake_skill_module(self, module: types.ModuleType) -> None:
+        # ``importlib.import_module("hermes.skills.<n>")`` requires that the
+        # parent packages ``hermes`` and ``hermes.skills`` are also present
+        # in ``sys.modules``. Inject empty package stubs as needed; record
+        # them so tearDown removes any we created (we never overwrite an
+        # existing entry).
+        for parent in ("hermes", "hermes.skills"):
+            if parent not in sys.modules:
+                pkg = types.ModuleType(parent)
+                pkg.__path__ = []  # mark as namespace package
+                sys.modules[parent] = pkg
+                self._added_module_keys.append(parent)
+        sys.modules[self.MODULE_KEY] = module
+
+    def test_import_error_returns_gated(self) -> None:
+        # No fake injected -- ``hermes.skills.fixture_skill`` is not
+        # installed, so ``importlib.import_module`` raises ImportError and
+        # the helper returns "gated" (the AC-3 pass branch).
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/nonexistent.yaml", self.SKILL_NAME),
+            "gated",
+        )
+
+    def test_module_with_no_entry_point_returns_gated(self) -> None:
+        # Module imports fine but exposes neither ``invoke``, ``main``, nor
+        # a ``Skill`` class -> _resolve_hermes_skill_entry_point returns
+        # None -> helper returns "gated".
+        fake = types.ModuleType(self.MODULE_KEY)
+        self._inject_fake_skill_module(fake)
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
+            "gated",
+        )
+
+    def test_invoke_raising_returns_gated(self) -> None:
+        # invoke() raises (Hermes' own gating exception, TypeError,
+        # RuntimeError, anything) -> helper returns "gated" (the AC-3 pass
+        # branch -- the runtime refused to execute the skill).
+        fake = types.ModuleType(self.MODULE_KEY)
+
+        def invoke(**kwargs: object) -> None:
+            raise RuntimeError("Hermes gating: skill is disabled")
+
+        fake.invoke = invoke
+        self._inject_fake_skill_module(fake)
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
+            "gated",
+        )
+
+    def test_invoke_succeeding_returns_callable(self) -> None:
+        # invoke() returns without raising -> helper returns "callable",
+        # which surfaces upstream as the AC-3 fail branch (the runtime
+        # ran the gated skill end-to-end). This is the live failure mode
+        # session-2 row 1 documented.
+        fake = types.ModuleType(self.MODULE_KEY)
+        invoked: list[str] = []
+
+        def invoke(**kwargs: object) -> None:
+            invoked.append(str(kwargs.get("config_path", "")))
+
+        fake.invoke = invoke
+        self._inject_fake_skill_module(fake)
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
+            "callable",
+        )
+        self.assertEqual(invoked, ["/cfg.yaml"])
+
+    def test_skill_class_with_invoke_method_dispatches(self) -> None:
+        # Hermes built-in skills may expose entry as ``Skill().invoke``.
+        # The helper must instantiate Skill() and dispatch on the bound
+        # method.
+        fake = types.ModuleType(self.MODULE_KEY)
+
+        class FakeSkill:
+            invoked: list[str] = []
+
+            def invoke(self, **kwargs: object) -> None:
+                FakeSkill.invoked.append(str(kwargs.get("config_path", "")))
+
+        fake.Skill = FakeSkill
+        self._inject_fake_skill_module(fake)
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
+            "callable",
+        )
+        self.assertEqual(FakeSkill.invoked, ["/cfg.yaml"])
+
+    def test_main_module_attribute_is_dispatched(self) -> None:
+        # Skills that expose ``main`` instead of ``invoke`` are still
+        # recognised by the entry-point resolver.
+        fake = types.ModuleType(self.MODULE_KEY)
+        invoked: list[str] = []
+
+        def main(**kwargs: object) -> None:
+            invoked.append(str(kwargs.get("config_path", "")))
+
+        fake.main = main
+        self._inject_fake_skill_module(fake)
+        self.assertEqual(
+            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
+            "callable",
+        )
+        self.assertEqual(invoked, ["/cfg.yaml"])
+
+
+class TestCallerInjectionFallback(unittest.TestCase):
+    """Finding 2 regression: ``check_runtime`` selects the injected
+    ``delegate_task_caller`` / ``skill_manage_caller`` via an explicit
+    ``is not None`` guard rather than truthiness. A falsy-but-callable
+    sentinel (e.g., a class instance whose ``__bool__`` returns False)
+    must be invoked, not silently fall through to the default production
+    caller.
+    """
+
+    def _make_falsy_caller(self, captured: list[str]) -> object:
+        class FalsyCaller:
+            def __bool__(self) -> bool:
+                return False
+
+            def __call__(self, config_path: str) -> str:
+                captured.append(config_path)
+                return "gated"
+
+        instance = FalsyCaller()
+        # Guard the test's own preconditions: instance is falsy under
+        # bool() and callable under callable().
+        assert bool(instance) is False
+        assert callable(instance)
+        return instance
+
+    def test_falsy_callable_delegate_caller_is_invoked(self) -> None:
+        captured: list[str] = []
+        caller = self._make_falsy_caller(captured)
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            db = os.path.join(td, "operational.db")
+            _write_minimal_config(cfg, ["cronjob", "memory"])
+            _create_operational_db(db)
+            check_runtime(
+                role="planner",
+                config_path=cfg,
+                operational_db_path=db,
+                env={},
+                prompt_manifest_path="",
+                delegate_task_caller=caller,
+            )
+        self.assertEqual(captured, [cfg])
+
+    def test_falsy_callable_skill_manage_caller_is_invoked(self) -> None:
+        captured: list[str] = []
+        caller = self._make_falsy_caller(captured)
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            db = os.path.join(td, "operational.db")
+            _write_minimal_config(cfg, ["cronjob", "memory"])
+            _create_operational_db(db)
+            check_runtime(
+                role="architect",
+                config_path=cfg,
+                operational_db_path=db,
+                env={},
+                prompt_manifest_path="",
+                skill_manage_caller=caller,
+            )
+        self.assertEqual(captured, [cfg])
 
 
 class TestPromptManifest(unittest.TestCase):

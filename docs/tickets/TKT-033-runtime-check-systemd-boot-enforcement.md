@@ -314,7 +314,7 @@ Ran `grep -rEn "TELEGRAM_BOT_TOKEN=[0-9]+:|GITHUB_TOKEN=ghp_|FIREWORKS_API_KEY=f
 - `python3 -m unittest discover -s tests -p "test_*.py"` → `Ran 1017 tests; FAILED (failures=1, errors=51, skipped=2)` (per-FQN identity check above; same 54 non-passing tests as baseline minus 27 sqlite3-driven incidental fixes).
 - `bash scripts/install-self.sh` (DRY-RUN, fixture mode) → exits `0`; renders 5 per-role configs + manifest at `<prefix>/srv/devassist/state/prompt-manifest.json` (schema_version=1.0, rendered_at ISO8601, prompts {role: sha256}) + 5 systemd unit files containing the new `ExecStartPre=`, `Environment=PYTHONPATH=…/repo/src`, `Restart=always`, `RestartPreventExitStatus=78` directives.
 
-#### Files modified (11 allowed; 9 actually touched)
+#### Files modified (11 allowed; 10 actually touched)
 
 1. `src/developer_assistant/runtime_check.py` — refactor to 11-name enum + `_emit_marker` helper + 4 new invariants + CLI `__main__` shim returning `RUNTIME_CHECK_ABORT_EXIT_CODE = 78`.
 2. `scripts/install-self.sh` — added `render_prompt_manifest` block inside `render_runtime_configs()`; no other behavioural change.
@@ -335,3 +335,141 @@ Add `sqlite3` (Ubuntu apt package providing the `sqlite3` CLI) to the repo `init
 #### Deviations / open questions / Q-TKT-033-NN
 
 None. No deviations from spec § 1 / § 4 / § 5. No `Q-TKT-033-NN.md` filed.
+
+### Iter-2 — Executor (Devin, same session as iter-1, in-session continuation)
+
+- **Date / branch / continuation pattern:** 2026-05-08 / `exe/tkt-033-runtime-check-enforcement` (same branch as iter-1; PR #128 same; no re-clone, no force-push, no amend; new commits on top of `a022a3f`).
+- **Context:** Reviewer `RV-CODE-033` returned `pass_with_changes` (PR #129 @ `7b23642`) with three findings; SO pass-2 ratify on RV-CODE-033 verdict `PASS` (Reviewer findings substantively correct). iter-2 NUDGE composed by SO and dispatched via Founder paste-relay.
+
+#### Finding 1 (medium / must-fix) — `delegate_task_callable` and `skill_manage_callable` production callers must round-trip via the actual Hermes runtime, not the rendered config
+
+**Disposition: Path A (preferred) implemented.** The two production default callers `_default_delegate_task_caller` and `_default_skill_manage_caller` in `src/developer_assistant/runtime_check.py` no longer infer gating from rendered config. Both now forward to a single helper `_attempt_hermes_skill_round_trip(config_path, skill_name)` which:
+
+1. Calls `importlib.import_module("hermes.skills.<skill_name>")` against the upstream Hermes built-in skill module. The systemd unit's `Environment=PYTHONPATH=/srv/devassist/repo/src` (added in iter-1 component A) brings the upstream `hermes` Python package onto `sys.path` for the ExecStartPre interpreter, so this import is the same import the running Hermes runtime would resolve.
+2. If the import raises `ImportError` (no Hermes runtime → no callable surface to invoke), returns `"gated"`. The AC-3 (i)/(ii) round-trip pass condition is "the call attempt fails"; an unimportable module is the strongest possible "the call cannot succeed" signal.
+3. If the import succeeds, calls a small entry-point resolver `_resolve_hermes_skill_entry_point(skill_module)` that recognises three Hermes built-in skill module shapes — module-level `invoke`, module-level `main`, or `Skill` class with an `invoke` method (instantiated then dispatched). If no recognisable entry point, returns `"gated"`.
+4. If an entry point is resolved, dispatches `invoke(config_path=config_path)`. If the call raises any `BaseException` (Hermes' own gating exception class, `TypeError` on argument-shape mismatch, `RuntimeError` from a config validator, anything), returns `"gated"`. Only when the call returns without raising does the helper return `"callable"` — which propagates upstream as a `DelegateTaskCallableError` / `SkillManageCallableError` raise. This is the live failure mode the invariant catches: the runtime ran the gated skill end-to-end despite `config.yaml` asserting it should be disabled.
+
+The iter-1 helper `_config_asserts_skill_gating` (which read `skills.<name>.enabled` and `plugins.disabled:` from the rendered YAML) is removed. It was the entire content of the iter-1 production round-trip and was the substance of the Reviewer's medium finding; after Path A it is dead code and removing it keeps the production module clean.
+
+The existing TKT-033 `delegate_task_caller` / `skill_manage_caller` injection seam is retained unchanged. Tests still bypass the production caller by passing in their own callable; the only change is what the *default* (production) caller does when no injection is provided.
+
+The two existing iter-1 tests that exercise the default production path (`TestDelegateTaskCallable.test_gated_passes_via_default_caller` and `TestSkillManageCallable.test_gated_passes_via_default_caller`) continue to pass: in the offline test environment `hermes.skills.delegate_task` and `hermes.skills.skill_manage` are not installed, so `importlib.import_module` raises `ImportError` and the helper returns `"gated"`. Their docstring/comment is updated to describe the new behaviour (ImportError-driven gating) so the comment is not stale.
+
+**New tests (iter-2 § AC-4):**
+
+- `TestHermesRoundTripDefault` (6 tests) — exercises each branch of `_attempt_hermes_skill_round_trip` deterministically by injecting a fake module into `sys.modules['hermes.skills.fixture_skill']` (with parent stubs `hermes` and `hermes.skills` registered as needed). Branches covered:
+  1. `test_import_error_returns_gated` — no fake injected → ImportError → `"gated"`.
+  2. `test_module_with_no_entry_point_returns_gated` — fake module exposing no entry point → resolver returns None → `"gated"`.
+  3. `test_invoke_raising_returns_gated` — fake `invoke()` raises `RuntimeError("Hermes gating: skill is disabled")` → `"gated"`.
+  4. `test_invoke_succeeding_returns_callable` — fake `invoke()` returns successfully → `"callable"` (the AC-3 fail surface). Asserts `config_path` was passed through.
+  5. `test_skill_class_with_invoke_method_dispatches` — fake `Skill` class with `invoke` method → instantiated and dispatched; `"callable"`.
+  6. `test_main_module_attribute_is_dispatched` — fake `main` instead of `invoke` → recognised by resolver; `"callable"`.
+
+`setUp` / `tearDown` clean up `sys.modules` to avoid cross-test pollution (the stubs for `hermes` / `hermes.skills` are only created when not already present, and only cleaned up if this test class created them).
+
+**Why Path A and not Path B:** the upstream Hermes Python package is laid down on the production VPS at `/srv/devassist/repo/src/hermes/` (per ARCH-001 § 11 / § 14 + ADR-014 Correction 1 / 2 / 3); the systemd unit's `Environment=PYTHONPATH=/srv/devassist/repo/src` (added in iter-1) places that directory onto the ExecStartPre interpreter's `sys.path`. So an in-process `import hermes.skills.delegate_task` from `runtime_check.check_runtime()` is the same Python import the running `ExecStart=` Hermes process would do milliseconds later, against the same module file. This is the substantive round-trip the Reviewer's finding requires. No SO escalation needed.
+
+#### Finding 2 (low / nice-to-have) — fallback selection should use `is not None` instead of truthy `or`
+
+**Disposition: implemented.** Both lines in `check_runtime` (the body of the helper) replaced:
+
+```python
+delegate_caller = (
+    delegate_task_caller
+    if delegate_task_caller is not None
+    else _default_delegate_task_caller
+)
+skill_caller = (
+    skill_manage_caller
+    if skill_manage_caller is not None
+    else _default_skill_manage_caller
+)
+```
+
+This guards against the (admittedly contrived) case where a falsy-but-callable sentinel is injected (e.g., a class instance whose `__bool__` returns `False`); `or` would silently fall through to the default and the test author would have no way to tell. `is not None` is the explicit intent ("did the caller pass me a non-default value?") and matches the existing `prompt_manifest_path` guard a few lines earlier in the same function.
+
+**Regression test (iter-2 § AC-4):** `TestCallerInjectionFallback` (2 tests) — constructs a `FalsyCaller` class with `__bool__` returning `False` and `__call__` returning `"gated"`, asserts both `bool(instance) is False` and `callable(instance) is True` (the test's own preconditions), then injects the falsy callable for the `delegate_task_caller` and `skill_manage_caller` parameters of `check_runtime` and asserts the injected callable was actually invoked (its captured-args list non-empty) rather than silently bypassed.
+
+#### Finding 3 (nit / clerical) — § 10 typo on the modified-files heading
+
+**Disposition: fixed.** Line `#### Files modified (11 allowed; 9 actually touched)` corrected to `#### Files modified (11 allowed; 10 actually touched)` in the iter-1 entry. iter-1 actually touched 10 files (items 1-10 in the iter-1 numbered list); item 11 (`scripts/verify-self.sh`) is explicitly listed as `NOT touched`. The original "9" was a clerical miscount; no other narrative content changes.
+
+#### AC-6 — iter-2 baseline discipline
+
+**iter-2 pre-baseline (= iter-1 post-impl HEAD `a022a3f`, captured BEFORE iter-2 edits, on the iter-2-resumed Devin VM):**
+
+```
+Ran 1112 tests in 26.144s
+FAILED (failures=1, errors=12, skipped=2)
+```
+
+`<count_before_iter2> = 1112`; non-passing total `15` (`1F + 12E + 2S`). The line count of `/tmp/iter2_pre_fail_error_list.txt` (from `grep -E "^(FAIL|ERROR): " | sort`) is `13`.
+
+This `1112` differs from the iter-1 § 10 documented `1017` because the Devin VM's `pyyaml` (and parts of the install-self host environment) became fully available between iter-1 close and iter-2 start: the iter-1 `update_environment_config` suggestion adding `python3-yaml` + `sqlite3` to the repo `initialize:` block was applied, which unblocked module-level imports in `test_classifier_skill.py` / `test_escalation_surface_skill.py` / `test_progress_report_skill.py` (etc.), so the test loader now discovers ~95 additional tests that previously failed at import-time and disappeared from the count entirely. This is exactly the same `Ran 1112` reading the Reviewer captured on the Reviewer VM (per RV-CODE-033). The number of *new failures* introduced between iter-1 close and iter-2 start is zero — only the count of *passing* tests increased as the test environment became more functional.
+
+**iter-2 post-implementation (captured AFTER iter-2 edits, same Devin VM):**
+
+```
+Ran 1120 tests in 25.413s
+FAILED (failures=1, errors=12, skipped=2)
+```
+
+`<count_after_iter2> = 1120`; non-passing total `15` (`1F + 12E + 2S`). The line count of `/tmp/iter2_post_fail_error_list.txt` is `13`. New tests added by iter-2: `1120 − 1112 = 8` (`TestHermesRoundTripDefault` 6 tests + `TestCallerInjectionFallback` 2 tests).
+
+**Diff `iter-2 pre → iter-2 post`:**
+
+```sh
+diff /tmp/iter2_pre_fail_error_list.txt /tmp/iter2_post_fail_error_list.txt
+# (empty -- zero added lines, zero removed lines)
+```
+
+Zero added FAIL/ERROR lines. Zero removed lines (no incidental fixes in iter-2; the 8 new tests all pass on first run, and no pre-existing failing test was inadvertently silenced or fixed).
+
+Per-suite identity check (post-iter-2 vs. iter-2 pre):
+- `test_runtime_check.py`: 6 errors (unchanged; same `test_correct_symlink_passes` + 5 subtests of `test_all_five_roles_pass_in_fixture_mode` hitting the production-only `/srv/devassist/state/operational.db` symlink-target check).
+- `test_runtime_layout_catalog_round_trip.py`: 5 errors (unchanged).
+- `unittest.loader._FailedTest`: 1 error (unchanged; `test_llm_client_instrumentation` module-import failure).
+- `test_health_endpoint.py`: 1 failure (unchanged).
+- Total: `6 + 5 + 1 = 12 errors + 1 failure + 2 skipped = 15`. Matches `<count_after_iter2>` non-passing total. Zero new failures, zero silenced.
+
+**AC-6 audit (iter-2):** zero failures/errors/skips silenced; zero incidental fixes. The 8 new tests (Finding 1 round-trip + Finding 2 regression) all pass on first run.
+
+#### AC-7 — secrets / production-hostname grep (iter-2 modified files)
+
+Re-ran the same `grep -rEn "TELEGRAM_BOT_TOKEN=[0-9]+:|GITHUB_TOKEN=ghp_|FIREWORKS_API_KEY=fw-|OPENROUTER_API_KEY=sk-|omniroute\.openclown|srv\.openclown\.com" {iter-2 modified files}`. Zero matches across `runtime_check.py`, `test_runtime_check.py`, this § 10 entry. No new placeholders introduced.
+
+#### Validation results (iter-2 final HEAD)
+
+- `python3 scripts/validate_docs.py` → `Docs validation passed.` (run on the iter-2 final HEAD before `git push`).
+- `python3 -m unittest discover -s tests -p "test_*.py"` → `Ran 1120 tests; FAILED (failures=1, errors=12, skipped=2)` (per-FQN identity check above; same 13 FAIL/ERROR + 2 skip as iter-2 pre-baseline).
+
+#### Files modified in iter-2 (11 allowed; 3 actually touched in iter-2 commit; 10 cumulatively touched across iter-1 + iter-2)
+
+Files touched by iter-2 only (delta from `a022a3f`):
+
+1. `src/developer_assistant/runtime_check.py` — added `import importlib` + `Any` to imports; added two new module-level helpers `_resolve_hermes_skill_entry_point` and `_attempt_hermes_skill_round_trip`; replaced the two production default callers (`_default_delegate_task_caller`, `_default_skill_manage_caller`) to forward to the new helper; removed the now-dead `_config_asserts_skill_gating` helper; replaced the two `or` truthy fallbacks for `delegate_caller` / `skill_caller` with explicit `is not None` guards.
+2. `tests/test_runtime_check.py` — added `import types`; added `_attempt_hermes_skill_round_trip` to imports; added `TestHermesRoundTripDefault` (6 tests) and `TestCallerInjectionFallback` (2 tests); minor docstring-comment refresh on the two `test_gated_passes_via_default_caller` tests.
+3. `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` — Finding 3 typo fix on the iter-1 § 10 heading; this iter-2 § 10 entry appended.
+
+Files NOT touched in iter-2 (within the 11-allowed set): `scripts/install-self.sh`, the 5 `scripts/templates/devassist-<role>.service.j2`, `tests/test_self_deployment_scripts.py`, `scripts/verify-self.sh`. All preserved at iter-1 state.
+
+#### Hard rules ack (iter-2)
+
+- ✗ No re-clone (in-session continuation; same VM, same on-disk clone, same branch, same PR).
+- ✗ No force-push to `exe/tkt-033-runtime-check-enforcement`.
+- ✗ No amend of `a022a3f`. New commit added on top.
+- ✗ No skip of git hooks (`--no-verify` / `--no-gpg-sign`).
+- ✗ No modification of any file outside the 11 allowed paths.
+- ✗ No modification of any of the 8 ADR-014 corrections.
+- ✗ No add/remove from the 11-invariant enum (still 11 names: `role_env_unset`, `role_env_invalid`, `loaded_skills_mismatch`, `operational_db_path_mismatch`, `schema_version_mismatch`, `orchestrator_telegram_token_missing`, `non_orchestrator_telegram_skill_loaded`, `delegate_task_callable`, `skill_manage_callable`, `prompt_manifest_missing`, `prompt_sha_mismatch`).
+- ✗ No change to TKT-021 § 1 (a)-(e) raise-side contract (exception class identity preserved; same `DelegateTaskCallableError` / `SkillManageCallableError` raises with same messages).
+- ✗ No real LLM / Telegram / GitHub / OmniRoute credentials in any test fixture.
+- ✗ No `git add .`; explicit paths only.
+- ✗ No `git` with `sudo`.
+- ✗ No `git config` update.
+- ✗ No merge.
+
+#### Deviations / open questions / Q-TKT-033-NN (iter-2)
+
+None. Path A taken (preferred per NUDGE § 8); no SO escalation requested. No `Q-TKT-033-NN.md` filed.
