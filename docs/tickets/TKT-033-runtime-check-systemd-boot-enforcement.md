@@ -67,6 +67,18 @@ Five components in scope:
     prompt_sha_mismatch
     ```
 
+    Mapping rationale. The eleven symbolic names decompose as follows. Seven of them encode the existing TKT-021 § 1 (a)-(e) invariants — five prose buckets that yield seven distinct symbolic codes because two of the prose buckets resolve into multiple existing exception classes in `runtime_check.py`:
+
+    | TKT-021 § 1 prose | symbolic_name(s) | rationale |
+    |---|---|---|
+    | (a) `HERMES_DEVASSIST_ROLE` is set to one of the five allowed values | `role_env_unset`, `role_env_invalid` | Two distinct failure modes (env var absent vs env var present but not in the allowed set) that currently both surface as `RoleValueError` in `runtime_check.py`. This ticket splits them so that `verify-self.sh` can grep for the precise diagnostic. |
+    | (b) the loaded skills match the per-role expected set | `loaded_skills_mismatch` | One-to-one with the existing `SkillsMismatchError`. |
+    | (c) the per-runtime config references `/srv/devassist/state/operational.db` via the symlink | `operational_db_path_mismatch` | One-to-one with the existing `OperationalDbPathError`. |
+    | (d) the operational-store schema version matches the version this build expects | `schema_version_mismatch` | One-to-one with the existing `SchemaVersionMismatchError`. |
+    | (e) Orchestrator-only Telegram bot token; non-Orchestrator runtimes MUST NOT load the Telegram-gateway skill | `orchestrator_telegram_token_missing`, `non_orchestrator_telegram_skill_loaded` | Two distinct invariants conjoined in TKT-021 prose; they currently surface as two separate exception classes (`TelegramTokenMissingError`, `TelegramGatewayLoadedError`) because they apply to different role partitions of the runtime set. |
+
+    The remaining four symbolic names come from this ticket's AC-3 (i)-(iii) and the manifest-availability fail mode from § 5.1.B: `delegate_task_callable`, `skill_manage_callable`, `prompt_manifest_missing`, `prompt_sha_mismatch`. Splitting the existing `RoleValueError` into two symbolic codes (`role_env_unset` vs `role_env_invalid`) is a refactor of the helper, not a change to the raise-side contract: the (a) invariant continues to raise on either failure; the ticket adds finer-grained code-keyed observability on top.
+
     The first seven names are renamings of the existing TKT-021 § 1 (a)-(e) invariants into stable symbolic identifiers; the last four are new from component B. Adding a name to or removing a name from this enum is a breaking change for `verify-self.sh` and any other downstream grep consumer; the marker grammar version (separate from the manifest `schema_version`) bumps when this enum changes, and changes are gated by a sibling ADR.
   - The refactor preserves TKT-021 § 1 contract: `check_runtime()` MUST raise the same exception type for the same invariant as it does today. Only the observability path (stderr emit before raise) is added. RV-CODE will assert the existing exception types are preserved by the refactor.
 
