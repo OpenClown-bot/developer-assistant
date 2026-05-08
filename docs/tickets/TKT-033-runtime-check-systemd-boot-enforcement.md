@@ -473,3 +473,244 @@ Files NOT touched in iter-2 (within the 11-allowed set): `scripts/install-self.s
 #### Deviations / open questions / Q-TKT-033-NN (iter-2)
 
 None. Path A taken (preferred per NUDGE § 8); no SO escalation requested. No `Q-TKT-033-NN.md` filed.
+
+### Iter-3 — Executor (Devin, fresh account, cross-account continuation, role Executor)
+
+- **Date / branch / continuation pattern:** 2026-05-08 / `exe/tkt-033-runtime-check-enforcement` (same branch as iter-1 + iter-2; PR #128 same; iter-2 HEAD `c1949f3b28ddbf94d175a6554b75bedc72907418` preserved; no re-clone of branch state, no force-push, no amend; iter-3 commit added on top of `c1949f3`).
+- **Cross-account bootstrap:** Iter-2 Devin session quota was exhausted at iter-2 close; iter-3 NUDGE composed by SO and dispatched via Founder paste-relay to a fresh Devin account. Per NUDGE § -1, the new Devin obtained a `GITHUB_TOKEN_DEVELOPER_ASSISTANT` PAT (org-scoped, fine-grained, ADMIN on `OpenClown-bot/developer-assistant`), exported it as `GH_TOKEN`, unset Devin's built-in `GITHUB_TOKEN` to avoid shadowing, ran a fresh clone of `OpenClown-bot/developer-assistant`, and verified `gh auth status` resolves to `OpenClown-bot` with ADMIN permission before any git operation. The iter-1 + iter-2 in-session continuation pattern does NOT apply to iter-3 (different Devin account); the cross-account bootstrap reads the iter-1 + iter-2 § 10 entries as the only durable handoff state.
+- **Context:** Reviewer iter-2 RV-CODE-033 (PR #129 @ `20d22a9`) returned `pass_with_changes` with two iter-3 must-fix findings (§ 7.2): Finding 1 (medium) — broad-catch round-trip conflates absence, signature errors, and actual Hermes gating; Finding 2 (medium) — production call shape `invoke(config_path=...)` is guessed and not the upstream Hermes tool API. § 7.4 Flag-1 + Flag-2 both bounced to iter-3. § 7.6 recommendation: "Make `delegate_task_callable` and `skill_manage_callable` fail/pass on the real Hermes disabled-tool gating response, not on import absence, missing entry points, broad exception catch, or guessed keyword mismatch." iter-3 NUDGE § 2 directed Path A (registry-mediated round-trip + narrow gating-error class catch) as the preferred disposition.
+
+#### Hermes source reconnaissance (per NUDGE § 0.3)
+
+Cloned `https://github.com/NousResearch/hermes-agent.git` at the pinned tag `v2026.4.30` (the same tag `scripts/install-self.sh` lays down at `/usr/local/lib/hermes-agent/src/`) into a separate workspace and read the four files Reviewer iter-2 § 7.2 cited as authoritative for the upstream Hermes tool API. Findings:
+
+1. **`tools/registry.py` (538 lines).** Defines `class ToolRegistry` (lines 143-488) with module-level singleton `registry = ToolRegistry()` (line 491). Public API:
+   - `registry.register(name, toolset, schema, handler, check_fn=None, requires_env=None, is_async=False, description="", emoji="", max_result_size_chars=None)` (lines 226-278) — called at module-import time by each tool file to populate the singleton.
+   - `registry.get_entry(name)` (lines 184-187) — returns `ToolEntry | None`.
+   - `registry.get_definitions(tool_names, quiet=False)` (lines 310-341) — returns OpenAI-format tool schemas, **filtering out tools whose `check_fn()` returns False** (TTL-cached at 30 s via `_check_fn_cached`, lines 118-133). This is the only definitions-time filter on the registry surface itself.
+   - `registry.dispatch(name, args, **kwargs)` (lines 347-364) — looks up the entry and runs its handler. **Returns `json.dumps({"error": "Unknown tool: <name>"})` if the entry is absent**; otherwise calls `entry.handler(args, **kwargs)` (or `_run_async(entry.handler(...))` for async tools). **Catches every `Exception` and serialises it as `json.dumps({"error": "Tool execution failed: <type>: <msg>"})`**. There is NO gating layer between `get_entry` and the handler call: a registered tool whose toolset is disabled at config-level still dispatches normally if `dispatch()` is called directly.
+   - `tools.registry.tool_error(message, **extra)` (lines 511-522) — JSON-serialiser helper; returns a JSON string like `'{"error": "..."}'`. Not an exception.
+
+2. **`tools/delegate_tool.py` (line 1812 `def delegate_task(...)`, line 2514 `registry.register(...)`).** Real handler signature confirmed via AST parse of the upstream source:
+   ```python
+   def delegate_task(
+       goal: Optional[str] = None,
+       context: Optional[str] = None,
+       toolsets: Optional[List[str]] = None,
+       tasks: Optional[List[Dict[str, Any]]] = None,
+       max_iterations: Optional[int] = None,
+       acp_command: Optional[str] = None,
+       acp_args: Optional[Dict[str, Any]] = None,
+       role: Optional[str] = None,
+       parent_agent: Optional[Any] = None,
+   ) -> str: ...
+   ```
+   Registration:
+   ```python
+   registry.register(
+       name="delegate_task",
+       toolset="delegation",
+       handler=lambda args, **kw: delegate_task(
+           goal=args.get("goal"),
+           context=args.get("context"),
+           toolsets=args.get("toolsets"),
+           ...
+       ),
+       check_fn=check_delegate_requirements,
+       ...
+   )
+   ```
+   `check_delegate_requirements()` (lines 528-530) returns `True` unconditionally — the `delegation` toolset's `check_fn` never filters. The handler accepts NO `config_path=` keyword; iter-2 `_attempt_hermes_skill_round_trip(... config_path=config_path)` would have triggered `TypeError: delegate_task() got an unexpected keyword argument 'config_path'`, which iter-2's `except BaseException` would have swallowed as `"gated"` (Reviewer Finding 2 false-positive).
+   The "disabled / gated" runtime path for `delegate_task` is line 1838: `return tool_error("delegate_task requires a parent agent context.")` — a JSON error string returned to the caller, NOT a raised exception. There is no other gating return inside the handler body.
+
+3. **`tools/skill_manager_tool.py` (line 692 `def skill_manage(...)`, line 864 `registry.register(...)`).** Real handler signature:
+   ```python
+   def skill_manage(
+       action: str = "",
+       name: str = "",
+       content: Optional[str] = None,
+       category: Optional[str] = None,
+       file_path: Optional[str] = None,
+       file_content: Optional[str] = None,
+       old_string: Optional[str] = None,
+       new_string: Optional[str] = None,
+       replace_all: bool = False,
+       absorbed_into: Optional[str] = None,
+   ) -> Dict[str, Any]: ...
+   ```
+   Registration:
+   ```python
+   registry.register(
+       name="skill_manage",
+       toolset="skills",
+       handler=lambda args, **kw: skill_manage(
+           action=args.get("action", ""),
+           name=args.get("name", ""),
+           content=args.get("content"),
+           category=args.get("category"),
+           ...
+       ),
+       ...
+   )
+   ```
+   Same shape as `delegate_task`: NO `config_path=` keyword; gated path is a `tool_error(...)` JSON-string return, NOT a raised exception.
+
+4. **No specific gating-error / disabled-tool exception class exists in `hermes-agent v2026.4.30`.** Comprehensive recursive grep across `src/` for `class .*ToolError|class .*ToolException|class .*GateError|class .*DisabledError|class .*NotAvailableError|class .*UnavailableError`:
+   - `environments/agent_loop.py:53: class ToolError:` is a `@dataclass` (lines 51-58: `turn`, `tool_name`, `arguments`, `error`, `tool_result`) recording per-turn agent-loop errors. Not raised anywhere; appended to `tool_errors: List[ToolError]` after handler returns. NOT an exception class.
+   - `hermes_cli/gateway.py:820: class UserSystemdUnavailableError(RuntimeError)` and `hermes_cli/pty_bridge.py:50: class PtyUnavailableError(RuntimeError)` are unrelated CLI / PTY infrastructure errors with no connection to the tool-gating layer.
+   - No class matching the pattern `Tool*Disabled*`, `Skill*Gated*`, `*GatingError`, or similar exists anywhere in the upstream source. There is therefore no "specific gating-error class" for `runtime_check.check_runtime()` to import via `importlib.import_module(<gating_error_module>)` and catch with a narrow `except <gating_error_cls>` clause.
+
+5. **The actual gating mechanism in `v2026.4.30` is a definitions-time FILTER, not a dispatch-time RAISE.** Two filter paths confirmed via direct read:
+   - `model_tools.get_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode)` (lines 271-321) calls `_compute_tool_definitions(...)` (lines 335-391) which builds a `tools_to_include: Set[str]` by iterating registered tools and excluding those whose `entry.toolset` is in `disabled_toolsets` (lines 360-365: `for toolset_name in disabled_toolsets: ...exclude...`). The filtered `tools_to_include` set is then passed to `registry.get_definitions(tools_to_include, quiet=quiet_mode)` which applies a second filter: tools whose `check_fn()` returns False are dropped from the output. The model's prompt receives only the filtered list; tools not in the list are simply absent — no exception, no error response, just absence.
+   - `agent/skill_utils.py:155` and `agent/prompt_builder.py:719,744,799` apply equivalent filter logic for skills under `skills.disabled` / `skills.platform_disabled` config keys: `if frontmatter_name in disabled or skill_name in disabled: <exclude from prompt>`. Same shape — filter, not raise.
+   - In neither path does the runtime raise a "gating error" or return a specifically-typed disabled-tool response. The tool / skill is simply omitted from the model's available toolset; the model never emits a tool call for it; if a developer manually invokes `registry.dispatch("delegate_task", {...})` from code, the handler runs unconditionally regardless of any `disabled_toolsets` or `skills.disabled` config keys.
+
+6. **Spec language vs. reality.** TKT-033 § 1 component B(i) specifies: *"An attempted invocation of `delegate_task` MUST fail at runtime, **not just be absent from the loaded skill list**."* The "not just be absent from the loaded list" clause directly excludes the only gating mechanism `hermes-agent v2026.4.30` actually implements. The spec was authored on the assumption of an exception-based gating layer (a "Hermes returns the gating error" path) that does not exist in `v2026.4.30`; § 8 Risks bullet 8 ("Defense-in-depth for AC-3 (i) and (ii)") even names "the gating error class … pinned to the v2026.4.30 Hermes gating-error class as documented in `HERMES-SKILL-ALLOWLIST.md` (v0.1.1) § 4" — but no such class exists in the pinned tag's source tree.
+
+#### Path A vs Path B disposition (per NUDGE § 4)
+
+**Verdict: Path B (escalate to Architect for spec amendment).** Path A as defined in NUDGE § 2 ("registry-mediated round-trip + narrow gating-error class catch") is **infeasible at the pinned upstream `v2026.4.30` tag** because:
+
+- **No specific gating-error class exists to catch.** NUDGE § 2.2 directs the helper to `except gating_error_cls` for a specific `<gating_error_cls>` discovered in upstream source. The reconnaissance finding (5) above confirms no such class is present in `v2026.4.30`. Substituting `BaseException` reproduces iter-2's broad-catch anti-pattern (Reviewer Finding 1; § 8 Hard rule 15 forbids "silently fall back to broad-catch semantics").
+- **`registry.dispatch()` does not gate at dispatch time.** NUDGE § 2.1 directs the helper to call `registry.<dispatch_method>(tool_name, **args)` and treat a specific raised `<gating_error_cls>` as `"gated"`. Reconnaissance finding (1) above confirms `dispatch()` runs the handler unconditionally for any registered tool; toolset-level disabling is handled exclusively at definitions-build time, not at dispatch time. A registered-but-toolset-disabled tool would therefore dispatch successfully and return either the handler's normal result or an internal `tool_error(...)` JSON string (e.g., `delegate_task` line 1838's `tool_error("delegate_task requires a parent agent context.")`). Neither outcome is the spec-required "gating error".
+- **The spec language explicitly excludes the only gating mechanism that DOES exist.** § 1 component B(i)'s "not just be absent from the loaded skill list" clause forbids the definitions-time filter (the only path that actually gates `delegate_task` / `skill_manage` in `v2026.4.30`) from satisfying AC-3 (i)/(ii). A creative re-interpretation that treats "absent from `model_tools.get_tool_definitions()` output" as "Hermes returned the gating error" contradicts the spec text and would have to be argued as an Architect-approved spec amendment, not an Executor implementation choice.
+
+This matches NUDGE § 4 condition #4 verbatim:
+> *The registry's gating layer is not wired through dispatch (e.g. gating happens at config-load time only, never at dispatch time, so a registered-but-disabled tool dispatches normally and only fails at a higher layer reachable only from a fully booted Hermes process).*
+
+Per NUDGE § 4 the iter-3 disposition is therefore: (1) document the obstacle thoroughly in this § 10 entry; (2) mark iter-3 verdict as Path B; (3) request SO escalation in the hand-back § 8 disposition for an Architect iter-3 spec amendment that aligns AC-3 (i)/(ii) with the actual `hermes-agent v2026.4.30` gating mechanism; (4) do NOT silently fall back to broad-catch semantics.
+
+**What iter-3 changes:** only this § 10 Execution Log entry is appended (single allowed-path edit). `src/developer_assistant/runtime_check.py`, `tests/test_runtime_check.py`, the five `scripts/templates/devassist-<role>.service.j2` files, `scripts/install-self.sh`, `scripts/verify-self.sh`, and `tests/test_self_deployment_scripts.py` are **left at iter-2 state unchanged**, pending Architect iter-3 spec amendment. The iter-2 broad-catch helper `_attempt_hermes_skill_round_trip` (lines 304-349 of `runtime_check.py`) remains in place as a documented stub to be replaced atomically when the spec amendment lands; iter-3 does NOT introduce additional broad-catch surface (NUDGE § 8 Hard rule 15 attested below).
+
+**Architect amendment scope (proposed, not authored by Executor):** the realistic and least-invasive amendment is to redefine AC-3 (i)/(ii) "round-trip" semantics to align with the `v2026.4.30` definitions-time filter: the runtime-check imports `tools.registry` + the relevant tool module (which causes `registry.register(...)` to populate the singleton), parses the runtime's `config.yaml` for `agent.disabled_toolsets`, then asserts that a call to `model_tools.get_tool_definitions(disabled_toolsets=disabled_toolsets)` (or equivalent registry-side filter call) does NOT include `delegate_task` / `skill_manage`. The "not just be absent from the loaded skill list" clause in component B(i) would need rewording, e.g. "an attempted assembly of the model's tool list MUST exclude `delegate_task`, demonstrating Hermes' actual gating-layer evaluation against the runtime config". Alternative scopes (force-introduce a gating exception class upstream; backport an exception layer; pin to a future `v2026.5.x` Hermes release) require larger contracts and are outside Executor judgement. Final amendment shape is the Architect's call.
+
+**No Q-TKT-033-NN.md filed.** Per § 4 Acceptance, on a contract-level deviation surfaced by spec-vs-runtime mismatch the Executor "STOPS and files a Q-TKT rather than proceeding with a synthetic round-trip that does not actually exercise the gating code path"; iter-3 does NOT proceed with a synthetic round-trip and instead pauses on the existing iter-2 implementation while requesting the spec amendment via the cross-Devin SO escalation channel. A Q-TKT artefact would duplicate the contents of this § 10 entry; the SO § 6 hand-back is the load-bearing escalation path. If SO directs filing a separate Q-TKT, that is an iter-4 follow-up.
+
+#### Files changed (iter-3 delta)
+
+**iter-3 commit (single explicit-path commit on top of `c1949f3`):**
+
+1. `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` — appended this iter-3 § 10 entry below the iter-2 entry. iter-1 and iter-2 § 10 entries are preserved verbatim (no edit, no delete, no reorder).
+
+**Files NOT touched in iter-3 (within the 11-allowed set):**
+
+- `src/developer_assistant/runtime_check.py` — preserved at iter-2 state. The iter-2 `_attempt_hermes_skill_round_trip` / `_resolve_hermes_skill_entry_point` / `_default_delegate_task_caller` / `_default_skill_manage_caller` helpers remain in place as a documented stub awaiting Architect spec amendment per Path B disposition above.
+- `tests/test_runtime_check.py` — preserved at iter-2 state. `TestHermesRoundTripDefault` (6 iter-2 tests) and `TestCallerInjectionFallback` (2 iter-2 tests) remain in place.
+- `scripts/templates/devassist-orchestrator.service.j2`, `scripts/templates/devassist-planner.service.j2`, `scripts/templates/devassist-architect.service.j2`, `scripts/templates/devassist-executor.service.j2`, `scripts/templates/devassist-reviewer.service.j2` — preserved at iter-1 state.
+- `scripts/install-self.sh` — preserved at iter-1 state.
+- `scripts/verify-self.sh` — never touched (iter-1 + iter-2 + iter-3 cumulative: untouched).
+- `tests/test_self_deployment_scripts.py` — preserved at iter-1 state.
+
+Cumulative across iter-1 + iter-2 + iter-3: 10 of 11 allowed paths touched (`scripts/verify-self.sh` remains the one allowed-but-untouched file).
+
+#### AC matrix iter-2 → iter-3 delta
+
+| AC | iter-2 | iter-3 | Evidence |
+|---|---:|---:|---|
+| AC-1 | pass | pass | iter-3 commit changes only the ticket § 10 entry; the four § 3.1 branch-cut observations on `main` `c97ed39` are unchanged. No re-verification needed (no source-side delta). |
+| AC-2 | pass | pass | iter-3 commit does NOT modify any of the 5 `scripts/templates/devassist-<role>.service.j2` files; iter-1 + iter-2 `ExecStartPre=` + `RestartPreventExitStatus=78` + `Environment=PYTHONPATH=` directives preserved verbatim. |
+| AC-3 | partial | partial (escalated → Path B) | iter-3 surfaces a contract-level mismatch between AC-3 (i)/(ii) "round-trip … gating error" requirement and the actual `hermes-agent v2026.4.30` gating model (definitions-time filter, no exception-based gating). Iter-2's `_attempt_hermes_skill_round_trip` is left as a documented stub; AC-3 (i)/(ii) cannot be promoted to `pass` without an Architect spec amendment. AC-3 (iii) (`prompt_sha_mismatch` + `prompt_manifest_missing`) remains `pass` — iter-3 does not affect that surface. |
+| AC-4 | partial | partial (escalated → Path B) | iter-2's `TestHermesRoundTripDefault` (6 tests) and `TestCallerInjectionFallback` (2 tests) preserved unchanged. AC-4 promotion to `pass` is gated on the same Architect amendment as AC-3. |
+| AC-5 | pass | pass | iter-3 commit does NOT modify the 11-name enum, the 11 invariant constants, the `RUNTIME_CHECK_INVARIANTS` frozenset, or any raise-side exception class. Hard rules 8 + 9 attested below. |
+| AC-6 | pass | pass | Pre-list (iter-2 HEAD `c1949f3`) and post-list (iter-3 HEAD on top of `c1949f3`) FAIL/ERROR diff is empty (zero added lines, zero removed lines). Same 13 FAIL/ERROR + 2 skipped as iter-2 baseline; same `Ran 1120 tests` (no new tests added in iter-3, no tests removed). See "AC-6 audit (iter-3)" below. |
+| AC-7 | pass | pass | `grep -rEn "TELEGRAM_BOT_TOKEN=[0-9]+:|GITHUB_TOKEN=ghp_|FIREWORKS_API_KEY=fw-|OPENROUTER_API_KEY=sk-|omniroute\.openclown|srv\.openclown\.com" docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` returned zero matches. Placeholder mentions of `TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN` / etc. in this iter-3 § 10 entry are bare identifier names (no `=value` pattern); not real credentials. |
+| AC-8 | pass | pass | Two-PR pipeline preserved: PR #128 remains the Executor implementation PR; iter-3 lands as a new commit on top of `c1949f3` on the existing branch, no force-push, no amend. Reviewer iter-3 verify (if SO dispatches) lands on existing RV-CODE PR #129 as a new commit on top of `20d22a9`. No merge performed. |
+
+#### AC-6 audit (iter-3)
+
+**iter-3 pre-baseline (= iter-2 post-impl HEAD `c1949f3`, captured BEFORE iter-3 edits, on the iter-3 fresh-account Devin VM):**
+
+```
+Ran 1120 tests in <variable>s
+FAILED (failures=1, errors=12, skipped=2)
+```
+
+`<count_before_iter3> = 1120`; non-passing total `15` (`1F + 12E + 2S`). The line count of `/tmp/iter2_post_fail_error_list.txt` (= the iter-2 post-list, captured by iter-3 fresh-account Devin via `python3 -m unittest discover -s tests -p "test_*.py" 2>&1 | grep -E "^(FAIL|ERROR): " | sort > /tmp/iter2_post_fail_error_list.txt` against the on-disk `c1949f3` HEAD before any iter-3 edit) is `13`. Per-FQN breakdown matches iter-2 post-impl exactly:
+
+```
+ERROR: test_all_five_roles_pass_in_fixture_mode (test_runtime_check.TestAllRolesPass.test_all_five_roles_pass_in_fixture_mode) (role='architect')
+ERROR: test_all_five_roles_pass_in_fixture_mode (test_runtime_check.TestAllRolesPass.test_all_five_roles_pass_in_fixture_mode) (role='executor')
+ERROR: test_all_five_roles_pass_in_fixture_mode (test_runtime_check.TestAllRolesPass.test_all_five_roles_pass_in_fixture_mode) (role='orchestrator')
+ERROR: test_all_five_roles_pass_in_fixture_mode (test_runtime_check.TestAllRolesPass.test_all_five_roles_pass_in_fixture_mode) (role='planner')
+ERROR: test_all_five_roles_pass_in_fixture_mode (test_runtime_check.TestAllRolesPass.test_all_five_roles_pass_in_fixture_mode) (role='reviewer')
+ERROR: test_correct_symlink_passes (test_runtime_check.TestOperationalDbPath.test_correct_symlink_passes)
+ERROR: test_llm_client_instrumentation (unittest.loader._FailedTest.test_llm_client_instrumentation)
+ERROR: test_round_trip_all_roles (test_runtime_layout_catalog_round_trip.TestRoundTrip.test_round_trip_all_roles) (role='architect')
+ERROR: test_round_trip_all_roles (test_runtime_layout_catalog_round_trip.TestRoundTrip.test_round_trip_all_roles) (role='executor')
+ERROR: test_round_trip_all_roles (test_runtime_layout_catalog_round_trip.TestRoundTrip.test_round_trip_all_roles) (role='orchestrator')
+ERROR: test_round_trip_all_roles (test_runtime_layout_catalog_round_trip.TestRoundTrip.test_round_trip_all_roles) (role='planner')
+ERROR: test_round_trip_all_roles (test_runtime_layout_catalog_round_trip.TestRoundTrip.test_round_trip_all_roles) (role='reviewer')
+FAIL: test_non_localhost_refused (test_health_endpoint.TestHealthEndpointNonLocalhost.test_non_localhost_refused)
+```
+
+**iter-3 post-implementation (after iter-3 commit on top of `c1949f3`, same Devin VM):**
+
+iter-3 changes only `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md`. `src/`, `tests/`, `scripts/` are bit-identical with iter-2 HEAD. The post-list is therefore bit-identical to the pre-list:
+
+```
+Ran 1120 tests in <variable>s
+FAILED (failures=1, errors=12, skipped=2)
+```
+
+`<count_after_iter3> = 1120`; non-passing total `15` (`1F + 12E + 2S`). Line count of `/tmp/iter3_post_fail_error_list.txt` is `13`.
+
+**Diff `iter-3 pre → iter-3 post`:**
+
+```sh
+diff /tmp/iter2_post_fail_error_list.txt /tmp/iter3_post_fail_error_list.txt
+# (empty -- zero added lines, zero removed lines)
+```
+
+**AC-6 audit (iter-3):** zero failures/errors/skips silenced; zero new failures introduced; zero new tests added; zero existing tests removed. Tests listed in NUDGE § 2.4 as "drop or rewrite" candidates (the 6 `TestHermesRoundTripDefault` cases) are preserved in place per Path B disposition (the rewrite is gated on the Architect spec amendment, not on the Executor's iter-3 commit).
+
+#### AC-7 — secrets / production-hostname grep (iter-3 modified files)
+
+```sh
+grep -rEn 'TELEGRAM_BOT_TOKEN=[0-9]+:|GITHUB_TOKEN=ghp_|FIREWORKS_API_KEY=fw-|OPENROUTER_API_KEY=sk-|omniroute\.openclown|srv\.openclown\.com' \
+  docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md
+# (zero matches)
+```
+
+The bare identifier strings `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `FIREWORKS_API_KEY`, `OMNIROUTE_API_KEY`, `OPENROUTER_API_KEY` appear in this iter-3 § 10 entry only as variable-name placeholders (no `=<value>` suffix, no real token content). The wider regex used by iter-1 + iter-2 (`TELEGRAM_BOT_TOKEN=[0-9]+:` etc.) is the load-bearing pattern; bare identifier mentions are documentation, not credentials.
+
+#### Validation results (iter-3 final HEAD)
+
+- `python3 scripts/validate_docs.py` → `Docs validation passed.` (run on iter-3 final HEAD before `git push`).
+- `python3 -m unittest discover -s tests -p "test_*.py"` → `Ran 1120 tests; FAILED (failures=1, errors=12, skipped=2)` (per-FQN identity check above; same 13 FAIL/ERROR + 2 skipped as iter-2 post-impl).
+
+#### Files modified in iter-3 (11 allowed; 1 actually touched in iter-3 commit; 10 cumulatively touched across iter-1 + iter-2 + iter-3)
+
+Files touched by iter-3 only (delta from `c1949f3`):
+
+1. `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` — this iter-3 § 10 entry appended below iter-2.
+
+Files NOT touched in iter-3 (within the 11-allowed set): `src/developer_assistant/runtime_check.py`, `tests/test_runtime_check.py`, `scripts/install-self.sh`, the 5 `scripts/templates/devassist-<role>.service.j2`, `tests/test_self_deployment_scripts.py`, `scripts/verify-self.sh`. All preserved at iter-2 state (or iter-1 state for files iter-2 did not touch).
+
+#### Hard rules ack (iter-3)
+
+- ✗ No new branch opened. iter-3 lands on the existing `exe/tkt-033-runtime-check-enforcement` branch.
+- ✗ No new PR opened. iter-3 lands on existing PR #128.
+- ✗ No force-push to `exe/tkt-033-runtime-check-enforcement` or any other branch.
+- ✗ No amend of `c1949f3` or `a022a3f`. iter-3 commit added on top.
+- ✗ No skip of git hooks (`--no-verify` / `--no-gpg-sign`).
+- ✗ No modification of any file outside the 11 allowed paths in TKT-033 § 5.
+- ✗ No modification of any of the 8 ADR-014 corrections.
+- ✗ No add/remove from the 11-invariant enum (still 11 names: `role_env_unset`, `role_env_invalid`, `loaded_skills_mismatch`, `operational_db_path_mismatch`, `schema_version_mismatch`, `orchestrator_telegram_token_missing`, `non_orchestrator_telegram_skill_loaded`, `delegate_task_callable`, `skill_manage_callable`, `prompt_manifest_missing`, `prompt_sha_mismatch`). Path B → no Option 2.3.B 12th-invariant request made; the enum stays frozen pending Architect amendment.
+- ✗ No change to TKT-021 § 1 (a)-(e) raise-side contract. `DelegateTaskCallableError` / `SkillManageCallableError` exception class identities preserved unchanged.
+- ✗ No real LLM / Telegram / GitHub / OmniRoute credentials committed. Placeholder identifier names only.
+- ✗ No `git add .`; explicit path only (`git add docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md`).
+- ✗ No `git` with `sudo`.
+- ✗ No `git config` update.
+- ✗ No merge.
+- ✗ No silent fallback to broad-catch semantics. Path B → iter-3 does NOT introduce additional broad-catch surface; the iter-2 broad-catch helper is left as a documented stub awaiting Architect spec amendment.
+- ✗ No skip of substantive Hermes source reading. Recon performed against `git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/hermes-agent.git`; the four files cited by Reviewer iter-2 § 7.2 (`tools/registry.py`, `tools/delegate_tool.py`, `tools/skill_manager_tool.py`, plus broader exception-class search across `src/`) were read directly with citations above.
+- ✗ No skip of cross-account GH auth bootstrap. `GITHUB_TOKEN_DEVELOPER_ASSISTANT` (org-scoped, fine-grained PAT, ADMIN on `OpenClown-bot/developer-assistant`) requested via `request_secret`, exported as `GH_TOKEN`, Devin's built-in `GITHUB_TOKEN` unset, `gh auth status` verified before any git operation.
+- ✗ No skip of required reading. Tier B (TKT-033 ticket §§ 1-10 incl. iter-1 + iter-2 entries), Tier E (`runtime_check.py` iter-2 state, `test_runtime_check.py` iter-2 state, `RV-CODE-033.md` iter-1 + iter-2 sections at `rv/rv-code-033 @ 20d22a9`) were read directly on the iter-3 fresh-account Devin VM before this § 10 entry was authored.
+
+#### Deviations / open questions / Q-TKT-033-NN (iter-3)
+
+**Deviation from NUDGE § 2 (Path A preferred):** Path B taken instead, on the basis of the recon evidence above (no specific gating-error class exists in `hermes-agent v2026.4.30`; `registry.dispatch()` does not gate at dispatch time; the spec language "not just be absent from the loaded skill list" excludes the only gating mechanism that DOES exist). NUDGE § 4 explicitly enumerates this scenario as a valid Path B trigger and directs the Executor to escalate rather than synthesise a round-trip that does not actually exercise the gating code path.
+
+**SO escalation requested via § 6 hand-back paste-relay:** Architect iter-3 spec amendment to align AC-3 (i)/(ii) round-trip semantics with the actual `hermes-agent v2026.4.30` gating model (definitions-time filter via `model_tools.get_tool_definitions(disabled_toolsets=...)`), or alternatively to redefine the round-trip target. Pipeline pauses on AUDIT-001 implementation pending the amendment; PR #128 remains `pass_with_changes` (iter-2 verdict) until Architect amends the spec and a successor Executor iter-4 implements the amended AC.
+
+**No `Q-TKT-033-NN.md` filed.** The § 6 hand-back is the load-bearing escalation channel for cross-Devin spec-vs-runtime mismatches. If SO directs filing a separate Q-TKT, that is an iter-4 follow-up task.
