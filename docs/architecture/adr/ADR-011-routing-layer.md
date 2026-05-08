@@ -1,14 +1,24 @@
 ---
 id: ADR-011
-version: 0.1.0
-status: draft
+version: 0.1.1
+status: amended
+amended_by: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
 ---
 
 # ADR-011: Routing Layer — OmniRoute primary + Fireworks backend + OpenRouter backup
 
 ## Status
 
-Draft, pending Founder approval. Supersedes the routing-layer portion of `ADR-009-model-assignment-and-fallback.md` (specifically Options A/F in ADR-009 § Considered Options, which referenced the v0.1.0 catalog's `OmniRoute primary + OpenRouter backup` topology against placeholder models). Related: ADR-009 (per-role assignment), `MODEL-CATALOG.md` v0.2.0 (catalog content).
+Amended per ADR-014 (2026-05-08). Key corrections:
+
+1. **Correction 1**: OmniRoute is remote, not local. The `omniroute.service` systemd unit is not deployed on the VPS. Specialist runtimes point to `OMNIROUTE_BASE_URL` (remote endpoint), not `localhost:20128`. The install script makes the endpoint configurable.
+2. **Correction 2**: Hermes config format uses `model.default` / `model.provider: custom` / `model.api_key` / `model.base_url`, not `agent.model` / `agent.fallback_models`.
+3. **Correction 3**: `FIREWORKS_API_KEY` is the OmniRoute auth key, not a separate `OMNIROUTE_API_KEY`.
+4. **Correction 4**: Model ID `deepseek-v3p2` verified on deployed OmniRoute; `accounts/fireworks/models/deepseek-v4-pro` format unconfirmed.
+
+All other ADR-011 decisions (Option B chosen, verification gate, no direct Fireworks SDK, observability, failure modes) remain in force. The remote-OmniRoute topology preserves the architectural intent (all calls through OmniRoute, no direct provider SDK) while adjusting the deployment shape.
+
+Draft, pending Founder approval. Supersedes the routing-layer portion of `ADR-009-model-assignment-and-fallback.md` (specifically Options A/F in ADR-009 § Considered Options, which referenced the v0.1.0 catalog's `OmniRoute primary + OpenRouter backup` topology against placeholder models). Related: ADR-009 (per-role assignment), `MODEL-CATALOG.md` v0.3.0 (catalog content).
 
 ## Context
 

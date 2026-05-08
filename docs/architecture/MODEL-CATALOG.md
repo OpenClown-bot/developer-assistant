@@ -1,7 +1,8 @@
 ---
 id: MODEL-CATALOG
-version: 0.2.0
+version: 0.3.0
 status: draft
+amendments: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
 ---
 
 # Model Catalog
@@ -41,7 +42,9 @@ If `SESSION-STATE.md` and this catalog disagree, **this catalog is authoritative
 
 ### 4.1 Per-role assignment
 
-All identifiers are real OmniRoute model paths in the Fireworks-native form `accounts/fireworks/models/<slug>`. OmniRoute auto-resolves these paths to the Fireworks backend per its provider registry (OmniRoute issue [#265](https://github.com/diegosouzapw/OmniRoute/issues/265), closed 2026-03-10, mainteiner confirmed: "send the Fireworks path as model ID and OmniRoute auto-resolves it"). Specialist runtimes pass these strings verbatim as `agent.model` / `agent.fallback_models` in their per-runtime Hermes config. The fallback chain is capability-only — ordered by suitability for the role's task, NOT by per-token price (per ADDENDUM-001 cost-posture override).
+All identifiers are real OmniRoute model paths in the Fireworks-native form `accounts/fireworks/models/<slug>`. OmniRoute auto-resolves these paths to the Fireworks backend per its provider registry (OmniRoute issue [#265](https://github.com/diegosouzapw/OmniRoute/issues/265), closed 2026-03-10, maintainer confirmed: "send the Fireworks path as model ID and OmniRoute auto-resolves it"). Specialist runtimes pass these strings as `model.default` in their per-runtime Hermes `config.yaml` under the `model:` section (ADR-014 Correction 2). The legacy `agent.model` / `agent.fallback_models` keys are not used. The fallback chain is capability-only — ordered by suitability for the role's task, NOT by per-token price (per ADDENDUM-001 cost-posture override).
+
+**Operational note (ADR-014 Correction 4):** During the TKT-032 live deployment, the short-form model ID `deepseek-v3p2` was verified to resolve on the deployed OmniRoute instance, while the `accounts/fireworks/models/deepseek-v4-pro` format was not confirmed. The deployed OmniRoute may use a different alias convention than the Fireworks-native slug format. Until a systematic verification against the deployed OmniRoute's `/v1/models` endpoint confirms that the `accounts/fireworks/models/<slug>` format works, the install script uses the short-form identifiers that are known to resolve. The catalog below retains the Fireworks-native format as the canonical identifier; operational deployment may substitute the short-form alias as documented in the install script's `MODEL_IDENTIFIERS` configuration.
 
 | Role | Main model | Fallback 1 | Fallback 2 | Fallback 3 |
 | --- | --- | --- | --- | --- |
@@ -51,7 +54,7 @@ All identifiers are real OmniRoute model paths in the Fireworks-native form `acc
 | Executor | `accounts/fireworks/models/glm-5p1` | `accounts/fireworks/models/deepseek-v4-pro` | `accounts/fireworks/models/kimi-k2p6` | `accounts/fireworks/models/qwen3p6-plus` |
 | Reviewer | `accounts/fireworks/models/kimi-k2p6` | `accounts/fireworks/models/deepseek-v4-pro` | `accounts/fireworks/models/glm-5p1` | `accounts/fireworks/models/qwen3p6-plus` |
 
-The fallback chain is consumed in order by Hermes' built-in retry plus the per-runtime `agent.fallback_models` config. When a model in the chain fails (network error, rate limit, content filter, schema-invalid response), the runtime advances to the next entry. If the entire chain is exhausted, the work item attempt fails per `MULTI-HERMES-CONTRACT.md` § 9.2.
+The fallback chain is consumed in order by Hermes' built-in retry. When a model in the chain fails (network error, rate limit, content filter, schema-invalid response), the runtime advances to the next entry. If the entire chain is exhausted, the work item attempt fails per `MULTI-HERMES-CONTRACT.md` § 9.2. Fallback models are configured under `model.fallback_models` in the `model:` section of Hermes `config.yaml` (ADR-014 Correction 2).
 
 ### 4.2 No separate auxiliary classifier model in v0.1
 
@@ -82,15 +85,15 @@ All model calls go through OmniRoute (primary) with Fireworks as its configured 
 
 ### 5.1 Endpoints and ports
 
-The install script renders OmniRoute as a systemd unit on the same VPS, bound to a localhost port. Runtimes point their `agent.api_base` at `http://127.0.0.1:<port>/v1`. The exact port is harmonized across all artifacts in PR-E (RV-SPEC-014 C-001); v0.1.1 of this catalog defers to `SELF-DEPLOYMENT-CONTRACT.md` § 5.3 as the single source of truth for the port number.
+**Amended per ADR-014 Correction 1 (2026-05-08):** OmniRoute is currently deployed on a remote host. The install script renders the OmniRoute base URL into each runtime's `config.yaml` via the `OMNIROUTE_BASE_URL` env var. The current deployment uses `https://omniroute.infinitycore.space:8443/v1`. The `model.base_url` field in the `model:` config section (not `agent.api_base`) is set to this value by the install script's `render_runtime_configs()` function (ADR-014 Corrections 2 and 8). When OmniRoute is deployed locally in the future, `OMNIROUTE_BASE_URL` defaults to `http://127.0.0.1:20128` per `SELF-DEPLOYMENT-CONTRACT.md` § 5.3.
 
 ### 5.2 Credentials
 
-Configured via env vars in `SELF-DEPLOY.env`:
+**Amended per ADR-014 Correction 3 (2026-05-08):** Configured via env vars in `SELF-DEPLOY.env`:
 
-- `OMNIROUTE_API_KEY` — required (used by the OmniRoute systemd unit to authenticate to the Fireworks backend).
+- `FIREWORKS_API_KEY` — required. Used by specialist runtimes as the `model.api_key` value in Hermes `config.yaml` to authenticate to OmniRoute. When OmniRoute is remote (current deployment), this is the sole auth key. When OmniRoute is local (future option), this key is configured into OmniRoute's state DB as the upstream Fireworks credential, and a separate `OMNIROUTE_API_KEY` may be used for runtime-to-OmniRoute auth.
+- `OMNIROUTE_BASE_URL` — required. The full base URL of the OmniRoute endpoint (e.g., `https://omniroute.infinitycore.space:8443/v1`). Set as `model.base_url` in Hermes config.
 - `OPENROUTER_API_KEY` — required (backup routing layer, activated when OmniRoute is unreachable).
-- `FIREWORKS_API_KEY` — required by OmniRoute for the Fireworks backend; loaded by the OmniRoute unit, NOT by any Hermes specialist unit (defense-in-depth per `SELF-DEPLOYMENT-CONTRACT.md` § 10.1).
 
 If neither OmniRoute nor OpenRouter is reachable, runtimes fail fast per `MULTI-HERMES-CONTRACT.md` § 9.2.
 

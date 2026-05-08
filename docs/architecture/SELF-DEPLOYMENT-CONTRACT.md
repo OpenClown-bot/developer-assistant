@@ -1,7 +1,8 @@
 ---
 id: SELF-DEPLOYMENT-CONTRACT
-version: 0.2.0
+version: 0.3.0
 status: draft
+amendments: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
 ---
 
 # Self-Deployment Contract
@@ -103,8 +104,8 @@ The install script lays down this layout. All paths are owned by the `devassist`
 │   ├── current -> /srv/devassist/releases/<release-id>/  (symlink)
 │   ├── previous -> ...                                    (symlink)
 │   └── <release-id>/                          # snapshot of repo + shared-skills + shared-plugins
-├── omniroute/                                 # OmniRoute install (per ADR-011); the binary lives at /opt/omniroute, this is its working tree
-│   ├── omniroute.db                           # OmniRoute's own state DB (provider registry, alias map, FIREWORKS_API_KEY)
+├── omniroute/                                 # OmniRoute working tree (ONLY when OmniRoute is local per ADR-014 Correction 1; omitted for remote OmniRoute)
+│   ├── omniroute.db                           # OmniRoute's own state DB (provider registry, alias map, FIREWORKS_API_KEY) — only for local OmniRoute
 │   └── logs/
 ├── web/
 │   └── templates/                             # HTML templates for dev-assist-cli serve-web (per ADR-013)
@@ -116,7 +117,7 @@ Additional v0.2.0 paths laid down by the install script (outside `/srv/devassist
 
 ```
 /opt/dev-assist/bin/dev-assist-cli              # operator CLI + web server binary (ADR-010 / TKT-027 / ADR-013)
-/opt/omniroute/                                 # OmniRoute v3.7.x install root (ADR-011); owner: omniroute:omniroute
+/opt/omniroute/                                 # OmniRoute v3.7.x install root (ADR-011); owner: omniroute:omniroute — ONLY when OmniRoute is local per ADR-014 Correction 1
 /etc/systemd/journald.conf.d/dev-assist.conf    # journald drop-in (FR-OBS-09a; ADR-010)
 ```
 
@@ -130,7 +131,7 @@ Notes:
 
 ## 5. systemd Units
 
-Eight unit files are written by the install script (v0.2.0 adds `omniroute.service` per ADR-011 and `devassist-web.service` per ADR-013 to the v0.1.1 set of six):
+Eight unit files are written by the install script when OmniRoute is local (v0.2.0 adds `omniroute.service` per ADR-011 and `devassist-web.service` per ADR-013 to the v0.1.1 set of six). When OmniRoute is remote (ADR-014 Correction 1), seven unit files are written — `omniroute.service` is omitted:
 
 ```
 /etc/systemd/system/devassist.target
@@ -139,7 +140,7 @@ Eight unit files are written by the install script (v0.2.0 adds `omniroute.servi
 /etc/systemd/system/devassist-architect.service
 /etc/systemd/system/devassist-executor.service
 /etc/systemd/system/devassist-reviewer.service
-/etc/systemd/system/omniroute.service
+/etc/systemd/system/omniroute.service          # ONLY when OmniRoute is local (OMNIROUTE_BASE_URL=localhost)
 /etc/systemd/system/devassist-web.service
 ```
 
@@ -159,6 +160,8 @@ Description=developer-assistant <role> Hermes runtime
 PartOf=devassist.target
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -166,14 +169,13 @@ User=devassist
 Group=devassist
 WorkingDirectory=/srv/devassist/runtimes/<role>
 Environment=HERMES_HOME=/srv/devassist/runtimes/<role>/.hermes
+Environment=HOME=/srv/devassist/runtimes/<role>
 Environment=HERMES_DEVASSIST_ROLE=<role>
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
 # ExecStart is role-specific (see § 5.2.1 for the per-role table). Default below is the specialist (non-gateway) runtime.
 ExecStart=/usr/local/bin/hermes run
 Restart=on-failure
 RestartSec=10s
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Sandboxing
 NoNewPrivileges=true
@@ -204,51 +206,39 @@ The template above defaults to the specialist (non-gateway) runtime. The install
 
 `hermes gateway run` and `hermes run` are distinct entry points in Hermes Agent v2026.4.30 (`RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 3.6). The specialist runtimes never invoke the gateway entry point and never expose any inbound listener; they are pure tool-using agent loops driven by `dev-assist-work-queue-poll` and `cronjob`. This eliminates the ambiguity flagged in RV-SPEC-011 MAJ-2 about whether `hermes gateway run` would gracefully degrade to a non-gateway worker when `gateway.enabled: false`.
 
-### 5.3 OmniRoute service
+### 5.3 OmniRoute routing layer configuration
 
-The routing layer (ADR-011 v0.1.1) runs as a dedicated systemd unit. It is the seventh unit in the install set (added in v0.2.0):
+**Amended per ADR-014 Correction 1 (2026-05-08):** OmniRoute runs on a remote host, not on the VPS as a local systemd unit. The prior `omniroute.service` unit template is removed. The routing layer is configured via the `OMNIROUTE_BASE_URL` environment variable.
 
-```
-[Unit]
-Description=OmniRoute v3.7.x routing layer for developer-assistant
-PartOf=devassist.target
-After=network-online.target
-Wants=network-online.target
-Before=devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service
+The routing layer (ADR-011 v0.1.1) is configured as follows:
 
-[Service]
-Type=simple
-User=omniroute
-Group=omniroute
-WorkingDirectory=/srv/devassist/omniroute
-EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
-# OmniRoute reads FIREWORKS_API_KEY from its own state DB at /srv/devassist/omniroute/omniroute.db (loaded once at install time);
-# the EnvironmentFile is loaded so OmniRoute can pick up secondary OPENROUTER_API_KEY for backup routing.
-ExecStart=/opt/omniroute/bin/omniroute serve --port 20128 --bind 127.0.0.1 --state-db /srv/devassist/omniroute/omniroute.db
-Restart=on-failure
-RestartSec=10s
-StartLimitIntervalSec=300
-StartLimitBurst=5
+| Configuration mode | When | `OMNIROUTE_BASE_URL` value | Systemd unit |
+| --- | --- | --- | --- |
+| Remote OmniRoute (current deployment) | `OMNIROUTE_BASE_URL` points to a remote host | `https://omniroute.infinitycore.space:8443/v1` (or equivalent) | None — no local `omniroute.service` needed |
+| Local OmniRoute (future option) | `OMNIROUTE_BASE_URL` is unset or `http://127.0.0.1:20128` | `http://127.0.0.1:20128` | `omniroute.service` (per ADR-011 original text) |
 
-# Sandboxing
-NoNewPrivileges=true
-ProtectSystem=full
-ProtectHome=true
-PrivateTmp=true
-ReadOnlyPaths=/opt/omniroute
-ReadWritePaths=/srv/devassist/omniroute
+When OmniRoute is remote:
 
-[Install]
-WantedBy=devassist.target
-```
+- No `omniroute` Linux user or `/opt/omniroute/` install directory is created.
+- No `omniroute.service` unit is rendered.
+- The `omniroute/` working tree under `/srv/devassist/` is not created.
+- `FIREWORKS_API_KEY` is used directly by specialist runtimes as the OmniRoute authentication key (ADR-014 Correction 3).
+- The install script's `render_runtime_configs()` sets `model.base_url` in each runtime's `config.yaml` to the value of `OMNIROUTE_BASE_URL`.
 
-Key invariants:
+When OmniRoute is local (future option, not currently deployed):
 
-- Bound to `127.0.0.1:20128` (the harmonized port from ADR-011 v0.1.1; supersedes the placeholder `18080` referenced in earlier drafts of MULTI-HERMES-CONTRACT.md and HERMES-SKILL-ALLOWLIST.md). All five specialist runtimes' `config.yaml` set the LLM provider base URL to `http://127.0.0.1:20128`.
-- Runs as a separate Linux user (`omniroute`) so its read/write surface does not include `/srv/devassist/state/operational.db`.
-- Started **before** the five specialist runtimes so the routing layer is up first; the verify script's connectivity invariant set assumes OmniRoute is already responding at `127.0.0.1:20128`.
-- Crash recovery is `Restart=on-failure` with `RestartSec=10s`, matching the per-runtime template. If OmniRoute fails repeatedly past `StartLimitBurst`, the verify script's invariant set fails and the install / upgrade gate aborts.
-- `FIREWORKS_API_KEY` and `OMNIROUTE_API_KEY` live in OmniRoute's own state DB; specialist runtimes never receive `FIREWORKS_API_KEY`, only `OMNIROUTE_API_KEY` (`MODEL-CATALOG.md` v0.2.0 § 4.2). This is the binding precondition recorded in ADR-011 v0.1.1.
+- The `omniroute.service` unit from ADR-011 § 5.3 original text is rendered and supervised.
+- `omniroute` Linux user and `/opt/omniroute/` are created.
+- Specialist runtimes use `OMNIROUTE_API_KEY` to authenticate to the local OmniRoute (isolated from `FIREWORKS_API_KEY`).
+
+The install script detects the mode from `OMNIROUTE_BASE_URL`: if the value does not start with `http://127.0.0.1` or `http://localhost`, OmniRoute is treated as remote.
+
+Key invariants (updated from ADR-011):
+
+- All five specialist runtimes' `config.yaml` set the LLM provider base URL to `OMNIROUTE_BASE_URL` (rendered into the config template at install time, not via Hermes env var expansion).
+- Specialist runtimes authenticate to OmniRoute using `FIREWORKS_API_KEY` as the `model.api_key` value (ADR-014 Correction 3).
+- Crash recovery for the local-OmniRoute case is `Restart=on-failure` with `RestartSec=10s`. For the remote-OmniRoute case, crash recovery is the responsibility of the remote host operator.
+- The verify script's connectivity invariant checks `OMNIROUTE_BASE_URL/v1/models` (not `127.0.0.1:20128`).
 
 ### 5.4 Web surface service
 
@@ -260,6 +250,8 @@ Description=developer-assistant read-only web status surface (dev-assist-cli ser
 PartOf=devassist.target
 After=network-online.target devassist-orchestrator.service devassist-planner.service devassist-architect.service devassist-executor.service devassist-reviewer.service
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -268,11 +260,10 @@ Group=devassist
 WorkingDirectory=/srv/devassist
 Environment=DEVASSIST_OPERATIONAL_DB=/srv/devassist/state/operational.db
 Environment=DEVASSIST_REPO=/srv/devassist/repo
+Environment=HOME=/srv/devassist
 ExecStart=/opt/dev-assist/bin/dev-assist-cli serve-web --port 8180 --bind 127.0.0.1
 Restart=on-failure
 RestartSec=10s
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Sandboxing — same posture as specialist runtimes
 NoNewPrivileges=true
@@ -330,16 +321,17 @@ Three gates per `PRD-001.md` § 12.5.
 
 `scripts/install-self.sh` runs without Founder approval. It:
 
-1. Validates preflight requirements (Ubuntu 22.04, Docker installed, ≥4GB RAM, sufficient disk).
-2. Creates the `devassist` system user/group if missing.
+1. Validates preflight requirements (Ubuntu 22.04, Docker installed, ≥4GB RAM, sufficient disk, `TELEGRAM_ALLOWED_USERS` is set to a non-placeholder numeric value per ADR-014 Correction 7).
+2. Creates the `devassist` system user/group if missing, with `--create-home` or with `HOME` set via systemd `Environment=` (ADR-014 Correction 5).
 3. Lays down `/srv/devassist/` filesystem layout.
 4. Installs Hermes Agent at `/usr/local/lib/hermes-agent/` (idempotent: skips reinstall if already at the pinned version).
 5. Lays down per-runtime `HERMES_HOME` directories.
-6. Renders systemd unit files.
-7. Runs `systemctl daemon-reload`.
-8. Runs `scripts/verify-self.sh` (non-zero exit aborts the install).
-9. Logs to `/srv/devassist/logs/self-deploy.log`.
-10. Prints a final message: "Install complete. Runtimes are NOT started. To start, run: `systemctl start devassist.target`. To verify, run: `scripts/verify-self.sh`."
+6. **Renders config templates** via `render_runtime_configs()`: substitutes `{{omniroute_base_url}}`, `{{api_key}}`, `{{model_id}}` placeholders with values from environment into `config.yaml` files. Raw `.tmpl` files are NOT copied as-is (ADR-014 Correction 8).
+7. Renders systemd unit files.
+8. Runs `systemctl daemon-reload`.
+9. Runs `scripts/verify-self.sh` (non-zero exit aborts the install).
+10. Logs to `/srv/devassist/logs/self-deploy.log`.
+11. Prints a final message: "Install complete. Runtimes are NOT started. To start, run: `systemctl start devassist.target`. To verify, run: `scripts/verify-self.sh`."
 
 The install must be safe to re-run on an already-installed VPS without duplicating runtime processes or corrupting the operational state store (`PRD-001.md` § 9 success criterion).
 
@@ -398,12 +390,12 @@ NOT preserved across rollback (because they belong to the failed release):
 | --- | --- | --- |
 | Telegram reachable | HTTPS GET to `https://api.telegram.org/bot<TOKEN>/getMe` returns `200 OK` | Non-zero exit, log: "Telegram getMe failed" |
 | GitHub PAT valid | HTTPS GET to `https://api.github.com/user` with `Authorization: token <PAT>` returns `200 OK` | Non-zero exit, log: "GitHub PAT invalid" |
-| OmniRoute reachable | `curl -fs http://127.0.0.1:20128/v1/models` returns `200 OK` and lists all five `MODEL-CATALOG.md` v0.2.0 § 4.1 identifiers | Non-zero exit, log: "OmniRoute model list mismatch" |
-| OmniRoute model probe | TKT-026's `dev-assist-cli probe-omniroute` issues a 1-token completion against `http://127.0.0.1:20128/v1/chat/completions` for each catalog identifier; failure raises `paid:third_party_external_service_not_yet_supported` (ESCALATION-POLICY § 4.6) | Non-zero exit, log: "OmniRoute probe failed for <identifier>" |
+| OmniRoute reachable | `curl -fs ${OMNIROUTE_BASE_URL}/models` returns `200 OK` and lists catalog model identifiers (remote or local per `OMNIROUTE_BASE_URL` value) | Non-zero exit, log: "OmniRoute model list mismatch" |
+| OmniRoute model probe | TKT-026's `dev-assist-cli probe-omniroute` issues a 1-token completion against `${OMNIROUTE_BASE_URL}/chat/completions` for each catalog identifier; failure raises `paid:third_party_external_service_not_yet_supported` (ESCALATION-POLICY § 4.6) | Non-zero exit, log: "OmniRoute probe failed for <identifier>" |
 | State store writable | `sqlite3 /srv/devassist/state/operational.db 'PRAGMA quick_check;'` returns `ok` | Non-zero exit, log: "operational.db check failed" |
 | Schema version | Apply migrations idempotently; final schema version equals expected | Non-zero exit, log: "schema version mismatch" |
 | Each runtime unit active | `systemctl is-active devassist-<role>.service` returns `active` for all five | Non-zero exit, log: "<role> unit inactive" |
-| OmniRoute unit active | `systemctl is-active omniroute.service` returns `active` | Non-zero exit, log: "omniroute unit inactive" |
+| OmniRoute unit active | `systemctl is-active omniroute.service` returns `active` — **only checked when `OMNIROUTE_BASE_URL` points to localhost** (remote OmniRoute has no local unit) | Non-zero exit, log: "omniroute unit inactive" (skipped for remote OmniRoute) |
 | Web unit active | `systemctl is-active devassist-web.service` returns `active` AND `curl -fs http://127.0.0.1:8180/health` returns `200 OK` with body `{"role":"web","ok":true}` | Non-zero exit, log: "devassist-web unit inactive" or "web /health probe failed" |
 | Per-runtime health endpoints | `curl -fs http://127.0.0.1:8181/health` ... `http://127.0.0.1:8185/health` each returns `200 OK` with `{"role":"<role>","ok":true}` (`OBSERVABILITY-CONTRACT.md` v0.1.1 § 11) | Non-zero exit, log: "<role> /health probe failed" |
 | journald retention configured | `/etc/systemd/journald.conf.d/dev-assist.conf` exists with `SystemMaxUse=1G` and `MaxRetentionSec=30d` (FR-OBS-09a, c) | Non-zero exit, log: "journald drop-in missing or misconfigured" |
@@ -458,9 +450,10 @@ Required env vars (the file must define all of these; missing values fail verify
 | Env var | Source | Used by |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | @BotFather | Orchestrator runtime only (§ 10.1) |
-| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime only |
+| `TELEGRAM_ALLOWED_USERS` | Founder | Orchestrator runtime only — **must be a comma-separated list of numeric Telegram user IDs** (e.g., `7977379217`). Placeholder values (e.g., `YOUR_USER_ID`) cause the bot to reject all messages. ADR-014 Correction 7. |
 | `GITHUB_TOKEN` | Founder PAT or GitHub App token | Executor runtime |
-| `OMNIROUTE_API_KEY` | OmniRoute | All runtimes |
+| `FIREWORKS_API_KEY` | Fireworks.ai | All runtimes — used as OmniRoute auth key (`model.api_key` in Hermes config) when OmniRoute is remote. Also used by OmniRoute as upstream credential when OmniRoute is local. Replaces the prior `OMNIROUTE_API_KEY` assumption. ADR-014 Correction 3. |
+| `OMNIROUTE_BASE_URL` | Founder / ops | All runtimes — the full base URL for OmniRoute (e.g., `https://omniroute.infinitycore.space:8443/v1`). Defaults to `http://127.0.0.1:20128` for local OmniRoute. ADR-014 Correction 1. |
 | `OPENROUTER_API_KEY` | OpenRouter (backup) | All runtimes; fallback chain |
 | `HERMES_DEVASSIST_REPO_URL` | Founder | All runtimes (clone target for the project repo) |
 | `HERMES_DEVASSIST_REPO_BRANCH` | Founder, default `main` | All runtimes |

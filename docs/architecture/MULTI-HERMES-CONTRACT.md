@@ -1,7 +1,8 @@
 ---
 id: MULTI-HERMES-CONTRACT
-version: 0.1.1
+version: 0.2.0
 status: draft
+amendments: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
 ---
 
 # Multi-Hermes Runtime Contract
@@ -36,11 +37,16 @@ Allowed values: `orchestrator`, `planner`, `architect`, `executor`, `reviewer`. 
 
 ## 4. Per-Runtime Config Layout
 
+**Amended per ADR-014 Correction 2 (2026-05-08):** Hermes Agent v2026.4.30 uses a `model:` top-level section in `config.yaml`, not the legacy `agent.model` / `agent.fallback_models` keys. The config layout below reflects the verified-live format.
+
 Each `runtimes/<role>/.hermes/config.yaml` carries:
 
 - `agent.system_prompt_path`: pointer to the role's prompt file inside the project repo (e.g., `/srv/devassist/repo/docs/prompts/architect.md`).
-- `agent.model`: the runtime's main model (per `MODEL-CATALOG.md`).
-- `agent.fallback_models`: ordered list of fallbacks (per `MODEL-CATALOG.md`).
+- `model.default`: the runtime's main model (per `MODEL-CATALOG.md`). This replaces the legacy `agent.model`.
+- `model.fallback_models`: ordered list of fallbacks (per `MODEL-CATALOG.md`). This replaces the legacy `agent.fallback_models`.
+- `model.provider`: `custom` for all runtimes using OmniRoute (required for Hermes to honor `model.api_key` and `model.base_url`).
+- `model.api_key`: the OmniRoute auth key. Set to `${FIREWORKS_API_KEY}` (rendered by the install script's `render_runtime_configs()`). ADR-014 Correction 3.
+- `model.base_url`: the OmniRoute endpoint. Set to the value of `OMNIROUTE_BASE_URL` env var (rendered at install time). ADR-014 Corrections 1 and 8.
 - `agent.toolsets`: enabled toolsets from § 5 below.
 - `skills.external_dirs`: includes `/srv/devassist/shared-skills/` for all five runtimes.
 - `plugins.enabled`: includes `dev-assist-escalation-policy` and `dev-assist-work-queue` for all five runtimes.
@@ -52,6 +58,22 @@ Each `runtimes/<role>/.hermes/config.yaml` carries:
 - `memory.path`: `/srv/devassist/runtimes/<role>/.hermes/memories/` (default Hermes layout).
 - `sessions.path`: `/srv/devassist/runtimes/<role>/.hermes/sessions/`.
 - `operational_db.path`: `/srv/devassist/runtimes/<role>/.hermes/operational.db` (the symlink target points to `/srv/devassist/state/operational.db`, the **shared** operational store).
+
+Example `model:` section for the Architect runtime:
+
+```yaml
+model:
+  default: "accounts/fireworks/models/deepseek-v4-pro"
+  fallback_models:
+    - "accounts/fireworks/models/kimi-k2p6"
+    - "accounts/fireworks/models/glm-5p1"
+    - "accounts/fireworks/models/qwen3p6-plus"
+  provider: custom
+  api_key: "${FIREWORKS_API_KEY}"
+  base_url: "https://omniroute.infinitycore.space:8443/v1"
+```
+
+The `api_key` and `base_url` values are rendered by the install script from `SELF-DEPLOY.env` at install time. The `{{key}}` template placeholders are substituted by `render_runtime_configs()` — they are NOT Hermes-native `${VAR}` expansion (which would double-expand and break escaping). ADR-014 Correction 8.
 
 The per-runtime Hermes native sessions index lives at `/srv/devassist/runtimes/<role>/.hermes/state.db` and is **not** shared and **not** a symlink — each runtime owns its own sessions index. The `state.db`/`operational.db` filename split eliminates the upstream Hermes default-layout collision flagged in RV-SPEC-010 CRIT-1.
 
