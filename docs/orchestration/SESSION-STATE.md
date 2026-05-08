@@ -16,9 +16,11 @@ updated: 2026-05-08
 
 ## Current Phase
 
-**Integration-verification halt (2026-05-08).** The first live VPS deployment under TKT-032 was performed by the Founder and exposed an integration-verification gap: the deployed Hermes runtime ran with a generic Hermes loadout (`delegate_task` enabled, `skill_manage` enabled, `hermes-agent` skill loaded, classifier path unused, `work_items` queue idle, Orchestrator writing production code directly into the test fork) instead of the composition mandated by `MULTI-HERMES-CONTRACT.md` § 5 and the per-runtime startup invariants of `TKT-021.md` § 1. The merged specs in `main` are correct; the gap is at the verification gate. Full incident record and 14-row contract-mismatch table: `docs/session-log/2026-05-08-session-1.md`.
+**TKT-032 cycle close + integration-composition audit (2026-05-08).** The first live VPS deployment under TKT-032 was executed by the Founder. The cycle produced three open PRs at the merge gate: PR #119 (Executor smoke-test PR, install/verify/upgrade/rollback fixes; @amaterasurobot is LIVE), PR #120 (Reviewer artifact RV-CODE-032 with verdict `pass-with-notes`, frontmatter CI failure to fix), PR #121 (Architect ADR-014 documenting eight infrastructure-plumbing corrections discovered during the live install: config format `model.default`, remote OmniRoute, `FIREWORKS_API_KEY` as auth key, model ID `deepseek-v3p2`, `HOME` env var, `StartLimitIntervalSec` placement, `TELEGRAM_ALLOWED_USERS` numeric, `render_runtime_configs()`).
 
-Founder decision (2026-05-08): «делаем правильно. так, чтобы после переустановки проекта он завелся так, как мы его разрабатывали, а не на дефолтном гермесе» — selecting the Architect-ticket-family path. TKT-032 is moved to `blocked`; the Ticket Orchestrator session driving TKT-032 on the Founder's Windows PC is paused. A four-ticket Architect family (`AUDIT-001..004` per the scope stubs in the incident record § 5) is dispatched in order: AUDIT-001 (runtime_check enforcement at systemd boot) first, then AUDIT-002 (install-script operator hygiene) and AUDIT-003 (behaviour-level smoke replacing TKT-032 AC) in parallel, then AUDIT-004 (TKT-011 reformulation). After the family closes, TKT-011 is dispatched as the full-pipeline integration trial.
+The live test exposed a second-layer gap that ADR-014 was not scoped to address: once the bot booted (after the eight infrastructure corrections), it was responding **as a generic Hermes Agent**, not as a `developer-assistant` Orchestrator runtime. `delegate_task` was enabled, `skill_manage` was enabled, `hermes-agent` skill was loaded, the classifier path was unused, `work_items` queue stayed idle, and the Orchestrator wrote production code directly into the test fork — fourteen documented contract violations against `MULTI-HERMES-CONTRACT.md` § 5 and the per-runtime startup invariants of `TKT-021.md` § 1. The merged specs in `main` are correct; the gap is at the runtime-composition verification gate. Full audit record and 14-row table: `docs/session-log/2026-05-08-session-2.md` (PR #122). The Architect's parallel session-log covering ADR-014's eight infrastructure corrections is `docs/session-log/2026-05-08-session-1.md` (PR #121).
+
+Founder decision (2026-05-08): «делаем правильно. так, чтобы после переустановки проекта он завелся так, как мы его разрабатывали, а не на дефолтном гермесе» — selecting the Architect-ticket-family path. TKT-032 the *ticket* is moved to `blocked` (its AC are process-aliveness only and cannot detect the 14 behavioural mismatches); the *cycle PRs* (#119/#120/#121) may be merged at Founder discretion as the closure of this round. There is **no halt** on the Ticket Orchestrator: the TO already produced #119/#120/#121 and has no outstanding iter NUDGE on TKT-032. A four-ticket Architect family (`AUDIT-001..004` per the scope stubs in `docs/session-log/2026-05-08-session-2.md` § 5) is dispatched in order: AUDIT-001 (runtime_check enforcement at systemd boot) first, then AUDIT-002 (install-script operator hygiene) and AUDIT-003 (behaviour-level smoke replacing TKT-032 AC) in parallel, then AUDIT-004 (TKT-011 reformulation). After the family closes, TKT-011 is dispatched as the full-pipeline integration trial.
 
 Prior backlog items (TKT-027 TKT-NEW-A..G, TKT-029 paginate_text prefix, etc.) remain deferred behind the AUDIT family.
 
@@ -30,9 +32,14 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 ## Current Active PRs
 
-- PR #118 (TKT-032 spec): **frozen pending AUDIT family**. The iter-1 NUDGE for the deployed Executor on the VPS is rescinded. The PR is left open as a placeholder; AUDIT-003 may supersede or absorb its AC. Do not progress without Architect direction.
-- PR opened 2026-05-08 carrying `docs/session-log/2026-05-08-session-1.md` (incident record) plus this `SESSION-STATE.md` update — single small process-state PR; the standard 2-PR rule does not apply because no TKT cycle is being closed.
-- PR #111 (TKT-029 Executor), PR #112 (RV-CODE-029), PR #113 (RV-CODE-030): per the prior phase, awaiting Founder merge. The AUDIT halt does not block these merges — they are pre-existing closure artefacts.
+- **PR #119** (`exe/tkt-032-vps-smoke-test`, Executor): TKT-032 smoke-test implementation. Install/verify/upgrade/rollback script fixes from live VPS testing; `@amaterasurobot` confirmed LIVE on the deployed runtime. CI green. Mergeable. Awaiting Founder merge.
+- **PR #120** (`rv/rv-code-032`, Reviewer): RV-CODE-032 review of PR #119 with verdict `pass-with-notes` (7 findings, 0 blockers). CI failing on `validate-docs` (frontmatter issue in `docs/reviews/RV-CODE-032.md`). Base branch is `exe/tkt-032-vps-smoke-test` so this PR retargets to `main` after #119 merges (or merges into the Executor branch first if Founder prefers). Awaiting Reviewer fix to frontmatter, then Founder merge.
+- **PR #121** (`arch/tkt-032-live-deployment-corrections`, Architect): ADR-014 (new) + ADR-011 amendment + SELF-DEPLOYMENT-CONTRACT v0.2.0→0.3.0 + MODEL-CATALOG v0.2.0→0.3.0 + MULTI-HERMES-CONTRACT v0.1.1→0.2.0 documenting the eight live deployment corrections. Also adds `docs/session-log/2026-05-08-session-1.md` (Architect's session record). CI green. Mergeable. Awaiting Founder merge.
+- **PR #122** (`devin/1778244824-int-audit-incident-2026-05-08`, SO): integration-composition audit record `docs/session-log/2026-05-08-session-2.md` (14-row contract-mismatch table + AUDIT-001..004 scope stubs) plus this `SESSION-STATE.md` update. Single small process-state PR; standard 2-PR rule does not apply because no TKT cycle is being closed. CI green. Mergeable. No content overlap with #119/#120/#121.
+
+Merge ordering: #119 → #120 (after frontmatter fix and base retarget if needed) → #121 → #122. PR #122 may be merged independently of the others; the four PRs do not modify the same files (the previous draft of PR #122 collided with PR #121 on `docs/session-log/2026-05-08-session-1.md`; this was resolved by renaming PR #122's session-log file to `2026-05-08-session-2.md`).
+
+All prior pending merges (PR #111 TKT-029 Executor, PR #112 RV-CODE-029, PR #113 RV-CODE-030, PR #114–#118 closure / fix / spec PRs) are merged to `main` as of 2026-05-08.
 
 ## Current Active Tickets
 
@@ -64,19 +71,19 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 - `TKT-026`: merged PR #102. Model-catalog enforcement.
 - `TKT-027`: merged PR #108. Operator CLI `dev-assist-cli`. RV-CODE-027 PR #109, verdict pass_with_changes. BACKLOG: TKT-NEW-A..G.
 - `TKT-028`: merged PR #107. Structured logging + work_item_id propagation.
-- `TKT-029`: Executor PR #111 merge-safe; RV-CODE-029 PR #112 retroactive. Daily digest + Telegram /status handler + status_query shared module.
-- `TKT-030`: merged PR #110. RV-CODE-030 PR #113 retroactive. Recovery playbook drift harness + contributor convention. Known issue: `devassist-omniroute.service` vs `omniroute.service` — Architect fix required before TKT-011.
+- `TKT-029`: merged PR #111 (Executor). RV-CODE-029 merged PR #112. Daily digest + Telegram /status handler + status_query shared module.
+- `TKT-030`: merged PR #110. RV-CODE-030 merged PR #113. Recovery playbook drift harness + contributor convention. TKT-030-FIX-001 (`devassist-omniroute.service` → `omniroute.service` reconciliation) merged PRs #115/#116/#117.
 - `TKT-031`: merged PR #106. Errors/llm_calls tables, health endpoints, ObservabilityManager.
-- `TKT-032`: status **`blocked`** (was `ready`) as of 2026-05-08. Spec PR #118 frozen. Reason: live VPS deployment under this ticket exposed integration-verification gap; current AC are process-aliveness only and cannot detect the live behaviour mismatches catalogued in `docs/session-log/2026-05-08-session-1.md` § 2. Will be superseded or absorbed by AUDIT-003 per Architect direction.
-- `TKT-NEW-INT-AUDIT-001..004`: pending Architect dispatch. Scope stubs in `docs/session-log/2026-05-08-session-1.md` § 5. Numbering at Architect discretion (`TKT-NEW-INT-AUDIT-*` family or next free `TKT-033..036` slot).
+- `TKT-032`: spec merged PR #118. Status **`blocked`** (was `ready`) as of 2026-05-08. Cycle PRs #119 (Executor) / #120 (Reviewer) / #121 (Architect ADR-014) at merge gate. Reason ticket is `blocked` rather than `done`: current AC are process-aliveness only and cannot detect the live behaviour mismatches catalogued in `docs/session-log/2026-05-08-session-2.md` § 2. Will be superseded or absorbed by AUDIT-003 per Architect direction.
+- `TKT-NEW-INT-AUDIT-001..004`: pending Architect dispatch. Scope stubs in `docs/session-log/2026-05-08-session-2.md` § 5. Numbering at Architect discretion (`TKT-NEW-INT-AUDIT-*` family or next free `TKT-033..036` slot).
 
 ## Current Blockers
 
-- **Integration-verification gap (2026-05-08).** Deployed Hermes runtime does not boot in the `developer-assistant` composition. Root cause: `runtime_check.check_runtime()` (TKT-021 § 1) is not enforced from the systemd `ExecStartPre=` of `etc/systemd/devassist@<role>.service.tmpl` (TKT-020), and TKT-032 AC are process-aliveness only. Resolved by the AUDIT-001..004 family. Full evidence and root-cause analysis in `docs/session-log/2026-05-08-session-1.md`.
+- **Integration-composition gap (2026-05-08).** Deployed Hermes runtime boots after ADR-014's eight infrastructure corrections, but boots in a generic Hermes loadout, not in the `developer-assistant` composition. Root cause: `runtime_check.check_runtime()` (TKT-021 § 1) is not enforced from the systemd `ExecStartPre=` of `etc/systemd/devassist@<role>.service.tmpl` (TKT-020), and TKT-032 AC are process-aliveness only. Resolved by the AUDIT-001..004 family. Full evidence and root-cause analysis in `docs/session-log/2026-05-08-session-2.md`.
 - TKT-011 dispatch precondition is rewritten by AUDIT-004; until AUDIT-001..003 are merged, TKT-011 must not be dispatched.
-- Halt directive on the Ticket Orchestrator session driving TKT-032 on the Founder's Windows PC. Founder closes the current TO opencode tab; the next TO opencode tab is opened only when AUDIT-001 reaches `ready` and the AUDIT-001 ticket body is the new dispatch target.
-- `devassist-omniroute.service` vs `omniroute.service` naming inconsistency in RECOVERY-PLAYBOOK.md §10 (detected by TKT-030 harness). Architect must reconcile before TKT-011 dispatch. Not a code blocker — the harness correctly flags it. Tracked separately from the AUDIT family.
-- GitHub CLI `gh` is available and authenticated in the current SO environment, but future sessions must still verify `gh auth status`. Note: the deployed VPS runtime under TKT-032 lacked `gh` despite `SESSION-STATE.md` text claiming availability — documentation drift, addressed by AUDIT-002.
+- PR #120 `validate-docs` failure on `docs/reviews/RV-CODE-032.md` frontmatter (Reviewer must fix). Not blocking the SO's audit PR #122; blocking PR #120's path to merge.
+- `FIREWORKS_API_KEY` must be rotated before production use — it was exposed in chat during TKT-032 live debugging (per ADR-014 / PR #121 security note). Founder action.
+- GitHub CLI `gh` is available and authenticated in the current SO environment, but future sessions must still verify `gh auth status`. Note: the deployed VPS runtime under TKT-032 lacked `gh` despite `SESSION-STATE.md` text previously claiming availability — documentation drift, addressed by AUDIT-002.
 
 ## Current Architectural Decisions
 
@@ -122,14 +129,16 @@ Lightweight PRD -> Architecture Specification -> Tickets -> PR implementation ->
 
 - Whether to create a retroactive ticket for PR-Agent setup/configuration history.
 - None blocking immediate post-TKT-008 closure planning.
-- **Founder decision recorded 2026-05-08:** post-live-deployment audit path is the Architect-ticket-family route (Variant A from the SO diagnostic message of 2026-05-08). No further pending decisions on path; the family is dispatched after this incident PR merges.
+- **Founder decision recorded 2026-05-08:** post-live-deployment audit path is the Architect-ticket-family route (Variant A from the SO diagnostic message of 2026-05-08). No further pending decisions on path; the family is dispatched after PR #122 merges.
 
 ## Next Recommended Action
 
-1. Founder merges the incident PR (`docs/session-log/2026-05-08-session-1.md` + this `SESSION-STATE.md` update). This PR is process state only; no code change.
-2. Founder closes the current Ticket Orchestrator opencode tab driving TKT-032 on the Windows PC (halt directive — see Current Blockers).
-3. SO drafts Architect dispatch NUDGE for AUDIT-001 only (lowest-risk, highest-leverage of the four). The NUDGE points at the scope stub in `docs/session-log/2026-05-08-session-1.md` § 5.1 and asks the Architect to write the formal ticket body under `docs/tickets/`.
-4. After AUDIT-001 ratifies the runtime-check pattern via merge, AUDIT-002 and AUDIT-003 are dispatched in parallel (no shared interfaces).
-5. After AUDIT-002 + AUDIT-003 close, AUDIT-004 reformulates TKT-011 as the full-pipeline trial.
-6. Pre-existing pending merges (PR #111 TKT-029 Executor, PR #112 RV-CODE-029, PR #113 RV-CODE-030) plus the architect fix for `devassist-omniroute.service` naming remain queued; they are not blocked by the AUDIT halt and may be processed in parallel at Founder discretion.
-7. BACKLOG items remain deferred across all tickets.
+1. Founder merges PR #119 (TKT-032 Executor smoke-test).
+2. Reviewer fixes `docs/reviews/RV-CODE-032.md` frontmatter so PR #120 `validate-docs` turns green; Founder retargets PR #120 base from `exe/tkt-032-vps-smoke-test` to `main` if needed (post-#119-merge), then merges PR #120.
+3. Founder merges PR #121 (ADR-014 + four contract version bumps + Architect's session-log).
+4. Founder merges PR #122 (this SO audit — `docs/session-log/2026-05-08-session-2.md` + this SESSION-STATE update). PR #122 has no content overlap with #119/#120/#121 and may be merged in any position in the sequence.
+5. After PR #122 is merged, SO drafts Architect dispatch NUDGE for AUDIT-001 only (lowest-risk, highest-leverage of the four). The NUDGE points at the scope stub in `docs/session-log/2026-05-08-session-2.md` § 5.1 and asks the Architect to write the formal ticket body under `docs/tickets/`.
+6. After AUDIT-001 ratifies the runtime-check pattern via merge, AUDIT-002 and AUDIT-003 are dispatched in parallel (no shared interfaces).
+7. After AUDIT-002 + AUDIT-003 close, AUDIT-004 reformulates TKT-011 as the full-pipeline trial.
+8. Founder rotates `FIREWORKS_API_KEY` before any production use (per ADR-014 / PR #121 security note).
+9. BACKLOG items remain deferred across all tickets.
