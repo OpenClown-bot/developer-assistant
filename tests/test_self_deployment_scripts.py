@@ -528,6 +528,207 @@ class TestDryRunPrefixContainment(unittest.TestCase):
 
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestRuntimeCheckEnforcementInUnits(unittest.TestCase):
+    """TKT-033 / AUDIT-001 § 1 components A + D + E:
+    every per-role systemd unit invokes runtime_check.check_runtime() at
+    ExecStartPre and never auto-restarts on EX_CONFIG=78 (the abort exit
+    code the CLI shim emits on RuntimeCheckError). Asserted directly
+    against the rendered unit on disk, not the template, to catch any
+    install-time mutation that would break enforcement.
+    """
+
+    EXPECTED_PRE = "ExecStartPre=/usr/bin/python3 -m developer_assistant.runtime_check"
+    EXPECTED_RESTART_PREVENT = "RestartPreventExitStatus=78"
+    EXPECTED_PYTHONPATH = "Environment=PYTHONPATH=/srv/devassist/repo/src"
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+            "ROLLBACK_DRY_RUN": "1",
+            "UPGRADE_DRY_RUN": "1",
+        }
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stderr[-500:] if result.stderr else "ok")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read_unit(self, role: str) -> str:
+        path = (
+            Path(self.tmpdir)
+            / "etc"
+            / "systemd"
+            / "system"
+            / "devassist-{r}.service".format(r=role)
+        )
+        return path.read_text()
+
+    def test_all_units_have_runtime_check_exec_start_pre(self) -> None:
+        # AC-2: every role's unit invokes runtime_check.check_runtime() at
+        # ExecStartPre BEFORE its own ExecStart so an invariant abort prevents
+        # the runtime from ever launching.
+        for role in ROLES:
+            content = self._read_unit(role)
+            self.assertIn(
+                self.EXPECTED_PRE,
+                content,
+                "{r}.service missing ExecStartPre runtime_check".format(r=role),
+            )
+            pre_pos = content.find(self.EXPECTED_PRE)
+            start_pos = content.find("\nExecStart=")
+            self.assertGreater(start_pos, pre_pos, "ExecStartPre must precede ExecStart for {r}".format(r=role))
+
+    def test_all_units_have_restart_prevent_exit_status_78(self) -> None:
+        # AC-2: invariant abort (EX_CONFIG=78) MUST NOT auto-restart;
+        # systemd RestartPreventExitStatus= takes the abort code (Option A:
+        # Restart=always + RestartPreventExitStatus=78).
+        for role in ROLES:
+            content = self._read_unit(role)
+            self.assertIn(
+                self.EXPECTED_RESTART_PREVENT,
+                content,
+                "{r}.service missing RestartPreventExitStatus=78".format(r=role),
+            )
+            self.assertIn("Restart=always", content)
+
+    def test_all_units_set_pythonpath_for_module_invocation(self) -> None:
+        # The ExecStartPre invokes ``python3 -m developer_assistant.runtime_check``
+        # under a sandboxed user (devassist); Environment=PYTHONPATH ensures
+        # the systemd-spawned interpreter can import the module from
+        # /srv/devassist/repo/src without polluting site-packages.
+        for role in ROLES:
+            content = self._read_unit(role)
+            self.assertIn(
+                self.EXPECTED_PYTHONPATH,
+                content,
+                "{r}.service missing PYTHONPATH for runtime_check module".format(r=role),
+            )
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestPromptManifestRender(unittest.TestCase):
+    """TKT-033 / AUDIT-001 § 1 component C:
+    install-self.sh renders an install-time prompt-manifest.json with
+    schema_version=1.0, rendered_at ISO8601, prompts {role: sha256} for the
+    five canonical per-role prompts. Folded INSIDE render_runtime_configs()
+    so it is part of the same atomic rendering phase as per-runtime
+    config.yaml; the manifest is guaranteed to exist on disk before any
+    ExecStart/ExecStartPre can run.
+    """
+
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    PROMPT_FILES = {
+        "orchestrator": "docs/prompts/runtime-hermes-orchestrator.md",
+        "planner": "docs/prompts/business-planner.md",
+        "architect": "docs/prompts/architect.md",
+        "executor": "docs/prompts/executor.md",
+        "reviewer": "docs/prompts/reviewer.md",
+    }
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-test-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+            "ROLLBACK_DRY_RUN": "1",
+            "UPGRADE_DRY_RUN": "1",
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _manifest_path(self, prefix: str) -> Path:
+        return Path(prefix) / "srv" / "devassist" / "state" / "prompt-manifest.json"
+
+    def _expected_sha(self, role: str) -> str:
+        import hashlib
+
+        path = self.REPO_ROOT / self.PROMPT_FILES[role]
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    def test_manifest_rendered_with_correct_shape(self) -> None:
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stderr[-500:] if result.stderr else "ok")
+        manifest = self._manifest_path(self.tmpdir)
+        self.assertTrue(manifest.is_file(), "prompt-manifest.json was not rendered")
+        import json
+
+        with open(manifest, encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(data.get("schema_version"), "1.0")
+        self.assertIn("rendered_at", data)
+        self.assertIsInstance(data["rendered_at"], str)
+        # ISO8601 UTC with Z suffix is what install-self.sh writes.
+        self.assertTrue(
+            data["rendered_at"].endswith("Z") and "T" in data["rendered_at"],
+            "rendered_at not ISO8601 UTC: {v!r}".format(v=data["rendered_at"]),
+        )
+        self.assertIn("prompts", data)
+        prompts = data["prompts"]
+        self.assertEqual(set(prompts.keys()), set(self.PROMPT_FILES.keys()))
+        for role in self.PROMPT_FILES:
+            self.assertEqual(prompts[role], self._expected_sha(role), "sha mismatch for {r}".format(r=role))
+
+    def test_manifest_render_is_deterministic_modulo_timestamp(self) -> None:
+        # Two consecutive renders MUST produce identical SHA-256 entries for
+        # the same on-disk inputs; the rendered_at timestamp is the only
+        # field allowed to differ. This protects against accidental
+        # non-determinism (e.g., dict ordering) introduced by future
+        # refactors of the renderer.
+        result1 = _run_script("install-self.sh", self.env)
+        self.assertEqual(result1.returncode, 0)
+        import json
+
+        with open(self._manifest_path(self.tmpdir), encoding="utf-8") as fh:
+            data1 = json.load(fh)
+
+        tmpdir2 = tempfile.mkdtemp(prefix="devassist-test-")
+        try:
+            env2 = dict(self.env)
+            env2["INSTALL_DRY_RUN_PREFIX"] = tmpdir2
+            result2 = _run_script("install-self.sh", env2)
+            self.assertEqual(result2.returncode, 0)
+            with open(self._manifest_path(tmpdir2), encoding="utf-8") as fh:
+                data2 = json.load(fh)
+        finally:
+            shutil.rmtree(tmpdir2, ignore_errors=True)
+
+        self.assertEqual(data1["schema_version"], data2["schema_version"])
+        self.assertEqual(data1["prompts"], data2["prompts"])
+
+    def test_manifest_rendered_before_systemd_units(self) -> None:
+        # The manifest MUST exist before any unit is rendered (and a fortiori
+        # before any ExecStart/ExecStartPre runs); this guards the call
+        # ordering invariant in render_runtime_configs() folded BEFORE
+        # render_systemd_units(). If install-self.sh ever reorders these
+        # phases, the test will catch it via mtime comparison.
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0)
+        manifest = self._manifest_path(self.tmpdir)
+        self.assertTrue(manifest.is_file())
+        manifest_mtime = manifest.stat().st_mtime
+        for role in ROLES:
+            unit = (
+                Path(self.tmpdir)
+                / "etc"
+                / "systemd"
+                / "system"
+                / "devassist-{r}.service".format(r=role)
+            )
+            self.assertTrue(unit.is_file())
+            self.assertLessEqual(
+                manifest_mtime,
+                unit.stat().st_mtime,
+                "prompt-manifest.json must be rendered no later than {r}.service".format(r=role),
+            )
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestNoSecretsInRepo(unittest.TestCase):
     def test_no_real_tokens_in_templates(self) -> None:
         templates_dir = SCRIPTS_DIR / "templates"
