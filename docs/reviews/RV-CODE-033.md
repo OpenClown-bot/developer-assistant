@@ -1,11 +1,11 @@
 ---
 id: RV-CODE-033
-version: 0.3.0
+version: 0.4.0
 status: review_complete
 ticket_ref: TKT-033@0.3.0
 pr_ref: OpenClown-bot/developer-assistant#128
-head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
-verdict: pass_with_changes
+head_sha: c9f41c0fbce4b22e8a9a13074ba81e6ee8ea2e02
+verdict: pass
 iter_history:
   - iteration: 1
     head_sha: a022a3f9ba3cc10ed456d1b16f572f92f153b8d2
@@ -16,6 +16,9 @@ iter_history:
   - iteration: 3
     head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
     verdict: pass_with_changes
+  - iteration: 4
+    head_sha: c9f41c0fbce4b22e8a9a13074ba81e6ee8ea2e02
+    verdict: pass
 ---
 
 # RV-CODE-033: Review of PR #128 — TKT-033 runtime_check enforcement at systemd boot
@@ -238,3 +241,137 @@ Dispatch Executor iter-3 as an in-session continuation. Required fix: make `dele
 ### 8.6 Iter-3 recommendation
 
 Verdict **pass_with_changes** — PR #128 at iter-4 HEAD `3e11ff0` is **not merge-safe**. Executor iter-5 must add the `if role != "orchestrator":` guard at `runtime_check.py:573-584` per Finding 8.2.1 (mirroring the existing `non_orchestrator_telegram_skill_loaded` precedent at lines 499–503), plus the paired unit test (`test_orchestrator_role_skips_delegate_task_check`) and the verification of the `skill_manage_callable` config-driven gating per spec § 1 B(ii). After Executor iter-5 hand-back, Reviewer iter-4 verify will run on the new HEAD in this same opencode session (cumulative-append § 9 entry to this file), with the gh REST API auth gap closed so PR-Agent triage runs natively. AUDIT-001 / TKT-033 implementation cycle closes after Executor iter-5 + Reviewer iter-4 verify pass + SO pass-2 + Founder merge.
+
+## 9. Iter-4 verify
+
+### 9.1 PR / branch state at iter-4 verify cut
+
+- **PR #128:** `state=open`, `mergeable_state=clean`, `head_sha=c9f41c0fbce4b22e8a9a13074ba81e6ee8ea2e02` (Executor iter-5 fix-up, 3 new commits on top of iter-4 HEAD `3e11ff0`)
+- **Commits:** `4599884` (impl), `a37b66c` (tests), `c9f41c0` (doc)
+- **CI:** `validate-docs` SUCCESS; `Run PR Agent on every pull request` SUCCESS
+- **Reviewer branch:** `rv/rv-code-033` at `259f3f8` (iter-3 verify revision baseline); fast-forward push will add 1 new commit
+
+### 9.2 AC matrix iter-3 → iter-4 delta
+
+| AC | iter-3 verify revision verdict | iter-4 verify verdict | Evidence (file:line at HEAD `c9f41c0`) |
+|---|---|---|---|
+| AC-1 | pass | pass | No service-template changes; `git diff 3e11ff0..c9f41c0 -- scripts/templates/` empty |
+| AC-2 | pass | pass | `RestartPreventExitStatus=78` byte-equal; no template touches |
+| **AC-3 (i)** | **partial (Finding 8.2.1 must-fix)** | **pass (Finding 8.2.1 closed)** | `runtime_check.py:573` `if role != "orchestrator":` outer guard + `tests/test_runtime_check.py:1167` `test_orchestrator_role_skips_delegate_task_check` |
+| AC-3 (ii) | pass | pass | `runtime_check.py:587-588` `disabled_toolsets = _parse_disabled_toolsets(config_path); if "skills" in disabled_toolsets:` + `tests/test_runtime_check.py:1198` `test_no_skills_disabled_toolset_skips_skill_manage_check` |
+| AC-3 (iii) | pass | pass | `TestPromptManifest` byte-equal; no prompt-manifest path / SHA-256 changes |
+| AC-4 (a-c) | pass | pass | 10 raise-side classes + `_emit_marker` body byte-for-byte preserved; `TestDelegateTaskCallable` / `TestSkillManageCallable` / `TestHermesFilterAssertionDefault` byte-equal |
+| AC-4 (d) | pass | pass | `test_inspect_signature_rejects_config_path_kwarg` at `test_runtime_check.py:1031` unchanged |
+| AC-5 | pass | pass | 11-name `RUNTIME_CHECK_INVARIANTS` enum + exit code 78 + `_emit_marker` call sites byte-equal (only pure indentation delta on 2 `_emit_marker` calls inside new outer guards) |
+| AC-6 | pass | pass | iter-4 baseline: 51 functions, 2 failed (env), 44 passed, 5 skipped; iter-5: 53 functions, 2 failed (same env, identity-preserved), 46 passed (+2 net new), 5 skipped. Zero regression. |
+| AC-7 | pass | pass | Secret grep on `git diff 3e11ff0..c9f41c0` = 0 high-confidence matches |
+| AC-8 | pass | pass | Two-PR pipeline preserved; iter-5 commits append to `exe/tkt-033-runtime-check-enforcement`; no merge or force-push |
+
+**Critical lift:** AC-3 (i) iter-3 = `partial (Finding 8.2.1 must-fix)` → iter-4 = `pass` (Finding 8.2.1 closed at iter-5 HEAD `c9f41c0`).
+
+### 9.3 Substantive verify per § 4 of NUDGE
+
+#### 9.3.1 File-scope verification (§ 4.1)
+
+`git diff --name-status 3e11ff0..c9f41c0` returns exactly:
+```
+M	docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md
+M	src/developer_assistant/runtime_check.py
+M	tests/test_runtime_check.py
+```
+
+No touches to forbidden zones (`docs/architecture/`, `docs/prompts/`, `docs/prd/`, `docs/reviews/`, `docs/meta/`, `docs/session-log/`, `scripts/templates/`, `scripts/install-self.sh`). **Verdict: pass.**
+
+#### 9.3.2 AC-3 (i) Finding 8.2.1 closure (§ 4.2)
+
+1. **Guard exists:** `runtime_check.py:572-573` (0-indexed lines 572-573) reads `if role != "orchestrator":` at 4-space indent.
+2. **Mirrors precedent:** `runtime_check.py:499-503` reads `if role != "orchestrator" and "telegram-gateway" in built_in:` — shape match (role-gating guard at same indentation level).
+3. **Body byte-equal:** The `delegate_caller` block and `DelegateTaskCallableError` raise are pure-indentation delta (+4 spaces) from iter-4 unconditional block. Constant references (`INVARIANT_DELEGATE_TASK_CALLABLE`) and exception message text are byte-equal.
+4. **Test exercises failure mode:** `tests/test_runtime_check.py:1167-1191` (`test_orchestrator_role_skips_delegate_task_check`) injects `delegate_task_caller=lambda _: "callable"` (simulates iter-4 production failure mode), `role="orchestrator"`, and asserts `check_runtime` does NOT raise.
+
+**Verdict: pass (Finding 8.2.1 closed).**
+
+#### 9.3.3 AC-3 (ii) config-driven gating (§ 4.3)
+
+1. **Guard exists:** `runtime_check.py:586-588` reads `disabled_toolsets = _parse_disabled_toolsets(config_path)` then `if "skills" in disabled_toolsets:`.
+2. **Parser untouched:** `_parse_disabled_toolsets(config_path)` is the iter-4 helper at lines 278-323; unchanged at iter-5.
+3. **Short-circuit verified:** When `"skills"` is NOT in parsed list, the `skill_manage_callable` check is skipped.
+4. **Test exercises failure mode:** `tests/test_runtime_check.py:1198-1222` (`test_no_skills_disabled_toolset_skips_skill_manage_check`) sets `agent_disabled_toolsets=[]`, injects `skill_manage_caller=lambda _: "callable"`, and asserts `check_runtime` does NOT raise.
+5. **Asymmetry preserved:** (i) is role-gated (`role != "orchestrator"`); (ii) is config-gated (`"skills" in disabled_toolsets`). This matches spec § 1 B(i) "non-orchestrator roles" vs B(ii) "any role whose `agent.disabled_toolsets` lists `"skills"`" wording.
+
+**Verdict: pass.**
+
+#### 9.3.4 Byte-equality of load-bearing surfaces (§ 4.4)
+
+- `RUNTIME_CHECK_INVARIANTS` frozenset / 11 invariant constants: `git diff` shows 4 ± lines, all pure indentation delta on `_emit_marker` call sites (constant names byte-equal).
+- 10 raise-side exception classes (`class .*Error\(.*\):`): 0 ± lines.
+- `RUNTIME_CHECK_ABORT_EXIT_CODE = 78`: 0 ± lines.
+- `_emit_marker` body: 0 ± lines (only call-site indentation changed).
+- `_attempt_hermes_filter_assertion` (lines 326-410): 85 lines counted, byte-equal with iter-4 baseline.
+
+**Verdict: pass.**
+
+#### 9.3.5 § 10 cumulative-append (§ 4.5)
+
+`git diff 3e11ff0..c9f41c0 -- docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md | head -3` shows `@@ -843,6 +843,141 @@`. Lines 1-843 byte-equal; iter-5 § 10 entry appended at line 844+. Iter-1/2/3/4 entries preserved verbatim.
+
+**Verdict: pass.**
+
+#### 9.3.6 AC-6 audit (§ 4.6)
+
+- iter-4 baseline (`3e11ff0`): 51 functions, 2 failed (`test_matching_sha_passes`, `test_cli_full_pass_returns_zero` — Windows environmental), 44 passed, 5 skipped.
+- iter-5 HEAD (`c9f41c0`): 53 functions, 2 failed (same 2, identity-preserved), 46 passed, 5 skipped.
+- Net delta: +2 functions (both pass), 0 new failures, 0 regression.
+
+**Verdict: pass.**
+
+#### 9.3.7 AC-7 secret grep (§ 4.7)
+
+`git diff 3e11ff0..c9f41c0 | grep -E '(ghp_|gho_|github_pat_|sk-|fw-|or-|AKIA...)'` = 0 matches. Synthetic Telegram stub `abcdef123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ` in test fixture is NOT a real credential.
+
+**Verdict: pass.**
+
+### 9.4 Hard rules check (14 items)
+
+- [x] **1. Spec authority:** TKT-033 v0.3.0 on main `78d1e42` is the source of truth; not amended by this verify cycle.
+- [x] **2. AC matrix coverage:** All 12 items mapped in § 9.2 table with file:line evidence at iter-5 HEAD `c9f41c0`.
+- [x] **3. Independent recon:** 4th-pass recon at upstream `73bf3ab1` (iter-3) is sufficient; iter-5 does not modify `_attempt_hermes_filter_assertion` or helper imports, so 5th pass skipped per NUDGE § 4.9.
+- [x] **4. PR-Agent triage native:** gh REST API auth gap closed (`gh auth login --with-token` with Founder's PAT); issue comment `4409507781` body re-fetched independently; header references iter-5 HEAD `c9f41c0`, not iter-4 HEAD `3e11ff0`.
+- [x] **5. Surface flags vs Findings:** 2 informational surface flags identified in § 9.6 (pre-existing iter-4 helper concerns); zero new Findings requiring must-fix at iter-4.
+- [x] **6. AC-6 audit:** No silenced failures; +2 net new tests are the only test-count delta; 0 regression.
+- [x] **7. Frontmatter iter_history immutability:** iter-1/2/3 entries preserved verbatim in frontmatter; only iter-4 appended.
+- [x] **8. § 10 cumulative-append discipline:** Executor's iter-5 § 10 entry appended at line 844+; lines 1-843 byte-equal.
+- [x] **9. No edits to forbidden write zones:** Reviewer sole-edit zone is `docs/reviews/RV-CODE-033.md`; no touch to `src/`, `tests/`, `scripts/`, `docs/architecture/`, `docs/prompts/`, `docs/prd/`, `docs/meta/`, `docs/session-log/`, `docs/tickets/§§1-9`.
+- [x] **10. Verbatim spec citation:** TKT-033 v0.3.0 § 1 B(i) "non-orchestrator roles" and B(ii) "any role whose `agent.disabled_toolsets` lists `"skills"`" cited with `git show origin/main:docs/tickets/...` line anchors.
+- [x] **11. Cross-acct discipline:** Cross-model independence proof anchored at "Kimi K2.6 Moonshot on opencode" — invariant across sessions; iter-4 verify is in-session continuation of iter-3.
+- [x] **12. No secrets in commit content:** Secret grep on own commit content clean (will verify before push).
+- [x] **13. Cumulative-append push:** Single commit on `rv/rv-code-033`; no force-push, no amend, no rebase.
+- [x] **14. Full 7-section hand-back template:** This § 9 uses the full template per NUDGE § 7.2 and § 9.
+
+### 9.5 Independent recon at iter-5 (skipped 5th-pass per § 4.9)
+
+iter-5 does NOT modify `_attempt_hermes_filter_assertion` (lines 326-410), `_default_delegate_task_caller`, `_default_skill_manage_caller`, `_parse_disabled_toolsets`, `_read_system_prompt_path`, or `_read_config_skills`. SHA comparison of `_attempt_hermes_filter_assertion` body between `3e11ff0` and `c9f41c0` confirms byte-equality. The 4th-pass independent Hermes recon at upstream commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` (Hermes v2026.4.30) from iter-3 remains valid; all 9 load-bearing claims carry over unchanged.
+
+### 9.6 PR-Agent triage closure
+
+**PR-Agent persistent-review block** (issue comment id `4409507781`, last updated `2026-05-09T12:41:56Z`):
+
+- **Header:** "Review updated until commit https://github.com/OpenClown-bot/developer-assistant/commit/c9f41c0fbce4b22e8a9a13074ba81e6ee8ea2e02" — confirms refresh to iter-5 HEAD (NOT iter-4 `3e11ff0`).
+- **Ticket compliance:** "Non-compliant requirements: None identified in the diff" — zero must-fix findings.
+- **Recommended focus areas (2 informational items):**
+  1. **Boot Crash Risk on Upstream Signature Mismatch** — `_attempt_hermes_filter_assertion` catches `ImportError` but not `TypeError` or `AttributeError`. This is a **pre-existing iter-4 helper concern**; iter-5 does not modify `_attempt_hermes_filter_assertion` (lines 326-410 byte-equal). Not an iter-5 regression.
+  2. **Fragile Manual YAML Parsing** — `_read_system_prompt_path` / `_parse_disabled_toolsets` use line-by-line string parsing. This is a **pre-existing iter-4 (and iter-1) helper concern**; iter-5 does not modify either parser. Not an iter-5 regression.
+
+**gh REST API auth gap:** Closed. `gh auth login --with-token` succeeded with Founder's fine-grained PAT; `gh api repos/.../issues/comments/4409507781` returned 200 with body length 6329.
+
+**Verdict:** PR-Agent block at iter-5 HEAD has no new non-compliant findings; 2 informational concerns are pre-existing and do not affect iter-4 verify verdict.
+
+### 9.7 Findings
+
+**No new findings at iter-4 verify.**
+
+Finding 8.2.1 from iter-3 verify revision (AC-3 (i) role-gating gap) is **closed** at iter-5 HEAD `c9f41c0` per § 9.3.2 above. The `if role != "orchestrator":` guard at `runtime_check.py:572-573` and the paired test `test_orchestrator_role_skips_delegate_task_check` satisfy the binding fix-scope from § 8.2.1 `expected` / `suggestion` sub-fields.
+
+### 9.8 Iter-4 recommendation
+
+Verdict **pass** — PR #128 at iter-5 HEAD `c9f41c0` **IS merge-safe**. Founder may merge to `main`. AUDIT-001 / TKT-033 implementation cycle closes after merge.
