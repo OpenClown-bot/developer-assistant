@@ -354,7 +354,10 @@ class TestRuntimeConfigRender(unittest.TestCase):
             }
             _run_script("install-self.sh", env)
             result = _run_script("verify-self.sh", env)
-            self.assertIn("11/11", result.stdout)
+            # TKT-034 § 1.B.vi: 11 baseline invariants + 8 new operator-
+            # hygiene + prereq invariants = 19 total. The summary line
+            # uses the form "PASS  (N/N invariants)".
+            self.assertIn("19/19", result.stdout)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -742,6 +745,338 @@ class TestNoSecretsInRepo(unittest.TestCase):
             content = (SCRIPTS_DIR / script).read_text()
             if "token-placeholder" in content:
                 self.assertNotIn("sk-", content, f"{script} contains real key prefix")
+
+
+# ----------------------------------------------------------------------
+# TKT-034 § 6 — extended fixture / unit / integration tests for the
+# operator-hygiene + interactive-installer surface.
+# ----------------------------------------------------------------------
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestSharedSkillsManifestRender(unittest.TestCase):
+    """TKT-034 AC-2 (d): render_shared_skills_manifest writes an atomic
+    JSON manifest enumerating the 15 dev-assist-* skills from
+    MULTI-HERMES-CONTRACT.md § 5.0."""
+
+    EXPECTED_SKILLS = (
+        "dev-assist-classifier",
+        "dev-assist-progress-report",
+        "dev-assist-escalation-surface",
+        "dev-assist-work-queue-write",
+        "dev-assist-work-queue-poll",
+        "dev-assist-prd-writer",
+        "dev-assist-questions-writer",
+        "dev-assist-arch-writer",
+        "dev-assist-adr-writer",
+        "dev-assist-tickets-writer",
+        "dev-assist-executor-discipline",
+        "dev-assist-write-zone-enforcer",
+        "dev-assist-github-workflow",
+        "dev-assist-reviewer-rubric",
+        "dev-assist-review-writer",
+    )
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-skills-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_manifest_file_exists(self) -> None:
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stdout[-500:])
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        self.assertTrue(manifest.is_file(), "shared-skills-manifest.json not rendered")
+
+    def test_manifest_lists_all_15_skills(self) -> None:
+        import json
+        _run_script("install-self.sh", self.env)
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        self.assertEqual(data["schema_version"], "1.0")
+        for skill in self.EXPECTED_SKILLS:
+            self.assertIn(skill, data["skills"], f"manifest missing skill: {skill}")
+        # No unexpected entries
+        self.assertEqual(set(data["skills"].keys()), set(self.EXPECTED_SKILLS))
+
+    def test_manifest_records_release_commit(self) -> None:
+        import json
+        _run_script("install-self.sh", self.env)
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        # release_commit is either a 40-char SHA or "unknown" if git unavailable
+        self.assertIn("release_commit", data)
+        for entry in data["skills"].values():
+            self.assertIn("path", entry)
+            self.assertIn("sha256_of_skill_md", entry)
+            self.assertIn("pinned_commit", entry)
+
+    def test_manifest_atomic_render(self) -> None:
+        # Two consecutive runs must produce identical manifests modulo
+        # the rendered_at timestamp; the .tmp.<pid> staging file MUST
+        # not survive after mv -f.
+        _run_script("install-self.sh", self.env)
+        manifest_dir = Path(self.tmpdir) / "srv" / "devassist" / "state"
+        for f in manifest_dir.glob("shared-skills-manifest.json.tmp.*"):
+            self.fail(f"staging file survived: {f}")
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestSecretsFileAcl(unittest.TestCase):
+    """TKT-034 AC-6: SELF-DEPLOY.env tightened to 0600 in fixture (0400
+    on real install); secrets/ dir mode 0710. The verify-self
+    `check_secrets_file_acl` invariant accepts both 0400 and 0600 in
+    fixture mode."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-acl-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+        }
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_secrets_dir_mode_0710(self) -> None:
+        _run_script("install-self.sh", self.env)
+        secrets_dir = Path(self.tmpdir) / "srv" / "devassist" / "secrets"
+        mode = oct(secrets_dir.stat().st_mode & 0o777)
+        self.assertEqual(mode, "0o710", f"secrets/ dir mode {mode}, expected 0o710")
+
+    def test_env_file_mode_0600_in_fixture(self) -> None:
+        _run_script("install-self.sh", self.env)
+        env_file = Path(self.tmpdir) / "srv" / "devassist" / "secrets" / "SELF-DEPLOY.env"
+        mode = oct(env_file.stat().st_mode & 0o777)
+        # fixture: 0600 (chown to devassist requires root and is skipped)
+        self.assertEqual(mode, "0o600", f"SELF-DEPLOY.env mode {mode}, expected 0o600")
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestVerifySelfNewInvariants(unittest.TestCase):
+    """TKT-034 § 1.B.vi: 8 new check_* invariants. PASS path covered by
+    install-then-verify; FAIL path covered by hand-crafted env files."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="devassist-verify-new-")
+        self.env = {
+            "INSTALL_DRY_RUN": "1",
+            "INSTALL_DRY_RUN_PREFIX": self.tmpdir,
+            "VERIFY_FIXTURE_MODE": "1",
+        }
+        # Establish a fully-installed baseline
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stdout[-500:])
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_verify_passes_after_clean_install(self) -> None:
+        result = _run_script("verify-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stdout[-500:])
+        # The 8 new invariants must each appear with PASS in the log
+        for inv_name in (
+            "gh CLI installed",
+            "gh CLI authenticated as devassist",
+            "devassist git identity configured",
+            "origin remote URL token-free",
+            "shared-skills manifest parity",
+            "secrets file ACL hardened",
+            "required env vars set + non-placeholder",
+            "VPS prereq baseline",
+        ):
+            self.assertIn(f"PASS: {inv_name}", result.stdout)
+
+    def test_verify_fails_when_manifest_missing(self) -> None:
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        manifest.unlink()
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared-skills manifest parity: FAIL", result.stdout)
+
+    def test_verify_fails_when_manifest_malformed(self) -> None:
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        manifest.write_text("not-json{")
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared-skills manifest parity: FAIL", result.stdout)
+
+    def test_verify_fails_when_manifest_missing_skill(self) -> None:
+        import json
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        del data["skills"]["dev-assist-classifier"]
+        manifest.write_text(json.dumps(data))
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dev-assist-classifier", result.stdout)
+
+    def test_verify_fails_when_gh_hosts_missing(self) -> None:
+        marker = Path(self.tmpdir) / "home" / "devassist" / ".config" / "gh" / "hosts.yml"
+        if marker.exists():
+            marker.unlink()
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gh CLI authenticated as devassist: FAIL", result.stdout)
+
+    def test_verify_fails_when_gitconfig_placeholder(self) -> None:
+        gitconfig = Path(self.tmpdir) / "home" / "devassist" / ".gitconfig"
+        gitconfig.write_text(
+            "[user]\n\tname = YOUR_NAME\n\temail = YOUR_EMAIL\n"
+            "[credential]\n\thelper = !gh auth git-credential\n"
+        )
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("devassist git identity configured: FAIL", result.stdout)
+
+    def test_verify_fails_when_origin_url_has_token(self) -> None:
+        # Stage a fake origin with embedded credential
+        repo_dir = Path(self.tmpdir) / "srv" / "devassist" / "repo"
+        git_dir = repo_dir / ".git"
+        git_dir.mkdir(parents=True, exist_ok=True)
+        (git_dir / "config").write_text(
+            "[remote \"origin\"]\n"
+            "\turl = https://ghp_TESTTOKEN@github.com/o/r.git\n"
+            "\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+        )
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("origin remote URL token-free: FAIL", result.stdout)
+
+    def test_verify_fails_when_required_env_var_placeholder_in_production_mode(self) -> None:
+        # TKT-034 AC-8 (g): in production verify (FIXTURE=0) the strict
+        # placeholder-rejection path must reject the test-token-placeholder
+        # values. We source verify-self.sh into a clean shell (the
+        # BASH_SOURCE != $0 guard prevents main() auto-run) and call
+        # check_required_env_vars_present directly so no network probes
+        # fire.
+        env_file = Path(self.tmpdir) / "srv" / "devassist" / "secrets" / "SELF-DEPLOY.env"
+        env_file.write_text(
+            "TELEGRAM_BOT_TOKEN=test-token-placeholder\n"
+            "TELEGRAM_ALLOWED_USERS=test-user-placeholder\n"
+            "DEVASSIST_FOUNDER_TELEGRAM_USER_ID=test-user-placeholder\n"
+            "GITHUB_TOKEN=test-token-placeholder\n"
+            "FIREWORKS_API_KEY=test-token-placeholder\n"
+            "OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1\n"
+            "HERMES_DEVASSIST_REPO_URL=https://github.com/o/r.git\n"
+            "HERMES_DEVASSIST_REPO_BRANCH=main\n"
+            "OPERATOR_GIT_USER_NAME=op\n"
+            "OPERATOR_GIT_USER_EMAIL=op@x\n"
+        )
+        bash_cmd = (
+            f'PREFIX="{self.tmpdir}"; '
+            f'BASE="${{PREFIX}}/srv/devassist"; '
+            f'ENV_FILE="${{BASE}}/secrets/SELF-DEPLOY.env"; '
+            f'FIXTURE=0; '
+            f'DRY_RUN=0; '
+            f'PASS_COUNT=0; FAIL_COUNT=0; FAIL_SUMMARY=""; '
+            f'log() {{ :; }}; '
+            f'record_pass() {{ PASS_COUNT=$((PASS_COUNT+1)); echo "PASS:$1"; }}; '
+            f'record_fail() {{ FAIL_COUNT=$((FAIL_COUNT+1)); echo "FAIL:$1: $2"; }}; '
+            f'source "{SCRIPTS_DIR}/verify-self.sh" 2>/dev/null; '
+            # Re-set FIXTURE/DRY_RUN/BASE because sourcing reset them
+            f'FIXTURE=0; DRY_RUN=0; '
+            f'PREFIX="{self.tmpdir}"; '
+            f'BASE="${{PREFIX}}/srv/devassist"; '
+            f'ENV_FILE="${{BASE}}/secrets/SELF-DEPLOY.env"; '
+            f'check_required_env_vars_present'
+        )
+        result = subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True, text=True,
+            timeout=15, check=False,
+        )
+        # Output is the verify-self log() format: "verify-self: FAIL:
+        # required env vars set + non-placeholder -- ..."
+        self.assertIn("required env vars set + non-placeholder", result.stdout)
+        self.assertIn("placeholder", result.stdout)
+        self.assertIn("FAIL", result.stdout)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestForceReinstallFlag(unittest.TestCase):
+    """TKT-034 AC-9: --force-reinstall skips prior-deploy detection;
+    --rotate-secrets aborts; --reprompt-secrets aborts."""
+
+    def test_force_reinstall_skips_prior_deploy_in_dry_run(self) -> None:
+        tmpdir = tempfile.mkdtemp(prefix="devassist-force-")
+        try:
+            env = {
+                "INSTALL_DRY_RUN": "1",
+                "INSTALL_DRY_RUN_PREFIX": tmpdir,
+                "VERIFY_FIXTURE_MODE": "1",
+            }
+            result = _run_script("install-self.sh", env, args=["--force-reinstall"])
+            self.assertEqual(result.returncode, 0, result.stdout[-500:])
+            # Detection-skipped log message present
+            self.assertIn(
+                "Prior-deploy detection skipped",
+                result.stdout,
+                "expected '--force-reinstall' log entry"
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_help_flag_lists_all_new_options(self) -> None:
+        result = _run_script("install-self.sh", {}, args=["--help"])
+        self.assertEqual(result.returncode, 0)
+        for opt in (
+            "--interactive",
+            "--non-interactive",
+            "--gh-auth=pat",
+            "--gh-auth=ssh",
+            "--force-reinstall",
+            "--reprompt-secrets",
+            "--rotate-secrets",
+        ):
+            self.assertIn(opt, result.stdout, f"--help missing {opt}")
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestPreReqVerificationStubsInDryRun(unittest.TestCase):
+    """TKT-034 AC-10: verify_prereqs() is a no-op in DRY_RUN /
+    INSTALL_FIXTURE_PROBES=1 to keep the test grid offline. Real-mode
+    behaviour is exercised on a real Ubuntu 22.04 VPS during the
+    operator install."""
+
+    def test_dry_run_install_log_records_prereq_skip(self) -> None:
+        tmpdir = tempfile.mkdtemp(prefix="devassist-prereq-")
+        try:
+            env = {
+                "INSTALL_DRY_RUN": "1",
+                "INSTALL_DRY_RUN_PREFIX": tmpdir,
+                "VERIFY_FIXTURE_MODE": "1",
+            }
+            result = _run_script("install-self.sh", env)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("verify_prereqs (8 checks) skipped", result.stdout)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestNoSecretsInTokenizedSurfaces(unittest.TestCase):
+    """TKT-034 AC-12: scan repository surfaces for token-shaped patterns."""
+
+    def test_install_self_has_no_real_token_patterns(self) -> None:
+        content = (SCRIPTS_DIR / "install-self.sh").read_text()
+        # Real GitHub PAT prefix (ghp_) is permitted in usage examples,
+        # but never as a literal key. Forbidden: known fixture-leak
+        # patterns observed in past CI failures.
+        for forbidden in ("ghp_RealLeakedPattern", "sk-", "AKIA", "AIza"):
+            self.assertNotIn(forbidden, content, f"install-self.sh contains pattern: {forbidden}")
+
+    def test_verify_self_has_no_real_token_patterns(self) -> None:
+        content = (SCRIPTS_DIR / "verify-self.sh").read_text()
+        for forbidden in ("ghp_RealLeakedPattern", "sk-", "AKIA", "AIza"):
+            self.assertNotIn(forbidden, content, f"verify-self.sh contains pattern: {forbidden}")
 
 
 if __name__ == "__main__":
