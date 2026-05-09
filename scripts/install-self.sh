@@ -203,6 +203,59 @@ render_runtime_configs() {
         fi
         log "Rendered config.yaml for ${role}"
     done
+
+    # TKT-033 § 1 component C: render the install-time prompt-manifest atomically.
+    # Folded INSIDE render_runtime_configs() so the manifest is part of the same
+    # rendering phase as the per-role config.yaml; main() already calls this
+    # function before render_systemd_units(), so the manifest is guaranteed to
+    # exist before any ExecStart/ExecStartPre can run. Per-role <role> -->
+    # docs/prompts/<file>.md mapping mirrors AGENTS.md Roles table; keep this
+    # in sync with src/developer_assistant/runtime_check.py PROMPT_FILE_BY_ROLE.
+    local repo_root="${SCRIPT_DIR}/.."
+    local manifest_dir="${BASE}/state"
+    local manifest="${manifest_dir}/prompt-manifest.json"
+    local manifest_tmp="${manifest}.tmp.$$"
+    local rendered_at
+    rendered_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    mkdir -p "$manifest_dir"
+    {
+        printf '{\n'
+        printf '  "schema_version": "1.0",\n'
+        printf '  "rendered_at": "%s",\n' "$rendered_at"
+        printf '  "prompts": {\n'
+        local first=1
+        for role in $ROLES; do
+            local prompt_rel
+            case "$role" in
+                orchestrator) prompt_rel="docs/prompts/runtime-hermes-orchestrator.md" ;;
+                planner)      prompt_rel="docs/prompts/business-planner.md" ;;
+                architect)    prompt_rel="docs/prompts/architect.md" ;;
+                executor)     prompt_rel="docs/prompts/executor.md" ;;
+                reviewer)     prompt_rel="docs/prompts/reviewer.md" ;;
+                *) log "FATAL: unknown role '${role}' in prompt-manifest renderer"; exit 1 ;;
+            esac
+            local prompt_path="${repo_root}/${prompt_rel}"
+            if [ ! -f "$prompt_path" ]; then
+                log "FATAL: prompt file not found at ${prompt_path}; cannot render manifest"
+                exit 1
+            fi
+            local sha
+            sha=$(sha256sum "$prompt_path" | awk '{print $1}')
+            if [ "$first" = "1" ]; then
+                first=0
+            else
+                printf ',\n'
+            fi
+            printf '    "%s": "%s"' "$role" "$sha"
+        done
+        printf '\n  }\n}\n'
+    } > "$manifest_tmp"
+    mv -f "$manifest_tmp" "$manifest"
+    if [ "$DRY_RUN" = "0" ]; then
+        chown devassist:devassist "$manifest" 2>/dev/null || true
+        chmod 0644 "$manifest"
+    fi
+    log "Rendered prompt-manifest.json with SHA-256 of 5 per-role prompt files (atomic mv)"
 }
 
 render_self_deploy_env() {
