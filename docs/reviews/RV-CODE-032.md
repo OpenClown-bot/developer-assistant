@@ -1,6 +1,7 @@
 ---
 id: RV-CODE-032
 version: 0.1.0
+status: complete
 ticket: TKT-032 v0.1.0
 branch: rv/rv-code-032
 reviewer_model: Kimi K2.6 via OmniRoute
