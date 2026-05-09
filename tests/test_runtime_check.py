@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -60,7 +61,7 @@ from developer_assistant.runtime_check import (
     SkillsMismatchError,
     TelegramGatewayLoadedError,
     TelegramTokenMissingError,
-    _attempt_hermes_skill_round_trip,
+    _attempt_hermes_filter_assertion,
     check_runtime,
 )
 
@@ -720,133 +721,345 @@ class TestSkillManageCallable(unittest.TestCase):
             )
 
 
-class TestHermesRoundTripDefault(unittest.TestCase):
-    """AC-3 (i)/(ii) Path A: ``_attempt_hermes_skill_round_trip`` actually
-    imports ``hermes.skills.<skill_name>`` and dispatches on the resolved
-    callable entry point, rather than inferring gating from the rendered
-    config. Tests inject a fake module into
-    ``sys.modules['hermes.skills.<skill_name>']`` to exercise each branch
-    deterministically without requiring the upstream ``hermes`` package
-    to be installed in the offline test environment.
+def _make_named_function(
+    name: str, params: tuple[str, ...]
+) -> "object":
+    """Build a fake top-level function with given name and positional params.
+
+    Used to mirror the upstream ``hermes-agent`` v2026.4.30 signatures of
+    ``tools.delegate_tool.delegate_task`` and
+    ``tools.skill_manager_tool.skill_manage`` for the AC-4 (d)
+    ``inspect.signature`` probe-shape verification. The fake never accepts
+    ``config_path=`` -- per TKT-033 v0.3.0 § 8 Amendment notes recon at
+    ``tools/delegate_tool.py:1812`` and
+    ``tools/skill_manager_tool.py:692-708``, neither upstream signature
+    accepts that keyword.
+    """
+    src = "def {n}({p}) -> str:\n    return ''\n".format(
+        n=name, p=", ".join(params)
+    )
+    namespace: dict[str, object] = {}
+    exec(src, namespace)  # noqa: S102 -- fixture-only synthetic function
+    return namespace[name]
+
+
+class TestHermesFilterAssertionDefault(unittest.TestCase):
+    """AC-3 (i)/(ii) + AC-4 (d): ``_attempt_hermes_filter_assertion`` round-trips
+    Hermes' definitions-time filter rather than invoking the upstream handler.
+
+    The TKT-033 v0.3.0 amendment realigned the AC-3 (i)/(ii) round-trip
+    semantics with the actual ``hermes-agent`` v2026.4.30 gating model
+    (commit ``73bf3ab1b22314ed9dfecbb59242c03742fe72af``): tools are gated
+    at definitions assembly time via
+    ``model_tools.get_tool_definitions(disabled_toolsets=...)``, NOT via a
+    handler-side gating exception. The iter-2 broad-catch helper
+    ``_attempt_hermes_skill_round_trip`` (with its ``except BaseException``
+    fallback) is replaced by this filter-assertion helper which performs
+    a positive membership check on the assembled definition list.
+
+    Tests stub ``tools.registry``, ``tools.delegate_tool``,
+    ``tools.skill_manager_tool``, and ``model_tools`` via ``sys.modules``
+    injection so the helper's ``import`` statements succeed deterministically
+    without requiring the upstream ``hermes-agent`` package to be installed
+    in the offline test environment. Synthetic ``config.yaml`` fixtures
+    exercise the YAML-parsing side of the round-trip.
+
+    AC-4 (d) probe-shape verification uses ``inspect.signature`` to assert
+    that the upstream-mirrored stubs do NOT accept ``config_path=`` --
+    documenting that any helper which passed ``config_path=`` to the
+    upstream callable (as iter-2 did to its synthetic invoke) would have
+    raised ``TypeError`` at the upstream call boundary, NOT a gating
+    exception, which the iter-2 ``except BaseException`` would have
+    silently swallowed as ``"gated"`` (Reviewer Finding 2 false-positive
+    that escalated to v0.3.0 spec amendment).
     """
 
-    SKILL_NAME = "fixture_skill"
-    MODULE_KEY = "hermes.skills." + SKILL_NAME
+    UPSTREAM_KEYS = (
+        "tools",
+        "tools.registry",
+        "tools.delegate_tool",
+        "tools.skill_manager_tool",
+        "model_tools",
+    )
 
     def setUp(self) -> None:
+        # Save current sys.modules state for the upstream module names so
+        # tearDown can restore the offline-VM baseline (where every key is
+        # absent). Each setUp records what was there; each tearDown
+        # restores or pops.
         self._added_module_keys: list[str] = []
-        sys.modules.pop(self.MODULE_KEY, None)
+        self._captured_disabled_toolsets: list[list[str]] = []
+        self._saved_modules: dict[str, types.ModuleType | None] = {}
+        for key in self.UPSTREAM_KEYS:
+            self._saved_modules[key] = sys.modules.get(key)
+            # Pre-condition for ImportError branch: every upstream key
+            # MUST be absent at setUp; if not, a prior test leaked.
+            if key in sys.modules:
+                sys.modules.pop(key, None)
 
     def tearDown(self) -> None:
-        sys.modules.pop(self.MODULE_KEY, None)
+        for key in self.UPSTREAM_KEYS:
+            sys.modules.pop(key, None)
+        for key, value in self._saved_modules.items():
+            if value is not None:
+                sys.modules[key] = value
         for key in self._added_module_keys:
             sys.modules.pop(key, None)
 
-    def _inject_fake_skill_module(self, module: types.ModuleType) -> None:
-        # ``importlib.import_module("hermes.skills.<n>")`` requires that the
-        # parent packages ``hermes`` and ``hermes.skills`` are also present
-        # in ``sys.modules``. Inject empty package stubs as needed; record
-        # them so tearDown removes any we created (we never overwrite an
-        # existing entry).
-        for parent in ("hermes", "hermes.skills"):
-            if parent not in sys.modules:
-                pkg = types.ModuleType(parent)
-                pkg.__path__ = []  # mark as namespace package
-                sys.modules[parent] = pkg
-                self._added_module_keys.append(parent)
-        sys.modules[self.MODULE_KEY] = module
+    def _inject_fake_upstream(
+        self,
+        *,
+        definitions_by_disabled: dict[
+            tuple[str, ...], list[dict[str, object]]
+        ]
+        | None = None,
+        delegate_task_signature: tuple[str, ...] = (
+            "goal",
+            "context",
+            "toolsets",
+        ),
+        skill_manage_signature: tuple[str, ...] = ("action", "name"),
+    ) -> None:
+        """Inject fake upstream modules into ``sys.modules``.
+
+        ``definitions_by_disabled`` keys are tuples of the disabled
+        toolsets passed to ``get_tool_definitions`` (sorted); values are
+        the synthetic OpenAI-shape definition lists to return for that
+        key. If a call's disabled-toolsets key is not in the mapping,
+        the stub returns ``[]``.
+
+        The ``delegate_task`` / ``skill_manage`` signatures intentionally
+        omit ``config_path`` to mirror the upstream v2026.4.30 shape; the
+        ``test_inspect_signature_rejects_config_path_kwarg`` case asserts
+        this directly.
+        """
+        # Namespace package "tools" + child modules. We also bind each
+        # submodule as an attribute of the parent stub so dotted-attribute
+        # access (``tools.delegate_tool``) resolves after ``import
+        # tools.delegate_tool``: when sys.modules is pre-populated by hand
+        # the import machinery does not always set the attribute on the
+        # parent automatically.
+        if "tools" not in sys.modules:
+            pkg = types.ModuleType("tools")
+            pkg.__path__ = []  # mark as namespace package
+            sys.modules["tools"] = pkg
+            self._added_module_keys.append("tools")
+        tools_pkg = sys.modules["tools"]
+        # tools.registry stub (the helper just imports it for side-effect).
+        registry_mod = types.ModuleType("tools.registry")
+        sys.modules["tools.registry"] = registry_mod
+        tools_pkg.registry = registry_mod
+        self._added_module_keys.append("tools.registry")
+        # tools.delegate_tool stub with delegate_task callable.
+        delegate_mod = types.ModuleType("tools.delegate_tool")
+        delegate_mod.delegate_task = _make_named_function(
+            "delegate_task", delegate_task_signature
+        )
+        sys.modules["tools.delegate_tool"] = delegate_mod
+        tools_pkg.delegate_tool = delegate_mod
+        self._added_module_keys.append("tools.delegate_tool")
+        # tools.skill_manager_tool stub with skill_manage callable.
+        skill_mod = types.ModuleType("tools.skill_manager_tool")
+        skill_mod.skill_manage = _make_named_function(
+            "skill_manage", skill_manage_signature
+        )
+        sys.modules["tools.skill_manager_tool"] = skill_mod
+        tools_pkg.skill_manager_tool = skill_mod
+        self._added_module_keys.append("tools.skill_manager_tool")
+        # model_tools stub with a get_tool_definitions function that
+        # records its disabled_toolsets argument and returns the configured
+        # fixture (or [] for unknown keys).
+        model_mod = types.ModuleType("model_tools")
+        captured = self._captured_disabled_toolsets
+        defs_by_key = definitions_by_disabled or {}
+
+        def get_tool_definitions(
+            *,
+            disabled_toolsets: list[str] | None = None,
+            quiet_mode: bool = False,
+            enabled_toolsets: list[str] | None = None,
+            **_extra: object,
+        ) -> list[dict[str, object]]:
+            captured.append(list(disabled_toolsets or []))
+            key = tuple(sorted(disabled_toolsets or []))
+            return list(defs_by_key.get(key, []))
+
+        model_mod.get_tool_definitions = get_tool_definitions
+        sys.modules["model_tools"] = model_mod
+        self._added_module_keys.append("model_tools")
+
+    def _write_config_with_disabled_toolsets(
+        self, path: str, disabled_toolsets: list[str]
+    ) -> None:
+        lines = [
+            "agent:",
+            "  model: accounts/fireworks/models/glm-5p1",
+        ]
+        if disabled_toolsets:
+            lines.append("  disabled_toolsets:")
+            for toolset in disabled_toolsets:
+                lines.append("  - " + toolset)
+        lines.extend(["", "skills:", "  built_in:", "  - cronjob", "  - memory"])
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
 
     def test_import_error_returns_gated(self) -> None:
-        # No fake injected -- ``hermes.skills.fixture_skill`` is not
-        # installed, so ``importlib.import_module`` raises ImportError and
-        # the helper returns "gated" (the AC-3 pass branch).
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/nonexistent.yaml", self.SKILL_NAME),
-            "gated",
+        # No upstream stubs injected -- ``import tools.registry`` raises
+        # ModuleNotFoundError (an ImportError subclass), so the helper
+        # returns "gated" via the only allowed catch (the AC-3 pass branch
+        # on the offline Devin VM and on minimal-dependency CI images).
+        for key in self.UPSTREAM_KEYS:
+            self.assertNotIn(
+                key,
+                sys.modules,
+                "{k} unexpectedly in sys.modules at setUp".format(k=key),
+            )
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, ["delegation"])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "delegate_task"),
+                "gated",
+            )
+
+    def test_filter_excludes_delegate_task_returns_gated(self) -> None:
+        # Filter correctly excludes delegate_task when delegation toolset
+        # is disabled -- assembled definitions list does NOT contain
+        # delegate_task; helper returns "gated" (AC-3 (i) pass branch).
+        self._inject_fake_upstream(
+            definitions_by_disabled={
+                ("delegation",): [
+                    {"type": "function", "function": {"name": "other_tool"}},
+                ],
+            },
         )
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, ["delegation"])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "delegate_task"),
+                "gated",
+            )
+        self.assertEqual(self._captured_disabled_toolsets, [["delegation"]])
 
-    def test_module_with_no_entry_point_returns_gated(self) -> None:
-        # Module imports fine but exposes neither ``invoke``, ``main``, nor
-        # a ``Skill`` class -> _resolve_hermes_skill_entry_point returns
-        # None -> helper returns "gated".
-        fake = types.ModuleType(self.MODULE_KEY)
-        self._inject_fake_skill_module(fake)
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
-            "gated",
+    def test_filter_includes_delegate_task_returns_callable(self) -> None:
+        # Filter FAILS to exclude delegate_task despite delegation being in
+        # disabled_toolsets -- assembled definitions list contains
+        # delegate_task; helper returns "callable" (AC-3 (i) live failure
+        # mode that surfaces as DelegateTaskCallableError at the
+        # check_runtime layer for non-orchestrator roles).
+        self._inject_fake_upstream(
+            definitions_by_disabled={
+                ("delegation",): [
+                    {"type": "function", "function": {"name": "delegate_task"}},
+                ],
+            },
         )
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, ["delegation"])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "delegate_task"),
+                "callable",
+            )
 
-    def test_invoke_raising_returns_gated(self) -> None:
-        # invoke() raises (Hermes' own gating exception, TypeError,
-        # RuntimeError, anything) -> helper returns "gated" (the AC-3 pass
-        # branch -- the runtime refused to execute the skill).
-        fake = types.ModuleType(self.MODULE_KEY)
-
-        def invoke(**kwargs: object) -> None:
-            raise RuntimeError("Hermes gating: skill is disabled")
-
-        fake.invoke = invoke
-        self._inject_fake_skill_module(fake)
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
-            "gated",
+    def test_filter_excludes_skill_manage_returns_gated(self) -> None:
+        # Same shape as the delegate_task gated case but for skill_manage
+        # under the skills toolset (AC-3 (ii) pass branch). All five
+        # roles disable the skills toolset per HERMES-SKILL-ALLOWLIST
+        # v0.1.2 § 4, so a correctly-filtered runtime must return
+        # "gated" for skill_manage on every role.
+        self._inject_fake_upstream(
+            definitions_by_disabled={
+                ("skills",): [
+                    {"type": "function", "function": {"name": "delegate_task"}},
+                ],
+            },
         )
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, ["skills"])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "skill_manage"),
+                "gated",
+            )
 
-    def test_invoke_succeeding_returns_callable(self) -> None:
-        # invoke() returns without raising -> helper returns "callable",
-        # which surfaces upstream as the AC-3 fail branch (the runtime
-        # ran the gated skill end-to-end). This is the live failure mode
-        # session-2 row 1 documented.
-        fake = types.ModuleType(self.MODULE_KEY)
-        invoked: list[str] = []
-
-        def invoke(**kwargs: object) -> None:
-            invoked.append(str(kwargs.get("config_path", "")))
-
-        fake.invoke = invoke
-        self._inject_fake_skill_module(fake)
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
-            "callable",
+    def test_filter_includes_skill_manage_returns_callable(self) -> None:
+        # AC-3 (ii) live failure mode -- skill_manage assembled into the
+        # definitions list despite skills toolset being disabled.
+        self._inject_fake_upstream(
+            definitions_by_disabled={
+                ("skills",): [
+                    {"type": "function", "function": {"name": "skill_manage"}},
+                ],
+            },
         )
-        self.assertEqual(invoked, ["/cfg.yaml"])
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, ["skills"])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "skill_manage"),
+                "callable",
+            )
 
-    def test_skill_class_with_invoke_method_dispatches(self) -> None:
-        # Hermes built-in skills may expose entry as ``Skill().invoke``.
-        # The helper must instantiate Skill() and dispatch on the bound
-        # method.
-        fake = types.ModuleType(self.MODULE_KEY)
-
-        class FakeSkill:
-            invoked: list[str] = []
-
-            def invoke(self, **kwargs: object) -> None:
-                FakeSkill.invoked.append(str(kwargs.get("config_path", "")))
-
-        fake.Skill = FakeSkill
-        self._inject_fake_skill_module(fake)
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
-            "callable",
+    def test_no_disabled_toolsets_passes_empty_list(self) -> None:
+        # When agent.disabled_toolsets is absent (e.g., orchestrator role
+        # which uses delegation), the helper passes an empty list to
+        # get_tool_definitions; the filter does NOT exclude delegate_task,
+        # and the helper returns "callable". The orchestrator-role
+        # caller-injection at the check_runtime layer guards against
+        # raising on this branch -- AC-3 (i) only enforces the invariant
+        # for non-orchestrator roles whose delegation toolset MUST be
+        # disabled.
+        self._inject_fake_upstream(
+            definitions_by_disabled={
+                (): [
+                    {"type": "function", "function": {"name": "delegate_task"}},
+                    {"type": "function", "function": {"name": "skill_manage"}},
+                ],
+            },
         )
-        self.assertEqual(FakeSkill.invoked, ["/cfg.yaml"])
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            self._write_config_with_disabled_toolsets(cfg, [])
+            self.assertEqual(
+                _attempt_hermes_filter_assertion(cfg, "delegate_task"),
+                "callable",
+            )
+        self.assertEqual(self._captured_disabled_toolsets, [[]])
 
-    def test_main_module_attribute_is_dispatched(self) -> None:
-        # Skills that expose ``main`` instead of ``invoke`` are still
-        # recognised by the entry-point resolver.
-        fake = types.ModuleType(self.MODULE_KEY)
-        invoked: list[str] = []
+    def test_inspect_signature_rejects_config_path_kwarg(self) -> None:
+        # AC-4 (d) probe-shape verification. Per TKT-033 v0.3.0 § 8
+        # Amendment notes recon at tools/delegate_tool.py:1812 and
+        # tools/skill_manager_tool.py:692-708, neither upstream signature
+        # accepts config_path=. The fake-upstream stubs mirror that shape;
+        # this test asserts it via inspect.signature.
+        #
+        # The runtime-check helper does NOT pass config_path= to either
+        # upstream callable (it uses the filter-based round-trip rather
+        # than direct invoke). This test documents that the iter-2
+        # broad-catch helper, which DID pass config_path=, would have
+        # raised TypeError at the upstream call boundary -- which the
+        # iter-2 ``except BaseException`` would have silently swallowed
+        # as "gated", not catching a gating exception (Reviewer Finding 2).
+        self._inject_fake_upstream()
+        import tools.delegate_tool  # type: ignore[import-not-found]
+        import tools.skill_manager_tool  # type: ignore[import-not-found]
 
-        def main(**kwargs: object) -> None:
-            invoked.append(str(kwargs.get("config_path", "")))
-
-        fake.main = main
-        self._inject_fake_skill_module(fake)
-        self.assertEqual(
-            _attempt_hermes_skill_round_trip("/cfg.yaml", self.SKILL_NAME),
-            "callable",
-        )
-        self.assertEqual(invoked, ["/cfg.yaml"])
+        delegate_params = inspect.signature(
+            tools.delegate_tool.delegate_task
+        ).parameters
+        skill_params = inspect.signature(
+            tools.skill_manager_tool.skill_manage
+        ).parameters
+        self.assertNotIn("config_path", delegate_params)
+        self.assertNotIn("config_path", skill_params)
+        # Confirm the stubs DO carry the documented v2026.4.30 parameter
+        # surface (positive shape assertion, not just the negative one):
+        self.assertIn("goal", delegate_params)
+        self.assertIn("toolsets", delegate_params)
+        self.assertIn("action", skill_params)
+        self.assertIn("name", skill_params)
 
 
 class TestCallerInjectionFallback(unittest.TestCase):

@@ -37,12 +37,11 @@ new invariants alongside.
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import sqlite3
 import sys
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping
 
 _ALLOWED_ROLES = frozenset({"orchestrator", "planner", "architect", "executor", "reviewer"})
 
@@ -276,101 +275,161 @@ def _read_system_prompt_path(config_path: str) -> str:
     return ""
 
 
-def _resolve_hermes_skill_entry_point(skill_module: Any) -> Callable[..., Any] | None:
-    """Resolve the public callable entry point of a Hermes built-in skill module.
+def _parse_disabled_toolsets(config_path: str) -> list[str]:
+    """Return the runtime's ``agent.disabled_toolsets`` list (or empty).
 
-    Hermes built-in skills expose their entry point as a module-level callable
-    named ``invoke`` or ``main``, or via a ``Skill`` class whose instance
-    exposes an ``invoke`` method. Returns the resolved callable, or ``None``
-    if no recognisable shape is present.
+    Mirrors the simple line-by-line shape of :func:`_read_config_skills` /
+    :func:`_read_system_prompt_path`. The schema pinned in
+    ``MULTI-HERMES-CONTRACT.md`` § 5.1 is:
+
+        agent:
+          disabled_toolsets:
+          - delegation
+          - skills
+
+    The list partitions per-runtime tool surfaces: orchestrator role does
+    not list ``delegation``; non-orchestrator roles list ``delegation``;
+    every role lists ``skills`` (per ``HERMES-SKILL-ALLOWLIST.md`` v0.1.2).
+    Returns ``[]`` if the file is absent or the section is missing.
     """
-    for attr in ("invoke", "main"):
-        candidate = getattr(skill_module, attr, None)
-        if callable(candidate):
-            return candidate
-    skill_class = getattr(skill_module, "Skill", None)
-    if skill_class is None:
-        return None
-    try:
-        instance = skill_class()
-    except BaseException:
-        return None
-    method = getattr(instance, "invoke", None)
-    if callable(method):
-        return method
-    return None
+    if not os.path.exists(config_path):
+        return []
+    with open(config_path, encoding="utf-8") as fh:
+        content = fh.read()
+    in_agent_block = False
+    in_disabled_list = False
+    result: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        # Top-level section header (no leading whitespace, ends with ':').
+        if line and not line.startswith((" ", "\t")) and stripped.endswith(":"):
+            in_agent_block = stripped == "agent:"
+            in_disabled_list = False
+            continue
+        if not in_agent_block:
+            continue
+        if stripped == "disabled_toolsets:":
+            in_disabled_list = True
+            continue
+        if in_disabled_list:
+            if stripped.startswith("- "):
+                value = stripped[2:].strip().strip('"').strip("'")
+                if value:
+                    result.append(value)
+                continue
+            # Any non-list-item line under agent: terminates the list section.
+            if stripped:
+                in_disabled_list = False
+    return result
 
 
-def _attempt_hermes_skill_round_trip(config_path: str, skill_name: str) -> str:
-    """Attempt an in-process invocation of a Hermes built-in skill module.
+def _attempt_hermes_filter_assertion(config_path: str, tool_name: str) -> str:
+    """Round-trip Hermes' definitions-time filter for a tool name.
 
-    Per TKT-033 § 1 component B(i)/(ii) the AC-3 round-trip must be an actual
-    call attempt against the same Hermes runtime that would otherwise execute
-    the skill, not a config-level introspection of ``skills.<name>.enabled``
-    or ``plugins.disabled``. The systemd unit's ``Environment=PYTHONPATH=
-    /srv/devassist/repo/src`` brings the upstream ``hermes`` Python package
-    onto ``sys.path`` so this helper can import the built-in skill module
-    in-process and dispatch on it directly.
+    Per TKT-033 v0.3.0 § 1 component B(i)/(ii) and § 4 AC-3 (i)/(ii), the
+    actual gating mechanism in ``hermes-agent`` v2026.4.30 (commit
+    ``73bf3ab1b22314ed9dfecbb59242c03742fe72af``) is a definitions-time
+    filter implemented in
+    ``model_tools.get_tool_definitions(enabled_toolsets, disabled_toolsets,
+    quiet_mode)`` (``model_tools.py:271-321``). When ``disabled_toolsets``
+    includes a toolset name, ``_compute_tool_definitions`` calls
+    ``tools_to_include.difference_update(resolved)`` for that toolset's
+    tool name set; tools filtered at this layer cannot be assembled into
+    the model's tool list and therefore cannot be invoked. The filter is
+    upstream of dispatch (``tools/registry.py:347-364``) -- there is no
+    typed gating-exception layer between the registry's ``get_entry()``
+    and the handler call (verified in TKT-033 v0.3.0 § 8 Amendment notes
+    recon evidence).
 
-    Returns ``"gated"`` when any of the following holds (the call did NOT
-    succeed end-to-end, which is the AC-3 pass condition):
-      * ``importlib.import_module("hermes.skills.<skill_name>")`` raises
-        ``ImportError`` -- the module is not present on this interpreter's
-        ``sys.path``, so the skill cannot be invoked through this Python.
-      * The imported module exposes no recognisable callable entry point
-        (``invoke`` / ``main`` / ``Skill().invoke``); there is no surface
-        on which to dispatch.
-      * The invocation attempt raises any ``BaseException`` (Hermes' own
-        gating exception class, ``TypeError`` on argument-shape mismatch,
-        ``RuntimeError`` from a config validator, etc.); the call raised
-        instead of returning.
+    This helper round-trips the filter against the runtime's actual
+    ``config.yaml``-driven ``agent.disabled_toolsets``:
 
-    Returns ``"callable"`` only when the invocation completes without raising
-    -- the live failure mode AC-3 catches (the runtime ran the gated skill
-    end-to-end despite ``config.yaml`` asserting it should be disabled).
+      1. Imports ``tools.registry`` (the singleton at
+         ``tools/registry.py:491``).
+      2. Imports ``tools.delegate_tool`` and ``tools.skill_manager_tool``;
+         each module's import-time
+         ``registry.register(name=<tool_name>, toolset=<toolset_name>, ...)``
+         call (``tools/delegate_tool.py:2514`` and
+         ``tools/skill_manager_tool.py:864``) populates the singleton.
+      3. Imports ``model_tools``.
+      4. Parses ``agent.disabled_toolsets`` from ``config_path`` via
+         :func:`_parse_disabled_toolsets`.
+      5. Calls
+         ``model_tools.get_tool_definitions(disabled_toolsets=...,
+         quiet_mode=True)`` and inspects the assembled tool list.
 
-    Tests exercise this helper by injecting a fake module into
-    ``sys.modules['hermes.skills.<skill_name>']``; the production callers
-    forward to this helper unchanged.
+    Returns ``"gated"`` when ``tool_name`` is absent from the assembled
+    definitions (the filter correctly excluded the tool -- AC-3 pass
+    branch). Returns ``"callable"`` when ``tool_name`` is present despite
+    the disabled-toolsets list (the live failure mode AC-3 catches; this
+    surfaces as :class:`DelegateTaskCallableError` /
+    :class:`SkillManageCallableError` at the :func:`check_runtime` layer
+    when the runtime's role disables the corresponding toolset).
+
+    The helper does NOT invoke the upstream handler. The ``config_path``
+    argument is the runtime's ``config.yaml`` path (input to YAML parsing
+    for the ``disabled_toolsets`` list); it is NOT forwarded to upstream
+    tools. Per TKT-033 v0.3.0 § 8 Amendment notes recon, neither
+    ``delegate_task`` (``tools/delegate_tool.py:1812``) nor ``skill_manage``
+    (``tools/skill_manager_tool.py:692-708``) accepts a ``config_path=``
+    keyword at v2026.4.30; passing one would be a ``TypeError`` (which is
+    NOT what this helper claims to detect). The probe-arg shape is
+    asserted in the AC-4 (d) test surface via ``inspect.signature``.
+
+    On ``ImportError`` (the upstream ``hermes-agent`` package is not on
+    ``sys.path`` -- e.g., on the offline Devin VM or in a
+    minimal-dependency CI image), returns ``"gated"``: a tool whose module
+    cannot be imported cannot be invoked, which is indistinguishable from
+    the gating-by-absence-of-import that Hermes' own definitions-time
+    filter would produce.
+
+    No broad-catch. The only catch is ``ImportError`` covering the four
+    upstream module imports; the filter assertion itself is a positive
+    membership check on the returned definition list. Tests inject fake
+    ``tools.*`` and ``model_tools`` modules into ``sys.modules`` to
+    exercise each branch deterministically without requiring the upstream
+    ``hermes-agent`` package to be installed.
     """
     try:
-        skill_module = importlib.import_module(
-            "hermes.skills.{n}".format(n=skill_name)
-        )
+        import tools.registry  # noqa: F401  -- side-effect: provides singleton
+        import tools.delegate_tool  # noqa: F401  -- registers delegate_task
+        import tools.skill_manager_tool  # noqa: F401  -- registers skill_manage
+        import model_tools
     except ImportError:
         return "gated"
-    invoke = _resolve_hermes_skill_entry_point(skill_module)
-    if invoke is None:
-        return "gated"
-    try:
-        invoke(config_path=config_path)
-    except BaseException:
-        return "gated"
-    return "callable"
+    disabled_toolsets = _parse_disabled_toolsets(config_path)
+    definitions = model_tools.get_tool_definitions(
+        disabled_toolsets=disabled_toolsets, quiet_mode=True
+    )
+    for definition in definitions:
+        if not isinstance(definition, dict):
+            continue
+        function = definition.get("function")
+        if isinstance(function, dict) and function.get("name") == tool_name:
+            return "callable"
+    return "gated"
 
 
 def _default_delegate_task_caller(config_path: str) -> str:
-    """Production round-trip for the ``delegate_task`` invariant (AC-3 (i)).
+    """Production filter-assertion for the ``delegate_task`` invariant (AC-3 (i)).
 
-    Forwards to :func:`_attempt_hermes_skill_round_trip` against the
-    upstream Hermes built-in module ``hermes.skills.delegate_task``. Returns
-    ``"gated"`` when the actual in-process invocation attempt fails (import
-    error, missing entry point, or any raised exception during invoke);
-    returns ``"callable"`` only when the invocation completes without
-    raising. Tests inject a callable via the ``delegate_task_caller``
-    parameter of :func:`check_runtime` to bypass this default.
+    Forwards to :func:`_attempt_hermes_filter_assertion` with
+    ``tool_name="delegate_task"``. Tests bypass this default by injecting a
+    callable via the ``delegate_task_caller`` parameter of
+    :func:`check_runtime` (caller-injection mechanism preserved from
+    iter-2 -- see ``TestCallerInjectionFallback``).
     """
-    return _attempt_hermes_skill_round_trip(config_path, "delegate_task")
+    return _attempt_hermes_filter_assertion(config_path, "delegate_task")
 
 
 def _default_skill_manage_caller(config_path: str) -> str:
-    """Production round-trip for the ``skill_manage`` invariant (AC-3 (ii)).
+    """Production filter-assertion for the ``skill_manage`` invariant (AC-3 (ii)).
 
     Same shape as :func:`_default_delegate_task_caller`; forwards to
-    :func:`_attempt_hermes_skill_round_trip` against
-    ``hermes.skills.skill_manage``.
+    :func:`_attempt_hermes_filter_assertion` with
+    ``tool_name="skill_manage"``.
     """
-    return _attempt_hermes_skill_round_trip(config_path, "skill_manage")
+    return _attempt_hermes_filter_assertion(config_path, "skill_manage")
 
 
 def _compute_prompt_sha(path: str) -> str:
@@ -414,7 +473,8 @@ def check_runtime(
         exercise other invariants without the prompt fixture.
     delegate_task_caller, skill_manage_caller
         Test injection points for the AC-3 (i)/(ii) round-trip; default
-        callers verify the rendered config asserts gating
+        callers forward to :func:`_attempt_hermes_filter_assertion` against
+        Hermes' definitions-time filter
         (see :func:`_default_delegate_task_caller`).
     """
     if not role:
