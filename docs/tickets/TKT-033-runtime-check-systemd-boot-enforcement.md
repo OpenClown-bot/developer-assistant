@@ -843,6 +843,141 @@ If RV-CODE-033 iter-2 (Reviewer cycle dispatched by SO after iter-4 ratify-ack) 
 
 **No `Q-TKT-033-NN.md` filed.** Iter-4 implements directly against the v0.3.0 amendment with all ACs passing; no spec-vs-runtime mismatch surfaced. The § 9 hand-back to SO via Founder paste-relay carries the AC verdict matrix, test count baseline, hard rules ack, file diff scope, and surface flags above.
 
+### Iter-5 — Executor (Devin, fresh account, fresh session, role Executor)
+
+- **Date / branch / head SHA-at-cut:** 2026-05-09 / `exe/tkt-033-runtime-check-enforcement` / branched from iter-4 HEAD `3e11ff0f217c2c4eaf78e0288a7ac9f68291c864` (last iter-4 commit: `TKT-033 iter-4: append section 10 Execution Log entry`).
+- **Bootstrap:** Reviewer iter-3 verify (RV-CODE-033 head `259f3f8`, branch `rv/rv-code-033`) flagged Finding 8.2.1 (severity: major / disposition: must-fix) — iter-4's check_runtime() ran the `delegate_task_callable` and `skill_manage_callable` invariant assertions unconditionally for all five roles, but spec § 1 B(i) scopes (i) to **non-orchestrator roles only** and B(ii) scopes (ii) to **roles whose `agent.disabled_toolsets` lists `"skills"`**. SO ratified the finding as a must-fix and dispatched iter-5 via Founder paste-relay with the binding fix-scope NUDGE; iter-5 implements the two role/config gating guards in `check_runtime()` plus paired tests + § 10 entry.
+- **Disposition:** Path A (direct fix). The iter-4 helper `_attempt_hermes_filter_assertion` (`runtime_check.py:326-410`) is correct and untouched at iter-5; only its **integration into `check_runtime()`** is being fixed. The fix is two ~3-line guard wrappers around the existing iter-4 invariant-assertion blocks, mirroring the existing precedent at `runtime_check.py:499-503` (`non_orchestrator_telegram_skill_loaded` is already role-gated by an `if role != "orchestrator" and "telegram-gateway" in built_in:` guard).
+
+#### AC-3 (i) — role-gating for `delegate_task_callable` (spec § 1 B(i))
+
+The iter-4 unconditional shape:
+
+```python
+delegate_caller = (delegate_task_caller if delegate_task_caller is not None else _default_delegate_task_caller)
+if delegate_caller(config_path) != "gated":
+    _emit_marker(role, INVARIANT_DELEGATE_TASK_CALLABLE)
+    raise DelegateTaskCallableError(...)
+```
+
+is wrapped in `if role != "orchestrator":`. Rationale (per `MULTI-HERMES-CONTRACT.md` § 5.1): orchestrator's runtime config does **not** list `"delegation"` in `agent.disabled_toolsets` — orchestrator blocks `delegate_task` by **not loading** the upstream tool module as a built-in skill (orchestrator's `skills.built_in` is `[telegram-gateway, cronjob, memory]`, not `[delegate_task]`). When iter-4's helper runs against an orchestrator config, `model_tools.get_tool_definitions(disabled_toolsets=[])` returns the full upstream tool list **including `delegate_task`** — so the helper correctly returns `"callable"`. Iter-4 then incorrectly raised `DelegateTaskCallableError` for orchestrator. The role-gating guard short-circuits the check at the `check_runtime` layer, mirroring the precedent for `non_orchestrator_telegram_skill_loaded`.
+
+#### AC-3 (ii) — config-driven gating for `skill_manage_callable` (spec § 1 B(ii))
+
+The iter-4 unconditional shape is wrapped in `if "skills" in disabled_toolsets:` where `disabled_toolsets = _parse_disabled_toolsets(config_path)`. Rationale (per spec § 1 B(ii) verbatim): "AC-3 (ii) applies only to roles whose `agent.disabled_toolsets` includes `"skills"`". The two B(i)/(ii) gating shapes are intentionally **not symmetric** — (i) is role-gated (orchestrator never asserts), (ii) is config-gated (any role whose config lacks `"skills"` in `disabled_toolsets` skips). The `_parse_disabled_toolsets` helper at `runtime_check.py:278-323` was already added in iter-4 (used by `_attempt_hermes_filter_assertion`); iter-5 reuses it without modification.
+
+#### Files changed (iter-5 delta)
+
+**iter-5 commits (atop iter-4 HEAD `3e11ff0`):**
+
+1. **Implementation commit `4599884`** — `TKT-033 iter-5: add role-gating guard for delegate_task_callable + config-driven gating for skill_manage_callable`. One file changed: `src/developer_assistant/runtime_check.py` — wraps `delegate_caller(config_path) != "gated"` block in `if role != "orchestrator":` guard at lines 573-585; wraps `skill_caller(config_path) != "gated"` block in `if "skills" in disabled_toolsets:` guard at lines 587-600 with `disabled_toolsets = _parse_disabled_toolsets(config_path)` declaration. Net diff: `+25 / -22` lines. 11-name `RUNTIME_CHECK_INVARIANTS` enum, 11 invariant constants, 10 raise-side exception classes, `RUNTIME_CHECK_ABORT_EXIT_CODE = 78`, `_emit_marker` body, `_attempt_hermes_filter_assertion` helper, `_default_delegate_task_caller` body, `_default_skill_manage_caller` body, `_read_config_skills`, `_check_operational_db_symlink`, `_read_system_prompt_path`, `_compute_prompt_sha`, `_main_cli`, the iter-2 caller-injection `is not None` guard pattern — all preserved byte-for-byte.
+
+2. **Test commit `a37b66c`** — `TKT-033 iter-5: add paired tests (test_orchestrator_role_skips_delegate_task_check + test_no_skills_disabled_toolset_skips_skill_manage_check)`. One file changed: `tests/test_runtime_check.py` — adds new `class TestRoleAndConfigDrivenGating` after `TestCallerInjectionFallback` with the two paired tests, and extends the `_write_minimal_config` helper signature with an optional `agent_disabled_toolsets: list[str] | None = None` parameter (defaults to `["delegation", "skills"]` — the non-orchestrator-role production shape per `MULTI-HERMES-CONTRACT.md` §§ 5.2-5.5). Net diff: `+109 / -2` lines. The default-on-None makes pre-iter-5 callers production-shape (the iter-1/2/4 fixture omitted `agent.disabled_toolsets` entirely, which was a fixture defect masked by iter-4's unconditional check; iter-5's config-driven gating exposed it). All iter-1 through iter-4 test classes (`TestRoleValueError`, `TestSkillsMismatch`, `TestOperationalDbPath`, `TestSchemaVersion`, `TestTelegramBotToken`, `TestTelegramGatewayNonOrchestrator`, `TestAllRolesPass`, `TestRuntimeCheckInvariantsEnum`, `TestMarkerEmits`, `TestDelegateTaskCallable`, `TestSkillManageCallable`, `TestHermesFilterAssertionDefault`, `TestCallerInjectionFallback`, `TestPromptManifest`, `TestRuntimeCheckCli`) preserved byte-for-byte.
+
+3. **Doc commit (this entry)** — appends iter-5 § 10 entry to `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md`. iter-1 / iter-2 / iter-3 / iter-4 § 10 entries preserved verbatim; § 1 / § 2 / § 3 / § 4 / § 5 / § 6 / § 7 / § 8 / § 9 / § 11 / frontmatter all preserved at v0.3.0 main state.
+
+**Files NOT touched in iter-5 (within the 11-allowed set):**
+
+- `scripts/templates/devassist-{orchestrator,planner,architect,executor,reviewer}.service.j2` — preserved at iter-1 state (no diff).
+- `scripts/install-self.sh` — preserved at iter-1 state (no diff).
+- `scripts/verify-self.sh` — preserved at iter-1 state (no diff; cumulative iter-1+2+3+4+5: untouched).
+- `tests/test_self_deployment_scripts.py` — preserved at iter-1 state (no diff).
+- `docs/architecture/HERMES-SKILL-ALLOWLIST.md` — preserved at v0.1.2 main state (companion amendment landed in iter-4's merge from main).
+
+#### AC matrix iter-4 → iter-5 delta
+
+| AC | iter-4 | iter-5 | Evidence |
+|---|---:|---:|---|
+| AC-1 | pass | pass | iter-5 commits do not modify any of the four § 3.1 branch-cut observations on `main`; the v0.3.0 amendment landed via iter-4 merge `651c526` which is preserved. |
+| AC-2 | pass | pass | iter-5 does NOT modify any of the 5 `scripts/templates/devassist-<role>.service.j2` files; iter-1 `ExecStartPre=` + `RestartPreventExitStatus=78` + `Environment=PYTHONPATH=` directives preserved verbatim. |
+| AC-3 (i) | pass (incorrect) → flagged by RV-CODE-033 § 8.2.1 | pass (correct) | Role-gating guard `if role != "orchestrator":` at `runtime_check.py:573` short-circuits the check for orchestrator. Verified by new test `test_orchestrator_role_skips_delegate_task_check` (asserts `check_runtime` does NOT raise `DelegateTaskCallableError` for `role="orchestrator"` even when `delegate_task_caller=lambda _: "callable"`). |
+| AC-3 (ii) | pass (incorrect) → flagged by RV-CODE-033 § 8.2.1 | pass (correct) | Config-driven gating guard `if "skills" in disabled_toolsets:` at `runtime_check.py:588` short-circuits the check when the runtime config does not list `"skills"` in `agent.disabled_toolsets`. Verified by new test `test_no_skills_disabled_toolset_skips_skill_manage_check` (asserts `check_runtime` does NOT raise `SkillManageCallableError` for an executor config with `agent.disabled_toolsets: []` even when `skill_manage_caller=lambda _: "callable"`). |
+| AC-3 (iii) | pass | pass | iter-5 does NOT touch `_compute_prompt_sha`, `_read_system_prompt_path`, `PromptManifestMissingError`, or `PromptShaMismatchError`. |
+| AC-4 (a-c) | pass | pass | iter-5 does NOT modify the iter-2/iter-4 caller-injection guard pattern or the `TestDelegateTaskCallable` / `TestSkillManageCallable` test classes (still 2 tests each, byte-for-byte). |
+| AC-4 (d) | pass | pass | iter-5 does NOT modify `TestHermesFilterAssertionDefault` (still 7 tests, byte-for-byte). The new `TestRoleAndConfigDrivenGating` is a separate test class for the iter-5 integration-layer gating, not the iter-4 helper-layer assertion. |
+| AC-5 | pass | pass | iter-5 does NOT modify the 11-name enum, the 11 invariant constants, the `RUNTIME_CHECK_INVARIANTS` frozenset, any of the 10 raise-side exception classes, or the `_emit_marker` body. The `INVARIANT_DELEGATE_TASK_CALLABLE` and `INVARIANT_SKILL_MANAGE_CALLABLE` markers are still emitted at the same `_emit_marker(role, INVARIANT_*)` call sites; the only change is that the surrounding raise-block is now conditionally entered. |
+| AC-6 | pass | pass | Pre-list (iter-4 HEAD `3e11ff0`) and post-list (iter-5 HEAD on top of `3e11ff0`) `tests/test_runtime_check.py` non-passing list is identity-preserving on the 6 environmental fixtures (`test_correct_symlink_passes` + 5 sub-roles of `test_all_five_roles_pass_in_fixture_mode`); +2 net new test cases pass. See "AC-6 audit (iter-5)" below. |
+| AC-7 | pass | pass | `grep -rEn 'TELEGRAM_BOT_TOKEN=[0-9]+:|GITHUB_TOKEN=ghp_|FIREWORKS_API_KEY=fw-|OPENROUTER_API_KEY=sk-|omniroute\.openclown|srv\.openclown\.com'` against the 3 modified files returned zero matches. |
+| AC-8 | pass | pass | Two-PR pipeline preserved: PR #128 remains the Executor implementation PR; iter-5 lands as 3 new commits on top of `3e11ff0` on the existing branch, no force-push, no amend. PR #129 (Reviewer artefact) untouched. No merge performed. |
+
+#### AC-6 audit (iter-5)
+
+**iter-5 pre-baseline (= iter-4 post-impl HEAD `3e11ff0`, captured BEFORE iter-5 edits, on the iter-5 fresh-account Devin VM):**
+
+```
+tests/test_runtime_check.py: 51 tests; 6 failed (1 + 5 sub-roles); 45 passed
+```
+
+The 6 pre-existing failures are environmental (production-only `/srv/devassist/state/operational.db` symlink-target check; the test fixture writes to a tempdir and so the check raises `OperationalDbPathError`). All 6 pre-date iter-5; carried from iter-1.
+
+**iter-5 post-implementation (after the impl + test commits, same Devin VM):**
+
+```
+tests/test_runtime_check.py: 53 tests; 6 failed (1 + 5 sub-roles); 47 passed (+2 new)
+```
+
+`<count_after_iter5> = 53` (was 51); +2 net new test cases (`test_orchestrator_role_skips_delegate_task_check` + `test_no_skills_disabled_toolset_skips_skill_manage_check`), both pass. The 6 environmental failures are bit-identical with iter-4 baseline; no failure introduced, none silenced. The four iter-1/iter-2 caller-injection tests that **briefly** failed between commit `4599884` and commit `a37b66c` (`TestSkillManageCallable::test_callable_raises_with_marker`, `TestCallerInjectionFallback::test_falsy_callable_skill_manage_caller_is_invoked`) are restored to passing by the `_write_minimal_config` fixture update in commit `a37b66c` (the iter-1 fixture omitted `agent.disabled_toolsets`; iter-5's config-driven gating exposed that defect, which the fixture update fixes). Final HEAD shows zero new failures vs. iter-4 baseline.
+
+**AC-6 audit (iter-5):** zero failures/errors/skips silenced; +2 new test cases added (intentional, per § 4 fix scope); zero existing tests removed; zero baseline failures regressed.
+
+#### AC-7 — secrets / production-hostname grep (iter-5 modified files)
+
+```sh
+git diff 3e11ff0..HEAD | rg -E '(ghp_|gho_|github_pat_|sk-[a-zA-Z0-9]{20,}|fw-[a-zA-Z0-9]{20,}|or-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|telegram\.org/bot[0-9]+:)'
+# (zero matches)
+```
+
+The bare identifier strings `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `FIREWORKS_API_KEY` etc. that appear in this iter-5 § 10 entry are documentation references (no `=value` suffix, no real token content). The `"abcdef123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"` literal in `test_orchestrator_role_skips_delegate_task_check` is a synthetic fixture string matching the `<digits>:<base64>` shape required by `_check_telegram_bot_token` to bypass the orchestrator empty-token check; it is not a real Telegram bot token (real tokens start with much larger numeric prefixes per `api.telegram.org`).
+
+#### Sanity — invariant identity preserved
+
+```sh
+git diff 3e11ff0..HEAD -- src/developer_assistant/runtime_check.py | grep -E '^[+-].*RUNTIME_CHECK_INVARIANTS|^[+-].*INVARIANT_'
+# (zero ± lines on enum names; only context lines)
+
+git diff 3e11ff0..HEAD -- src/developer_assistant/runtime_check.py | grep -E '^[+-]class .*Error\(.*\):'
+# (zero ± lines; all 10 raise-side classes byte-for-byte preserved)
+
+git diff 3e11ff0..HEAD -- src/developer_assistant/runtime_check.py | grep -E 'RUNTIME_CHECK_ABORT_EXIT_CODE'
+# (zero matches; exit code 78 untouched)
+```
+
+#### Validation results (iter-5 final HEAD)
+
+- `python3 scripts/validate_docs.py` → `Docs validation passed.` (run on iter-5 final HEAD before `git push`).
+- `ruff check src/developer_assistant/runtime_check.py tests/test_runtime_check.py` → `All checks passed!`.
+- `mypy src/developer_assistant/runtime_check.py` → 6 errors, all pre-existing (`tools.registry`, `tools.delegate_tool`, `tools.skill_manager_tool`, `model_tools` import-not-found errors at lines 394-397; carried from iter-4's `_attempt_hermes_filter_assertion` import block; `hermes-agent` is not installed in the offline Devin VM so these conditional imports are caught by `except ImportError` at runtime, but mypy cannot resolve them statically). **Confirmed pre-existing** by checking out `3e11ff0` and running mypy on that commit's `runtime_check.py` (same 6 errors; identity-preserving).
+- `python3 -m pytest tests/test_runtime_check.py` → `53 tests; 6 failed (environmental, pre-existing); 47 passed (+2 new)`.
+- `python3 -m pytest tests/` → +2 net new tests vs. iter-4 baseline; no new failures introduced.
+
+#### Hard rules ack (iter-5; NUDGE § 8, 17 items)
+
+1. **Cross-acct discipline.** iter-5 ran on a fresh-account Devin VM. The git commit author email matches the same identity used for iter-3/iter-4 in this repo's history (per the user's explicit instruction: "токен у тебя в секретах есть, этот момент можешь скипнуть и сразу работать"); the user authorized skipping the 6-point ack template. Cross-acct discipline at the git-author level is acknowledged as a soft constraint by the user for this iter-5 cycle only; if SO finds it unacceptable, iter-6 redo on a strictly distinct acct is a single-cycle follow-up.
+2. **Implementation write zones.** Only the 3 allowed files touched in iter-5: `src/developer_assistant/runtime_check.py`, `tests/test_runtime_check.py`, `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` (§ 10 append only).
+3. **Spec immutability.** TKT-033 §§ 1–9 + frontmatter on `main` are FROZEN; iter-5 only appended this § 10 entry. No edit to v0.3.0 wording.
+4. **11-name `RUNTIME_CHECK_INVARIANTS` enum: BYTE-FOR-BYTE preserved.** Sanity grep above returns zero ± lines.
+5. **10 raise-side classes: BYTE-FOR-BYTE preserved.** Sanity grep above returns zero ± lines.
+6. **Exit code 78 + `RestartPreventExitStatus=78`: BYTE-FOR-BYTE preserved.** Sanity grep above returns zero matches; templates untouched.
+7. **`_attempt_hermes_filter_assertion` helper (lines 326-410): DO NOT modify.** Untouched at iter-5; only its **integration into `check_runtime`** is fixed (the two guard wrappers).
+8. **§ 10 cumulative-append.** This iter-5 entry is appended **after** iter-4 entry; iter-1 / iter-2 / iter-3 / iter-4 entries preserved verbatim (no edit, no delete, no reorder).
+9. **No merge.** iter-5 did not merge any branch. `main` is already at `78d1e42` in this branch via iter-4 commit `651c526`; no new merge needed.
+10. **No force-push.** iter-5 push will be a fast-forward (3 new commits atop `3e11ff0`); plain `git push` only.
+11. **No skip git hooks.** All 3 iter-5 commits ran through pre-commit hooks normally; no `--no-verify`, no `--no-gpg-sign`. (Repo currently has no pre-commit hook config; if one is added later, iter-5 commits will pass it because they did not bypass anything.)
+12. **No amend.** No `git commit --amend` invocation in iter-5. New commits added on top of prior history.
+13. **No `sudo git`. No `git config` mutation.** All git commands ran as the unprivileged Devin user; no `sudo`, no `git config user.*`, no `git config --global`, no `git config core.hooksPath`. The pre-existing repo / global git config was not touched. (Note: a `git config` invocation was attempted early in the session to verify identity; it was blocked by the runtime guardrails and not executed.)
+14. **No `git add .`.** All 3 commits used explicit-path `git add`: `git add src/developer_assistant/runtime_check.py` for the impl commit; `git add tests/test_runtime_check.py` for the test commit; `git add docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` for this doc commit. No bulk staging.
+15. **No commit of secret-bearing files.** AC-7 secret grep ran on the 3 modified files before each commit → 0 real-credential hits. The synthetic Telegram-token-shape literal in the iter-5 test fixture is not a real credential (see AC-7 above).
+16. **No mid-session re-clone.** iter-5 used the existing local clone throughout; no `git clone` after work began.
+17. **Reviewer iter-3 verify Finding 8.2.1 is the binding fix scope.** iter-5 implements exactly the AC-3 (i) role-gating guard + AC-3 (ii) config-driven gating guard described in the NUDGE § 4 specification; no spec-vs-code dissent surfaced during implementation. Spec text on `main` (§ 1 B(i): "AC-3 (i) applies only to non-orchestrator roles" and § 1 B(ii): "AC-3 (ii) applies only to roles whose `agent.disabled_toolsets` includes `\"skills\"`") matches the NUDGE § 4 fix description verbatim.
+
+#### Surface flags
+
+None at iter-5 hand-off. All AC verdicts in the matrix above are `pass` (with carried-from-iter-1/iter-4 entries marked accordingly). The two iter-4-flagged items (AC-3 (i) `pass (incorrect)`, AC-3 (ii) `pass (incorrect)`) both lift to `pass (correct)` at iter-5 against the binding RV-CODE-033 § 8.2.1 finding. No new contract-level deviations surfaced during implementation. No `Q-TKT-033-NN.md` filed.
+
+The iter-4 § 10 entry's "iter-5 follow-up surface" speculation (real YAML parser dependency) is **not** what RV-CODE-033 iter-3 verify actually flagged; the binding finding 8.2.1 is the role/config gating gap, which is what iter-5 fixes. The line-by-line YAML parser shape in `_parse_disabled_toolsets` (iter-4 lines 278-323) is preserved at iter-5 — no real-YAML-parser swap, no new dependency. If SO later directs that swap as a separate concern, that is an iter-6 follow-up under its own ratify-ack.
+
+**No `Q-TKT-033-NN.md` filed.** iter-5 implements directly against RV-CODE-033 § 8.2.1 with all ACs passing. The § 9 hand-back to SO via Founder paste-relay carries the AC verdict matrix, test count baseline, hard rules ack, file diff scope, and surface flags above.
+
 ## 11. Cross-References
 
 - **TKT-033 v0.3.0 amendment rationale.** § 8 "Amendment notes (v0.3.0)" carries the load-bearing diagnosis (what was broken in v0.2.0), the chosen option (option (a) — filter-based round-trip alignment), the alternatives rejected, and the upstream-source-cited recon evidence (file:line at commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`).
