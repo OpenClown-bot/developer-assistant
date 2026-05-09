@@ -1,8 +1,9 @@
 ---
 id: MULTI-HERMES-CONTRACT
-version: 0.2.0
+version: 0.2.1
 status: draft
 amendments: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
+updated: 2026-05-09
 ---
 
 # Multi-Hermes Runtime Contract
@@ -87,7 +88,7 @@ The per-role loadout below is the authoritative list of Hermes built-in skills, 
 
 ### 5.0 Custom dev-assist-* skill allowlist (extends `HERMES-SKILL-ALLOWLIST.md` § 4)
 
-The 14 custom skills referenced below are project-local skills built and reviewed inside this repository (write zone: `docs/architecture/shared-skills/` for SKILL.md authorship; the runtime tree under `/srv/devassist/shared-skills/` is the install destination). Per `HERMES-SKILL-ALLOWLIST.md` § 6 ("Project-Local Plugin Policy"), `HERMES_ENABLE_PROJECT_PLUGINS` remains `false`; these custom skills are **skills**, not plugins, and ship as content inside `/srv/devassist/shared-skills/` referenced by `skills.external_dirs`.
+The 15 custom skills referenced below are project-local skills built and reviewed inside this repository (write zone: `docs/architecture/shared-skills/` for SKILL.md authorship; the runtime tree under `/srv/devassist/shared-skills/` is the install destination). Per `HERMES-SKILL-ALLOWLIST.md` § 6 ("Project-Local Plugin Policy"), `HERMES_ENABLE_PROJECT_PLUGINS` remains `false`; these custom skills are **skills**, not plugins, and ship as content inside `/srv/devassist/shared-skills/` referenced by `skills.external_dirs`.
 
 Each custom skill must satisfy the standard allowlist fields (Name, Source URL, Version/commit, Purpose, Required credentials, Permission scope, Source review result, Sandbox mode, Dangerous operations, Rollback procedure). Until `HERMES-SKILL-ALLOWLIST.md` is updated to include each of these (TKT-021 follow-up), this contract serves as the authoritative stub:
 
