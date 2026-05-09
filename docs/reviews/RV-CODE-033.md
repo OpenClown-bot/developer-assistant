@@ -1,11 +1,11 @@
 ---
 id: RV-CODE-033
-version: 0.2.0
-status: review_pending
-ticket_ref: TKT-033@0.2.0
+version: 0.3.0
+status: review_complete
+ticket_ref: TKT-033@0.3.0
 pr_ref: OpenClown-bot/developer-assistant#128
-head_sha: c1949f3b28ddbf94d175a6554b75bedc72907418
-verdict: pass_with_changes
+head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
+verdict: pass
 iter_history:
   - iteration: 1
     head_sha: a022a3f9ba3cc10ed456d1b16f572f92f153b8d2
@@ -13,6 +13,9 @@ iter_history:
   - iteration: 2
     head_sha: c1949f3b28ddbf94d175a6554b75bedc72907418
     verdict: pass_with_changes
+  - iteration: 3
+    head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
+    verdict: pass
 ---
 
 # RV-CODE-033: Review of PR #128 — TKT-033 runtime_check enforcement at systemd boot
@@ -167,3 +170,60 @@ Iter-2 needed; gaps listed above. The implementation is close, and AC-1/2/5/6/7/
 ### 7.6 Iter-2 recommendation
 
 Dispatch Executor iter-3 as an in-session continuation. Required fix: make `delegate_task_callable` and `skill_manage_callable` fail/pass on the real Hermes disabled-tool gating response, not on import absence, missing entry points, broad exception catch, or guessed keyword mismatch. Until then, PR #128 remains **pass_with_changes** rather than merge-safe.
+
+## 8. Iter-3 verification
+
+### 8.1 Iter-3 verdict
+
+**pass** — Executor iter-4 replaces the iter-2 broad-catch helper with a v0.3.0-amended filter-based round-trip that aligns with the actual Hermes `get_tool_definitions` definitions-time filter; independent 4th-pass Hermes recon at commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` confirms all 9 load-bearing upstream claims. AC-3 (i)/(ii) lift from partial to pass; AC-4 (d) `inspect.signature` probe is present and correct. No new findings; test-suite delta vs iter-3 shows zero new failures/errors on this Reviewer VM.
+
+### 8.2 Iter-3 findings
+
+Zero new findings at iter-3.
+
+### 8.3 Iter-3 AC matrix delta (iter-2 → iter-3)
+
+| AC | iter-2 | iter-3 | Evidence |
+|---|---|---|---|
+| AC-1 | pass | pass | Branch-cut observations unchanged; iter-4 delta does not touch service templates. |
+| AC-2 | pass | pass | `git diff 90efb29..3e11ff0 -- scripts/templates/` is empty; `RestartPreventExitStatus=78` preserved. |
+| AC-3 (i) | partial | pass | `_attempt_hermes_filter_assertion` at `runtime_check.py:326-409` implements the v0.3.0 amended round-trip against `model_tools.get_tool_definitions(disabled_toolsets=..., quiet_mode=True)`; no broad-catch, no `config_path=` kwarg forwarded to upstream. Verified by Reviewer Hermes recon at `hermes-agent` v2026.4.30 commit `73bf3ab1`: `model_tools.py:271-321` signature + `_compute_tool_definitions:360-368` `difference_update(resolved)`; `tools/registry.py:347-364` dispatch returns JSON (no typed gating exception); `tools/delegate_tool.py:2514` register `toolset="delegation"`; `tools/delegate_tool.py:1812` signature omits `config_path=`. |
+| AC-3 (ii) | partial | pass | Same helper with `tool_name="skill_manage"`; recon confirms `tools/skill_manager_tool.py:692-702` signature omits `config_path=` and `tools/skill_manager_tool.py:864` register `toolset="skills"`. |
+| AC-3 (iii) | pass | pass | Prompt-manifest path / SHA-256 check unchanged at iter-4; `TestPromptManifest` present. |
+| AC-4 (a) | partial | pass | `TestHermesFilterAssertionDefault` has 7 cases at `test_runtime_check.py:746-1062` (including offline `ImportError` branch, gated/callable branches for both tools, empty disabled-toolsets orchestrator path, and AC-4 (d) probe). |
+| AC-4 (b) | pass | pass | Unit-template tests unchanged at iter-4 (`test_self_deployment_scripts.py` untouched). |
+| AC-4 (c) | pass | pass | 10 raise-side classes and `_emit_marker` byte-for-byte preserved from iter-1 (`a022a3f` → `3e11ff0`). |
+| AC-4 (d) | n/a | pass | `test_inspect_signature_rejects_config_path_kwarg` at `test_runtime_check.py:1031` introspects upstream-shape stubs via `inspect.signature`, asserts absence of `config_path=` and presence of canonical upstream parameters (`goal`, `toolsets`, `action`, `name`). |
+| AC-5 | pass | pass | 11-name `RUNTIME_CHECK_INVARIANTS` enum + abort exit code 78 + `_emit_marker` body byte-for-byte preserved. |
+| AC-6 | pass | pass | iter-3 HEAD = 50 tests / 1F+1E+5skipped (environmental Windows pre-existing); iter-4 HEAD = 51 tests / same 1F+1E+5skipped; net +1 test, zero new failures/errors. |
+| AC-7 | pass | pass | Secret grep on 3 modified files = 0 real-credential matches. |
+| AC-8 | pass | pass | Two-PR pipeline preserved; this review commit appends to existing `rv/rv-code-033`. |
+
+### 8.4 SO-surfaced flags triage
+
+| Flag | Reviewer triage | Rationale |
+|---|---|---|
+| Sonnet 4.5 substitution disclosed in Executor 6-point ack | informational | Does not affect review independence or code correctness. |
+| "fresh Devin account" framing imprecise (same iter-3 Executor acct, new session) | informational | Clerical NUDGE wording; not a substantive audit concern. |
+| PR-Agent comments at iter-4 HEAD inaccessible | informational | `gh` REST API returned 401 with the PAT available in this session (git credential manager PAT works for HTTPS clone/fetch but not for `gh api` / REST). All substantive review performed via direct `git diff` / `git show` inspection of iter-4 delta; no PR-Agent actionable findings were surfaced through other channels. |
+
+### 8.5 Iter-3 hard rules check
+
+- [x] Reviewer write zone respected: this iter-3 commit modifies only `docs/reviews/RV-CODE-033.md`.
+- [x] Implementation PR branch `exe/tkt-033-runtime-check-enforcement` was read only; no push or edit was made to it.
+- [x] No code in `src/`, `tests/`, `scripts/`, `docs/architecture/`, `docs/architecture/adr/`, `docs/tickets/§§1-9`, `docs/prompts/`, or `docs/prd/` was modified by the Reviewer.
+- [x] Iter-1 + iter-2 review entries in `docs/reviews/RV-CODE-033.md` (§§ 1–7) were NOT modified by this iter-3 commit.
+- [x] No merge was performed or enabled.
+- [x] No force-push to `main`.
+- [x] No skip git hooks.
+- [x] No amend.
+- [x] No `sudo git`; no git config mutation.
+- [x] No `git add .`; staging explicit-path only.
+- [x] No commit of secrets (pre-commit secret grep clean on own commit content).
+- [x] No mid-session re-clone after iter-3 review work was started on `rv/rv-code-033`.
+- [x] Independent Hermes recon (4th pass) executed at upstream commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`; 9 load-bearing claims verified at file:line.
+- [ ] PR-Agent triage at iter-4 HEAD was inspected via `gh pr view 128 --comments` + `gh api .../pulls/128/comments` — **BLOCKED**: GitHub REST API auth gap (PAT from git credential manager valid for HTTPS fetch but rejected by REST API with 401). Flagged as informational in §8.4.
+
+### 8.6 Iter-3 recommendation
+
+Verdict **pass** — PR #128 is merge-safe at iter-4 HEAD. Founder may merge directly to `main`. AUDIT-001 / TKT-033 implementation cycle closes after merge.
