@@ -81,8 +81,34 @@ def _symlink_works() -> bool:
         return False
 
 
-def _write_minimal_config(path: str, built_in_skills: list[str], include_external_dirs: bool = False) -> None:
-    lines_arr = ["agent:", "  model: accounts/fireworks/models/glm-5p1", "", "skills:", "  built_in:"]
+def _write_minimal_config(
+    path: str,
+    built_in_skills: list[str],
+    include_external_dirs: bool = False,
+    agent_disabled_toolsets: list[str] | None = None,
+) -> None:
+    """Write a minimal per-runtime ``config.yaml`` fixture.
+
+    ``agent_disabled_toolsets`` mirrors the production-shape
+    ``agent.disabled_toolsets:`` list. Defaults to
+    ``["delegation", "skills"]`` -- the non-orchestrator-role shape
+    documented in ``MULTI-HERMES-CONTRACT.md`` § 5.2-5.5 -- so existing
+    callers keep their pre-iter-5 production-shape semantics under the
+    role-gating + config-driven gating in ``check_runtime`` (TKT-033 v0.3.0
+    § 1 B(i)/(ii)). Pass ``[]`` to omit the section entirely (e.g., for
+    the iter-5 ``test_no_skills_disabled_toolset_skips_skill_manage_check``
+    case which exercises the config-driven gating skip path) or pass an
+    explicit list (e.g., ``["skills"]`` for an orchestrator fixture which
+    excludes ``"delegation"`` per § 5.1).
+    """
+    if agent_disabled_toolsets is None:
+        agent_disabled_toolsets = ["delegation", "skills"]
+    lines_arr = ["agent:", "  model: accounts/fireworks/models/glm-5p1"]
+    if agent_disabled_toolsets:
+        lines_arr.append("  disabled_toolsets:")
+        for toolset in agent_disabled_toolsets:
+            lines_arr.append("  - " + toolset)
+    lines_arr.extend(["", "skills:", "  built_in:"])
     for skill in built_in_skills:
         lines_arr.append("  - " + skill)
     if include_external_dirs:
@@ -1122,6 +1148,87 @@ class TestCallerInjectionFallback(unittest.TestCase):
                 skill_manage_caller=caller,
             )
         self.assertEqual(captured, [cfg])
+
+
+class TestRoleAndConfigDrivenGating(unittest.TestCase):
+    """AC-3 (i)/(ii) iter-5: role-gating guard for ``delegate_task_callable``
+    and config-driven gating for ``skill_manage_callable`` at the
+    ``check_runtime`` integration layer (TKT-033 v0.3.0 § 1 B(i)/(ii);
+    Reviewer iter-3 verify Finding 8.2.1).
+
+    Per spec § 1 B(i), the ``delegate_task_callable`` invariant only
+    applies to non-orchestrator roles -- orchestrator's runtime config
+    does not list ``"delegation"`` in ``agent.disabled_toolsets`` (per
+    ``MULTI-HERMES-CONTRACT.md`` § 5.1; orchestrator blocks ``delegate_task``
+    by NOT loading it as a built-in skill, not via ``disabled_toolsets``)
+    and so the production filter-assertion correctly returns ``"callable"``
+    for orchestrator. The role-gating guard at ``runtime_check.py:573-585``
+    short-circuits the check for orchestrator, mirroring the precedent at
+    lines 499-503 for ``non_orchestrator_telegram_skill_loaded``.
+
+    Per spec § 1 B(ii), the ``skill_manage_callable`` invariant only
+    applies to roles whose ``agent.disabled_toolsets`` lists ``"skills"``.
+    The config-driven gating guard at ``runtime_check.py:587-600`` parses
+    ``agent.disabled_toolsets`` via ``_parse_disabled_toolsets`` and skips
+    the check when ``"skills"`` is not listed. The two B(i)/(ii) gating
+    shapes are intentionally not symmetric -- (i) is role-gated, (ii) is
+    config-gated.
+    """
+
+    def test_orchestrator_role_skips_delegate_task_check(self) -> None:
+        # Orchestrator config: ``agent.disabled_toolsets`` does NOT list
+        # ``"delegation"`` (per ``MULTI-HERMES-CONTRACT.md`` § 5.1). The
+        # production filter-assertion would correctly return ``"callable"``
+        # for ``delegate_task``; the role-gating guard at the
+        # ``check_runtime`` layer short-circuits the check before that
+        # caller is invoked. Assertion: ``check_runtime`` does NOT raise
+        # ``DelegateTaskCallableError`` even when ``delegate_task_caller``
+        # returns ``"callable"``.
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            db = os.path.join(td, "operational.db")
+            _write_minimal_config(
+                cfg,
+                ["telegram-gateway", "cronjob", "memory"],
+                include_external_dirs=True,
+                agent_disabled_toolsets=["skills"],
+            )
+            _create_operational_db(db)
+            check_runtime(
+                role="orchestrator",
+                config_path=cfg,
+                operational_db_path=db,
+                env={"TELEGRAM_BOT_TOKEN": "abcdef123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+                prompt_manifest_path="",
+                delegate_task_caller=lambda _cfg: "callable",
+                skill_manage_caller=lambda _cfg: "gated",
+            )
+
+    def test_no_skills_disabled_toolset_skips_skill_manage_check(self) -> None:
+        # Non-orchestrator config (executor role) WITHOUT ``"skills"`` in
+        # ``agent.disabled_toolsets``. Per spec § 1 B(ii), the
+        # ``skill_manage_callable`` invariant should skip on this branch.
+        # Assertion: ``check_runtime`` does NOT raise
+        # ``SkillManageCallableError`` even when ``skill_manage_caller``
+        # returns ``"callable"``.
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "config.yaml")
+            db = os.path.join(td, "operational.db")
+            _write_minimal_config(
+                cfg,
+                ["terminal", "cronjob", "memory"],
+                agent_disabled_toolsets=[],
+            )
+            _create_operational_db(db)
+            check_runtime(
+                role="executor",
+                config_path=cfg,
+                operational_db_path=db,
+                env={},
+                prompt_manifest_path="",
+                delegate_task_caller=lambda _cfg: "gated",
+                skill_manage_caller=lambda _cfg: "callable",
+            )
 
 
 class TestPromptManifest(unittest.TestCase):
