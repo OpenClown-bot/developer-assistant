@@ -16,10 +16,19 @@ Environment=HOME=/srv/devassist/runtimes/orchestrator
 Environment=HERMES_DEVASSIST_ROLE=orchestrator
 Environment=DEVASSIST_HEALTH_PORT=8181
 Environment=XDG_STATE_HOME=/srv/devassist/runtimes/orchestrator/.local/state
+Environment=PYTHONPATH=/srv/devassist/repo/src
 EnvironmentFile=/srv/devassist/secrets/SELF-DEPLOY.env
+# AUDIT-001 / TKT-033: invoke runtime_check.check_runtime() blockingly before
+# the unit's ExecStart so a failed invariant aborts boot with EX_CONFIG=78
+# (developer_assistant.runtime_check.RUNTIME_CHECK_ABORT_EXIT_CODE) and emits
+# the structured RUNTIME_CHECK_FAILED:<role>:<invariant_name> marker on stderr
+# (captured by journald). RestartPreventExitStatus=78 below ensures invariant
+# aborts surface as a `failed` unit and never auto-restart.
+ExecStartPre=/usr/bin/python3 -m developer_assistant.runtime_check
 ExecStart=/usr/local/bin/devassist-orchestrator-runner
 Restart=always
 RestartSec=10s
+RestartPreventExitStatus=78
 
 NoNewPrivileges=true
 ProtectSystem=full
