@@ -384,3 +384,86 @@ No new ADR is created by this ticket. The chosen Option ψ for B.iv is the exist
 ## 10. Execution Log
 
 <!-- Executor fills below this line, iter-1 onward. The Architect spec body §§ 1–9 is frozen; edits to §§ 1–9 require a sibling Architect amendment ticket. -->
+
+### iter-1 — 2026-05-09 — Code Executor (DeepSeek V4 Pro main) — branch `exe/tkt-034-interactive-installer`
+
+**Branch cut from main HEAD**: `8bc5288f248f4b536e2a54756b1826f76cb9e316`
+**v0.2.6 session-state — TKT-034 v0.2.0 spec landed (AUDIT-002 spec cycle CLOSED) (#134)**
+
+**AC-1 diagnosis re-verify** (TKT-034 § 4 row AC-1): all 7 observations confirmed unchanged on the branch-cut HEAD:
+
+1. `grep -E 'read -p|read -s|stty|interactive|tty' scripts/install-self.sh` → 0 hits ✓ (zero interactive prompts)
+2. `grep -E 'gh auth|apt-get install gh' scripts/install-self.sh` → 0 hits ✓ (no gh CLI install/auth)
+3. `grep -E 'git config|user.name|user.email' scripts/install-self.sh` → 0 hits ✓ (no devassist git identity)
+4. `grep -E 'shared-skills|dev-assist-' scripts/install-self.sh` → only directory-creation line ✓ (no manifest renderer)
+5. `grep -E 'check_deps|prereq|verify_prereqs' scripts/install-self.sh` → only `check_deps()` ✓ (no B.viii prereq baseline)
+6. `grep -E 'detect_prior_deploy|force-reinstall|prior-deploy' scripts/install-self.sh` → 0 hits ✓ (no cleanup-detection)
+7. `grep -E 'gh auth|user.name|origin|shared-skills|stat -c|prereq' scripts/verify-self.sh` → 0 hits ✓ (no operator-hygiene invariants)
+
+No Q-TKT raised. Diagnosis matches the spec's § 4 description.
+
+**Pre-existing-on-main test failures (write-zone-blocked, deferred)**: A fresh `python3 -m unittest discover` on `8bc5288` reveals 13 pre-existing failures (1 failure + 12 errors) on frozen-surface files outside the TKT-034 § 4.2 write zone:
+
+- `src/developer_assistant/runtime_check.py` hardcodes `/srv/devassist/state/operational.db` (errors when the path is absent in CI).
+- `src/developer_assistant/model_catalog.py` raises `agent.model 'None'` (config-loading drift; ARCH-001-frozen surface).
+- `tests/test_health_endpoint.py` rejects non-localhost connections in environments without network isolation (CI VM has no isolation).
+
+Per § 4.2 these files are explicitly NOT in my write zone. Documented here for the next iter to file Q-TKT-034-01 if SO/Founder want them addressed; this iter does not touch them.
+
+**Implementation summary** (TKT-034 § 4 + § 4.1 implementation plan):
+
+- **scripts/install-self.sh** — extended from 451 → 1363 lines.
+  - Globals: SELF_DEPLOY_VERSION 0.2.0 → 0.3.0; new SHARED_SKILLS enum (15 dev-assist-* skills, MULTI-HERMES-CONTRACT § 5.0); INSTALL_PROMPT_RETRIES (default 3); INSTALL_SSH_KEY_TIMEOUT_SECONDS (default 300); INSTALL_FIXTURE_PROBES; flag-state vars.
+  - **AC-2 (operator hygiene A.i–A.iv)**: `install_gh_cli()` (apt-key gh repo + apt install + version probe ≥ 2.40.0); `authenticate_gh_for_devassist()` (`gh auth login --with-token < pat-file` via stdin, never `--token` arg); `configure_devassist_git_identity()` (sudo-as-devassist git config --global user.name/user.email/credential.helper); `render_shared_skills_manifest()` (atomic JSON manifest under /srv/devassist/state/shared-skills-manifest.json with per-skill SHA-256 + pinned commit + release_commit).
+  - **AC-3 (B.i one-command bootstrap)**: `--interactive` flag; `--non-interactive` flag; `--gh-auth=[pat|ssh]` (default pat); `--force-reinstall`; `--reprompt-secrets` (RESERVED, aborts); `--rotate-secrets` (RESERVED, aborts); `--help`. Mutual-exclusive conflict detection.
+  - **AC-4 (B.ii 11 interactive prompts)**: `prompt_visible()`, `prompt_secret()`, `abort_install()`, plus 11 specific prompt functions (telegram bot token, allowed users, founder user id, github auth path, github token, fireworks api key, omniroute base url, omniroute api key, repo url + branch, operator git user.name/email). Validators: `is_placeholder_value()`, `validate_telegram_allowed_users()`, `validate_telegram_user_id()`, `validate_repo_url()`, `validate_omniroute_base_url()`. INSTALL_PROMPT_RETRIES default 3; abort_install names env-var only (never the rejected value).
+  - **AC-5 (B.iii TTY detection)**: `detect_install_mode()` precedence: explicit CLI flag > INSTALL_NONINTERACTIVE env > `[ -t 0 ] && [ -t 1 ]` > default non-interactive.
+  - **AC-6 (B.iv credential storage)**: secrets dir 0710 root:devassist (chown skipped in DRY_RUN); env file 0400 devassist:devassist on real install (chmod 0600 in DRY_RUN; verify-self accepts both in fixture); pre-write check for empty/placeholder env vars on a re-run.
+  - **AC-7 (B.v re-run idempotency)**: `prompt_phase_idempotent_skip()` returns 0 when env file exists + all required vars non-empty + non-placeholder; `--reprompt-secrets` aborts with "RESERVED; not implemented in v0.2.0".
+  - **AC-9 (B.vii cleanup detection)**: `detect_prior_deploy()` returns 0 if /srv/devassist exists OR devassist user exists OR devassist.target exists OR any devassist-*.service exists; `--force-reinstall` skips detection; combining `--force-reinstall` + `--rotate-secrets` aborts.
+  - **AC-10 (B.viii VPS prereq verification)**: `verify_prereqs()` runs 8 checks — OS (Ubuntu 22.04), sudo (uid=0), network (curl https://api.github.com), disk (df ≥ 5_000_000 KB on /srv), required CLIs (full B.viii enumeration), Docker (command + systemctl is-active + docker info + getent group), Python ≥ 3.11.0, gh CLI ≥ 2.40.0. All checks short-circuit in DRY_RUN/INSTALL_FIXTURE_PROBES.
+  - `main()` wraps with `if [ "${BASH_SOURCE[0]}" = "${0}" ]` so PTY/unit tests can source the script and call individual functions in isolation.
+
+- **scripts/verify-self.sh** — extended from 11 → 19 invariants.
+  - 8 new `check_*` functions: `check_gh_cli_installed`, `check_gh_cli_authenticated`, `check_devassist_git_identity`, `check_origin_remote_token_free`, `check_shared_skills_manifest_match`, `check_secrets_file_acl`, `check_required_env_vars_present`, `check_prereq_baseline`.
+  - Each new check honours FIXTURE / DRY_RUN modes the same way as the existing 11; `check_required_env_vars_present` skips placeholder rejection in fixture (the dedicated unit test in `TestVerifySelfNewInvariants.test_verify_fails_when_required_env_var_placeholder_in_production_mode` exercises the strict path).
+  - Summary line now shows e.g. `verify-self: PASS  (19/19 invariants)` when all 19 pass.
+  - SELF_DEPLOY_VERSION bumped 0.2.0 → 0.3.0 to mirror install-self.
+  - `main "$@"` guarded by `BASH_SOURCE != $0` for unit-testability.
+
+  *Spec/code drift note*: TKT-034 § 4 row AC-8 (h) refers to "13 baseline invariants → 21 total". The actual baseline on `8bc5288` is 11 invariants (verified by reading `scripts/verify-self.sh` and counting `invariant_*` functions). After adding 8 new invariants the total is 19, not 21. This drift is **non-load-bearing** (the invariant-renaming/renumbering is purely informational) and does NOT introduce missing security checks; the 8 spec-listed `check_*` functions are all implemented exactly as spec'd. SO/Founder may file a clerical Architect amendment to update the count in TKT-034 § 4 if desired.
+
+- **tests/test_install_interactive_prompts.py** (NEW, 31 tests). Categories: TestPromptHelpers (10 validator tests), TestVisiblePrompts (4 default-fill / retry tests), TestSecretPrompts (2 echo-suppression tests), TestAbortMessages (1 env-var-name-only test), TestPromptPhaseSkip (3 idempotency + reserved-flag tests), TestFlagParsing (6 flag-parser tests), TestDetectInstallMode (4 TTY-detection tests), TestSshFlowFixtureMode (1 SSH skip test). All offline; the `_run_function()` helper sources install-self.sh into a clean shell using the new `BASH_SOURCE != $0` guard.
+
+- **tests/test_self_deployment_scripts.py** — extended with 6 new test classes (19 new tests): TestSharedSkillsManifestRender, TestSecretsFileAcl, TestVerifySelfNewInvariants (8 PASS-path + FAIL-path tests for the new invariants), TestForceReinstallFlag, TestPreReqVerificationStubsInDryRun, TestNoSecretsInTokenizedSurfaces. Existing 41 tests retained; the `test_verify_counts_invariants` assertion updated from "11/11" → "19/19" to track the new total.
+
+- **tests/fixtures/self-deploy.env.fixture** (NEW, opt-in) — placeholder-only env file for tests that need to point INSTALL_DRY_RUN_PREFIX at a tmpdir + copy a known env file in. All values are `test-token-placeholder` / `test-user-placeholder` per AC-12.
+
+**Local validation**:
+
+```
+python3 scripts/validate_docs.py        → "Docs validation passed."  (exit 0)
+python3 -m unittest \
+    tests.test_self_deployment_scripts \
+    tests.test_install_interactive_prompts
+                                        → Ran 91 tests in 90.7s · OK · (exit 0)
+shellcheck scripts/install-self.sh \
+            scripts/verify-self.sh
+                                        → 13 pre-existing warnings (same set
+                                          as on 8bc5288); 0 net-new findings
+                                          on the TKT-034 surface  (exit 0)
+```
+
+**Architectural compliance**:
+
+- A.i–A.iv (operator hygiene): all four implemented per § 1.A; manifest atomic-write idiom (`mv -f $tmp $final`) confirmed by `TestSharedSkillsManifestRender.test_manifest_atomic_render`.
+- B.i–B.viii (interactive installer): all 8 sub-criteria implemented; reserved flags abort with the spec-mandated "Not implemented in v0.2.0" message.
+- AC-12 (security): no real tokens in source; all fixtures use `test-*-placeholder`; `prompt_secret` uses `IFS= read -rs`; abort_install names env-var only.
+- AC-13 (docs validation): validate_docs.py green; PR body follows .github/pull_request_template.md.
+
+**Open questions for SO/Founder**:
+
+- **Q-TKT-034-01 (informational, low-priority)**: Spec says "13 → 21 invariants"; reality is "11 → 19". Suggest a sibling clerical Architect amendment to update TKT-034 § 4 row AC-8 (h) and § 4.1 step 8.h. Non-blocking for this iter.
+- **Q-TKT-034-02 (informational)**: 13 pre-existing test failures on `main` (runtime_check.py hardcoded paths, model_catalog.py None handling, test_health_endpoint.py network assumptions) are write-zone-blocked here. Not introduced by TKT-034. SO/Founder may dispatch a follow-up TKT to address.
+
+No blocking questions for iter-1.
