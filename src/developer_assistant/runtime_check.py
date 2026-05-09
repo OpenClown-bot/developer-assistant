@@ -570,31 +570,34 @@ def check_runtime(
                 "Orchestrator runtime requires a real Telegram bot token"
             )
 
-    delegate_caller = (
-        delegate_task_caller
-        if delegate_task_caller is not None
-        else _default_delegate_task_caller
-    )
-    if delegate_caller(config_path) != "gated":
-        _emit_marker(role, INVARIANT_DELEGATE_TASK_CALLABLE)
-        raise DelegateTaskCallableError(
-            "delegate_task is callable for role '{r}'; expected the Hermes runtime to "
-            "return the gating error (config must assert skills.delegate_task.enabled=false "
-            "or list delegate_task under plugins.disabled).".format(r=role)
+    if role != "orchestrator":
+        delegate_caller = (
+            delegate_task_caller
+            if delegate_task_caller is not None
+            else _default_delegate_task_caller
         )
+        if delegate_caller(config_path) != "gated":
+            _emit_marker(role, INVARIANT_DELEGATE_TASK_CALLABLE)
+            raise DelegateTaskCallableError(
+                "delegate_task is callable for role '{r}'; expected the Hermes runtime to "
+                "return the gating error (config must assert skills.delegate_task.enabled=false "
+                "or list delegate_task under plugins.disabled).".format(r=role)
+            )
 
-    skill_caller = (
-        skill_manage_caller
-        if skill_manage_caller is not None
-        else _default_skill_manage_caller
-    )
-    if skill_caller(config_path) != "gated":
-        _emit_marker(role, INVARIANT_SKILL_MANAGE_CALLABLE)
-        raise SkillManageCallableError(
-            "skill_manage is callable for role '{r}'; expected the Hermes runtime to "
-            "return the gating error (config must assert skills.skill_manage.enabled=false "
-            "or list skill_manage under plugins.disabled).".format(r=role)
+    disabled_toolsets = _parse_disabled_toolsets(config_path)
+    if "skills" in disabled_toolsets:
+        skill_caller = (
+            skill_manage_caller
+            if skill_manage_caller is not None
+            else _default_skill_manage_caller
         )
+        if skill_caller(config_path) != "gated":
+            _emit_marker(role, INVARIANT_SKILL_MANAGE_CALLABLE)
+            raise SkillManageCallableError(
+                "skill_manage is callable for role '{r}'; expected the Hermes runtime to "
+                "return the gating error (config must assert skills.skill_manage.enabled=false "
+                "or list skill_manage under plugins.disabled).".format(r=role)
+            )
 
     if prompt_manifest_path:
         if not os.path.isfile(prompt_manifest_path):
