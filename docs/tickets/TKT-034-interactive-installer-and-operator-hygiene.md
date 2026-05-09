@@ -1,9 +1,12 @@
 ---
 id: TKT-034
-version: 0.2.0
+version: 0.3.0
 status: ready
 arch_ref: ARCH-001@0.3.0
 audit_ref: AUDIT-002
+prior_version: "0.2.0"
+amended_at: 2026-05-09
+amendment_trigger: "RV-CODE-033 verdict fail (PR #137)"
 updated: 2026-05-09
 ---
 
@@ -25,6 +28,8 @@ These four items are the original AUDIT-002 stub. They are preserved here withou
 - **A.ii** git `user.name` and `user.email` are configured for the `devassist` system user.
 - **A.iii** the runtime's `git remote get-url origin` returns a token-free HTTPS URL (PAT comes from the credential helper or env, not from the URL).
 - **A.iv** `/srv/devassist/shared-skills/` is populated with all custom `dev-assist-*` skills at the pinned git commit declared in `MULTI-HERMES-CONTRACT.md` § 5.0, and `verify-self.sh` asserts directory contents match the manifest.
+
+  **v0.3.0 enforcement**: When the renderer cannot find a `shared-skills/<skill>/SKILL.md` for any skill enumerated in `MULTI-HERMES-CONTRACT.md` § 5.0, the install MUST abort with a FATAL log message naming the missing skill path. Silent fallback (e.g. recording a sentinel SHA value like `"absent_at_install_time"` and continuing) is explicitly disallowed. The on-disk source tree at `shared-skills/<skill>/SKILL.md` is the single source of truth; absence is a hard error, not a degradation path.
 
 ### 1.B Interactive installer and operator-driven bootstrap (Founder ask, 2026-05-09)
 
@@ -101,7 +106,7 @@ These eight items extend the original stub. Each item names a single observable 
   7. **`required-env-vars-present`** — every required env var enumerated in B.ii is present in `/srv/devassist/secrets/SELF-DEPLOY.env` AND non-empty AND NOT a placeholder pattern. Failure lists the missing/empty/placeholder env-var name only (never the value). (B.iv.)
   8. **`prereq-baseline`** — every prereq enumerated in B.viii is satisfied (Ubuntu 22.04 LTS, Docker daemon active, `devassist` in `docker` supplementary group, sufficient disk under `/srv`, required CLIs present). Failure lists the unmet prereq. (B.viii.)
 
-  Existing 13 invariants remain unchanged in their AC and emit format. The 8 new invariants append to the same summary line; the post-install operator output becomes `verify-self: PASS  (21/21 invariants)`.
+  Existing 11 invariants remain unchanged in their AC and emit format. The 8 new invariants append to the same summary line; the post-install operator output becomes `verify-self: PASS  (19/19 invariants)`.
 
 - **B.vii — Cleanup story (separate runbook, not bundled).** Two options were considered:
 
@@ -197,6 +202,7 @@ The following observations pin the live state of the operator-hygiene and creden
   - **AC-2 (b) — A.ii: git `user.name` and `user.email` configured for `devassist`.** The installer runs `sudo -u devassist git config --global user.name "$OPERATOR_GIT_USER_NAME"` and `sudo -u devassist git config --global user.email "$OPERATOR_GIT_USER_EMAIL"`. The `devassist` user MUST have a writable `HOME` per ADR-014 Correction 5 (the unit-template path); for git-config purposes, the installer ensures `/home/devassist/` exists and is owned by `devassist:devassist` mode `0700` (creating it via `useradd --create-home` is the simplest path; existing call `useradd --system --no-create-home` at line 65 of install-self.sh MUST be amended in this ticket's scope to drop `--no-create-home` OR followed by `mkdir -p /home/devassist && chown devassist:devassist /home/devassist && chmod 0700 /home/devassist`). Test: parse install-self.sh for the two `git config --global` lines and the home-dir creation; assert `~/.gitconfig` is written under devassist's home, not under root's home.
   - **AC-2 (c) — A.iii: origin remote URL token-free.** The installer's repo-clone step (`git clone "$HERMES_DEVASSIST_REPO_URL" /srv/devassist/repo` as `devassist` via `sudo -u devassist`) MUST NOT embed `GITHUB_TOKEN` into the URL. The credential helper used is `git config --global credential.helper '!gh auth git-credential'` (which delegates to gh's stored token from AC-2 (a)). Test: after install in dry-run / fixture mode, `git -C /srv/devassist/repo remote get-url origin` returns the bare HTTPS URL; regex `https://[^@/]+@` matches zero times.
   - **AC-2 (d) — A.iv: `/srv/devassist/shared-skills/` populated; manifest written; verify enforces match.** A new function `render_shared_skills_manifest()` in install-self.sh: (1) iterates the 14 custom skills enumerated in `MULTI-HERMES-CONTRACT.md` § 5.0; (2) for each, copies `${SCRIPT_DIR}/../shared-skills/<skill-name>/SKILL.md` (and any sibling files in the skill directory) to `/srv/devassist/shared-skills/<skill-name>/`; (3) computes SHA-256 of `SKILL.md` and records the pinned git commit (resolved at install time via `git -C ${SCRIPT_DIR}/.. rev-parse HEAD`); (4) atomically writes `/srv/devassist/state/shared-skills-manifest.json` with shape `{"schema_version": "1.0", "rendered_at": "<ISO-Z>", "release_commit": "<HEAD-SHA>", "skills": {"<name>": {"path": "<path>", "sha256_of_skill_md": "<hex>", "pinned_commit": "<HEAD-SHA>"}, ...}}` (one entry per skill). The manifest MUST contain exactly the 14 skill names listed in `MULTI-HERMES-CONTRACT.md` § 5.0; any addition/removal MUST be a sibling Architect amendment to the contract first, not a silent install-script edit. Test: round-trip a fixture install in `INSTALL_DRY_RUN=1` mode, parse the rendered manifest, assert the skill set is exactly the 14 names from a hard-coded test fixture (which the test cross-references to `MULTI-HERMES-CONTRACT.md` § 5.0 by parsing the contract's table; mismatch means the contract or the script drifted).
+  - **AC-2 (A.iv) — no silent absent-fallback.** Test: with an artificial fixture that removes `shared-skills/<skill>/SKILL.md` for any single skill, invoke the renderer; assert the install aborts with exit code 1 and the log line `"FATAL: shared-skills source missing: shared-skills/<skill>/SKILL.md"`. Test: when all 15 SKILL.md files are present, the manifest renders successfully with each skill's `sha256_of_skill_md` set to the actual on-disk SHA-256 of that file (no `absent_at_install_time` sentinel anywhere). The verify invariant `check_shared_skills_manifest_match()` MUST treat any `sha256_of_skill_md = "absent_at_install_time"` as FAIL (no skip clause).
 
 - [ ] **AC-3 (B.i — one-command bootstrap entrypoint, Option β).** The script accepts a `--interactive` CLI flag. Invoked as `sudo ./scripts/install-self.sh --interactive` from a fresh git clone, it MUST drive the operator through the full B.ii prompt set, write `/srv/devassist/secrets/SELF-DEPLOY.env` with non-placeholder values, and complete the existing `install-self.sh` flow ending in the `verify-self.sh` invocation per `SELF-DEPLOYMENT-CONTRACT.md` § 6.1 step 9. The README and `SELF-DEPLOYMENT-CONTRACT.md` § 6.1 are NOT modified by this PR (sibling clerical PR); the implementer documents the new flag in `scripts/install-self.sh`'s in-script `usage()` block (which already exists at the top of the file) and in `tests/test_self_deployment_scripts.py` test docstrings only. Test: parse install-self.sh for the new flag; assert default behaviour is unchanged when `--interactive` is absent (existing AC-1 of TKT-020 v0.2.0 regression must continue to pass).
 
@@ -229,13 +235,17 @@ The following observations pin the live state of the operator-hygiene and creden
 - [ ] **AC-8 (B.vi — `verify-self.sh` extensions: 8 new invariants).** Each new invariant is implemented as a separate `check_*` function in verify-self.sh and is called by the existing dispatcher. Sub-criteria (one test per invariant):
   - **AC-8 (1) — `check_gh_cli_installed`.** Test: stub `command -v gh` and `gh --version` in fixture mode; assert PASS when both succeed and version ≥ 2.40.0; assert FAIL otherwise with the message "gh CLI missing or below 2.40.0".
   - **AC-8 (2) — `check_gh_cli_authenticated`.** Test: stub `gh auth status` exit code; PASS at 0 + clean stderr; FAIL at non-0 OR stderr contains `embedded credential`. Message: "gh CLI not authenticated as devassist".
+
+    **v0.3.0 enforcement**: The implementation MUST NOT redirect stderr to `/dev/null` (e.g. `2>&1` discard pattern). Stderr MUST be captured (e.g. `local err; err=$(... 2>&1 >/dev/null)` or equivalent) and grep-checked for the literal substring `embedded credential` (case-sensitive). On match, `record_fail` with message `"gh auth status reports embedded credential"`. Test: stub `gh auth status` to print `embedded credential found in store` to stderr with exit code 0; assert FAIL with the embedded-credential message.
   - **AC-8 (3) — `check_devassist_git_identity`.** Test: stub `git config --global user.name|user.email` outputs; PASS at non-empty + non-placeholder; FAIL otherwise. Message: "devassist git identity unset or placeholder".
   - **AC-8 (4) — `check_origin_remote_token_free`.** Test: parse a fixture remote URL; FAIL on userinfo regex match. Message: "origin URL contains embedded credential".
   - **AC-8 (5) — `check_shared_skills_manifest_match`.** Test: render a manifest, mutate one SHA value, re-run check; assert FAIL with the offending skill name; restore SHA, re-run, assert PASS. Message: "shared-skills manifest drift: <skill> <reason>".
   - **AC-8 (6) — `check_secrets_file_acl`.** Test: stat fixture file; assert PASS at `400 devassist devassist`; mutate to `600`, assert FAIL. Message: "SELF-DEPLOY.env ACL drift".
   - **AC-8 (7) — `check_required_env_vars_present`.** Test: source a fixture env file with one missing var; assert FAIL with the missing var name only (no value); fill the var, assert PASS.
   - **AC-8 (8) — `check_prereq_baseline`.** Test: stub each prereq individually as missing; assert FAIL with the unmet prereq name; full prereq set present, assert PASS.
-  - **AC-8 (9) — summary line accuracy.** Test: full verify run with all 21 invariants present; assert summary line is `verify-self: PASS  (21/21 invariants)`. With one new invariant failing, assert `verify-self: FAIL  (20/21 invariants)` and the failing-invariant block lists the failure reason.
+
+    **v0.3.0 enforcement**: The verify invariant `check_prereq_baseline()` MUST re-check all 8 prereqs from the install-self.sh `verify_prereqs()` function in the same order and with the same depth: (1) OS Ubuntu 22.04 (`lsb_release` id+release), (2) sudo posture (`id -u == 0` — note: in verify-self runtime, this MAY be relaxed if the verify command is run as `devassist`; document the check semantics in the implementation), (3) network reachability (`api.github.com` HTTP 200), (4) `/srv` disk ≥ 5_000_000 KB, (5) required-CLI presence list (full list mirrored from `verify_prereqs()`), (6) Docker daemon present + active + `docker info` ok + `docker` group exists + `devassist` in `docker` group (5 sub-checks), (7) Python ≥ 3.11, (8) `gh` ≥ 2.40.0. A "lightweight subset" implementation that omits any of OS / sudo / network / disk / Docker / gh-version checks is explicitly disallowed. Each of the 8 prereqs MUST have its own negative-path test (stub it as missing, assert FAIL with the prereq name surfaced).
+  - **AC-8 (9) — summary line accuracy.** Test: full verify run with all 19 invariants present; assert summary line is `verify-self: PASS  (19/19 invariants)`. With one new invariant failing, assert `verify-self: FAIL  (18/19 invariants)` and the failing-invariant block lists the failure reason.
 
 - [ ] **AC-9 (B.vii — cleanup story: separate runbook + abort detection).** Sub-criteria:
   - **AC-9 (a) — installer detects existing deploy.** Test: pre-create one of the four detection markers (`/srv/devassist/`, `devassist` user, `devassist.target` file, any `devassist-*.service` file); invoke installer; assert exit-1 with the message "Existing deploy detected. Run the cleanup runbook first."
@@ -272,6 +282,21 @@ The implementer's write zone for this ticket:
 - `tests/test_install_interactive_prompts.py` (new file)
 - `tests/fixtures/self-deploy.env.fixture` (new file, opt-in fixture with placeholder values; NOT real secrets)
 - `docs/tickets/TKT-034-interactive-installer-and-operator-hygiene.md` § 10 Execution Log only (Executor fills iter-1+; the ticket body §§ 1–9 is frozen at this draft, edits to §§ 1–9 require a sibling Architect amendment ticket)
+- `shared-skills/dev-assist-classifier/SKILL.md` (new file)
+- `shared-skills/dev-assist-progress-report/SKILL.md` (new file)
+- `shared-skills/dev-assist-escalation-surface/SKILL.md` (new file)
+- `shared-skills/dev-assist-work-queue-write/SKILL.md` (new file)
+- `shared-skills/dev-assist-work-queue-poll/SKILL.md` (new file)
+- `shared-skills/dev-assist-prd-writer/SKILL.md` (new file)
+- `shared-skills/dev-assist-questions-writer/SKILL.md` (new file)
+- `shared-skills/dev-assist-arch-writer/SKILL.md` (new file)
+- `shared-skills/dev-assist-adr-writer/SKILL.md` (new file)
+- `shared-skills/dev-assist-tickets-writer/SKILL.md` (new file)
+- `shared-skills/dev-assist-executor-discipline/SKILL.md` (new file)
+- `shared-skills/dev-assist-write-zone-enforcer/SKILL.md` (new file)
+- `shared-skills/dev-assist-github-workflow/SKILL.md` (new file)
+- `shared-skills/dev-assist-reviewer-rubric/SKILL.md` (new file)
+- `shared-skills/dev-assist-review-writer/SKILL.md` (new file)
 
 Files explicitly **NOT** in the allowed list and MUST NOT be modified by this ticket:
 
@@ -467,3 +492,21 @@ shellcheck scripts/install-self.sh \
 - **Q-TKT-034-02 (informational)**: 13 pre-existing test failures on `main` (runtime_check.py hardcoded paths, model_catalog.py None handling, test_health_endpoint.py network assumptions) are write-zone-blocked here. Not introduced by TKT-034. SO/Founder may dispatch a follow-up TKT to address.
 
 No blocking questions for iter-1.
+
+## 11. Amendment Delta — v0.2.0 → v0.3.0
+
+Amendment trigger: RV-CODE-033 verdict `fail` on PR #135 (TKT-034 v0.2.0 implementation iter-1) returned 2 HIGH-severity blockers + 1 MEDIUM gap. Independently re-verified by SO pass-2 ratify-ack on PR #137. Founder approved iter-2 dispatch with Architect amendment first (path 4a — add real `shared-skills/<skill>/SKILL.md` source tree).
+
+Delta summary:
+
+1. **Frontmatter**: version `0.2.0` → `0.3.0`; new fields `prior_version`, `amended_at`, `amendment_trigger`.
+2. **§ 1.A.iv enforcement clause** (NEW): silent absent-fallback explicitly disallowed; install MUST abort on any missing `shared-skills/<skill>/SKILL.md`.
+3. **§ 4 AC-2 (A.iv) sub-criterion** (NEW): no-silent-absent-fallback test pair (positive + negative).
+4. **§ 4 AC-8(2) enforcement clause** (NEW): MUST NOT discard stderr; MUST grep-check for `embedded credential` substring.
+5. **§ 4 AC-8(8) enforcement clause** (NEW): full 8-prereq mirror of `verify_prereqs()`; lightweight subset disallowed; per-prereq negative tests.
+6. **§ 4 AC-8 invariant counts** (Q-TKT-034-01 resolved): "13 → 21" replaced with "11 → 19" everywhere.
+7. **§ 5 Allowed Files extension**: 15 new `shared-skills/dev-assist-<name>/SKILL.md` paths added to implementer's write zone.
+
+Sections **unchanged** by this amendment: §§ 1.A.i, 1.A.ii, 1.A.iii (operator-hygiene baseline preserved verbatim from TKT-032/ADR-014); § 1.B.i–B.viii (all 8 architectural choices from PR #133 preserved); § 4 AC-1, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9, AC-10, AC-11, AC-12, AC-13 (only AC-2 and AC-8 are touched); § 6 Test Strategy; § 7 Risk Notes; § 8 Spec Amendment Notes; § 9 Cross-references; § 10 Execution Log (Executor will append iter-2 entry).
+
+Execution Log entries from PR #135 (iter-1) are preserved as-is; iter-2 by Executor will append a new sub-section.
