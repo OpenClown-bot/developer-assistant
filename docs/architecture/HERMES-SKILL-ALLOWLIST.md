@@ -1,7 +1,8 @@
 ---
 id: HERMES-SKILL-ALLOWLIST
-version: 0.1.1
+version: 0.1.2
 status: draft
+updated: 2026-05-09
 ---
 
 # Hermes Skill/Plugin Security Allowlist
@@ -42,6 +43,8 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | Skills Hub auto-update | Disabled in v0.1; `hermes skills update` requires manual review |
 
 ## 4. Enabled Skill/Plugin Allowlist
+
+> **Gating mechanism note (v0.1.2 amendment).** The "Blocked", "Disabled", "not reviewed", and per-toolset constraints documented in this section are enforced at the Hermes runtime through the **definitions-time filter** `model_tools.get_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode)` at `model_tools.py:271-321` in `hermes-agent v2026.4.30` (commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`). When a toolset name appears in the runtime's `agent.disabled_toolsets` (e.g. `"delegation"` for non-orchestrator roles, or `"skills"` for any role), the filter calls `tools_to_include.difference_update(resolved)` for that toolset's resolved tool name set, then `registry.get_definitions(tools_to_include, ...)` returns only the surviving definitions. Tools filtered out at this layer are simply absent from the assembled tool list and cannot be invoked by the model in the first place — the gate is upstream of `tools.registry.dispatch()`. There is **no typed gating-error class** at this upstream tag (repo-wide grep across `tools/`, `model_tools.py`, `environments/`, `hermes_cli/` returns only three unrelated `*Error` classes: `environments/agent_loop.py:53 class ToolError:` is a `@dataclass`, NOT an exception; `hermes_cli/pty_bridge.py:50 PtyUnavailableError(RuntimeError)` is PTY infrastructure; `hermes_cli/gateway.py:820 UserSystemdUnavailableError(RuntimeError)` is CLI infrastructure). TKT-033 v0.3.0 AC-3 (i)/(ii) round-trips this filter from the runtime check at boot time to verify that disabled tools are not assembled for non-orchestrator runtimes (see TKT-033 v0.3.0 § 8 "Amendment notes (v0.3.0)" for the load-bearing rationale and the upstream-source-cited recon evidence).
 
 ### 4.1 Telegram Gateway Capability
 
@@ -118,7 +121,7 @@ The following rules govern all Hermes skills, plugins, and capabilities in the v
 | Maintenance category | built-in |
 | Required credentials | LLM provider API key (same as main agent or auxiliary model key) |
 | Permission scope | Inherits the toolsets and permissions of the parent agent session; subagent shares the Docker container by default |
-| Source review result | not reviewed — core Hermes tool. **Blocked for credential-bearing production delegation until runtime adapter confirms subagent isolation is adequate.** Development/testing with non-sensitive repositories is acceptable. |
+| Source review result | not reviewed — core Hermes tool. **Blocked for credential-bearing production delegation until runtime adapter confirms subagent isolation is adequate.** Development/testing with non-sensitive repositories is acceptable. **Runtime gating mechanism (v0.1.2 amendment):** disabling delegation is enforced via `agent.disabled_toolsets: ["delegation"]` in the runtime's `config.yaml`, which causes `model_tools.get_tool_definitions(disabled_toolsets=["delegation", ...], quiet_mode=True)` to omit the `delegate_task` tool definition from the model's assembled tool list at `model_tools.py:271-321`. Non-orchestrator roles MUST set `agent.disabled_toolsets: ["delegation", "skills"]` per `MULTI-HERMES-CONTRACT.md` § 5.1; TKT-033 v0.3.0 AC-3 (i) round-trips this filter at runtime-check time. There is no typed gating-error class at the pinned tag; the gate is the filter exclusion. |
 | Sandbox mode | Subagents share the Docker container sandbox with the parent agent unless per-task environment overrides are registered |
 | Dangerous operations | Can execute terminal commands; can read and write files in the shared workspace; can access the same credentials as the parent |
 | Rollback procedure | (1) Stop the subagent via `/stop` or interrupt; (2) Stop Hermes service; (3) Revoke any credentials the subagent had access to; (4) Restore workspace from git state; (5) Restart Hermes |
@@ -428,3 +431,9 @@ The following follow-up tickets are needed:
 | Subagent isolation verification | Verify that `delegate_task` subagents cannot access credentials not forwarded via `docker_forward_env` |
 | Rollback procedure testing | End-to-end test of the rollback procedure documented in Section 10 |
 | Operational state store selection | Decide between Hermes native persistence and SQLite per HERMES-RUNTIME-CONTRACT.md Section 6 |
+
+## 14. Cross-References
+
+- **TKT-033 v0.3.0 § 1 component B(i)/(ii) + § 4 AC-3 (i)/(ii) + § 4 AC-4 + § 8 "Amendment notes (v0.3.0)".** The companion amendment in this same PR; specifies the runtime-check helper that round-trips the definitions-time filter described in the § 4 gating mechanism note above. AC-3 (i) targets the `delegate_task` exclusion; AC-3 (ii) targets the `skill_manage` exclusion; AC-4 (d) carries the test-side verification path with `inspect.signature` real-shape probe-arg introspection.
+- **MULTI-HERMES-CONTRACT.md § 5.1 (per-runtime skills loadout).** Defines the per-role `agent.disabled_toolsets` partition (orchestrator omits `"delegation"`; non-orchestrator roles include `"delegation"` AND `"skills"`).
+- **HERMES-RUNTIME-CONTRACT.md § 3 (repo-as-source-of-truth).** Establishes that the repository docs-as-code artifacts are the canonical record; this allowlist + TKT-033's runtime-check enforcement together close the gap between the canonical record and the deployed runtime composition exposed by TKT-032's live test (per `docs/session-log/2026-05-08-session-2.md` § 2).
