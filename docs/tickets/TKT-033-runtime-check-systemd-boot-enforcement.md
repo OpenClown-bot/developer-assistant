@@ -1,7 +1,7 @@
 ---
 id: TKT-033
 version: 0.3.0
-status: ready
+status: done
 arch_ref: ARCH-001@0.3.0
 updated: 2026-05-09
 ---
