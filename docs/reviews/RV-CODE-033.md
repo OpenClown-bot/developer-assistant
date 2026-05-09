@@ -5,7 +5,7 @@ status: review_complete
 ticket_ref: TKT-033@0.3.0
 pr_ref: OpenClown-bot/developer-assistant#128
 head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
-verdict: pass
+verdict: pass_with_changes
 iter_history:
   - iteration: 1
     head_sha: a022a3f9ba3cc10ed456d1b16f572f92f153b8d2
@@ -15,7 +15,7 @@ iter_history:
     verdict: pass_with_changes
   - iteration: 3
     head_sha: 3e11ff0f217c2c4eaf78e0288a7ac9f68291c864
-    verdict: pass
+    verdict: pass_with_changes
 ---
 
 # RV-CODE-033: Review of PR #128 — TKT-033 runtime_check enforcement at systemd boot
@@ -175,11 +175,21 @@ Dispatch Executor iter-3 as an in-session continuation. Required fix: make `dele
 
 ### 8.1 Iter-3 verdict
 
-**pass** — Executor iter-4 replaces the iter-2 broad-catch helper with a v0.3.0-amended filter-based round-trip that aligns with the actual Hermes `get_tool_definitions` definitions-time filter; independent 4th-pass Hermes recon at commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` confirms all 9 load-bearing upstream claims. AC-3 (i)/(ii) lift from partial to pass; AC-4 (d) `inspect.signature` probe is present and correct. No new findings; test-suite delta vs iter-3 shows zero new failures/errors on this Reviewer VM.
+**pass_with_changes** — Executor iter-4 replaces the iter-2 broad-catch helper with a v0.3.0-amended filter-based round-trip that aligns with the actual Hermes `get_tool_definitions` definitions-time filter. The runtime-check helper round-trip is correctly implemented; AC-3 (i)/(ii) lift from partial-on-mechanism to pass-on-mechanism; AC-4 (d) `inspect.signature` probe is present and correct; the 4th-pass independent Hermes recon at upstream commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af` confirms the 9 load-bearing claims. **However**, the production `check_runtime()` integration of the round-trip helper at `runtime_check.py:573-584` is missing the role-gating guard required by spec § 1 B(i) "**non-orchestrator roles**" qualifier (Finding 8.2.1). The implementation as committed at HEAD `3e11ff0` would prevent the orchestrator runtime from booting in production. PR #128 is **not merge-safe** until the role-gating guard is added; an Executor iter-5 cycle is required.
 
 ### 8.2 Iter-3 findings
 
-Zero new findings at iter-3.
+#### Finding 8.2.1 — `delegate_task_callable` invariant lacks role-gating; raises for orchestrator in production
+
+- **severity:** major
+- **disposition:** must-fix before merge
+- **ac_anchor:** AC-3 (i)
+- **spec_anchor:** `docs/tickets/TKT-033-runtime-check-systemd-boot-enforcement.md` line 22 (TKT-033 v0.3.0 § 1 B(i)) on main HEAD `78d1e42`
+- **code_anchor:** `src/developer_assistant/runtime_check.py` lines 573–584 at PR #128 HEAD `3e11ff0`
+- **observation:** The production `check_runtime()` calls `delegate_caller(config_path) != "gated"` unconditionally for all roles. There is no `if role != "orchestrator":` guard. Spec § 1 B(i) explicitly says "The runtime's assembled tool list MUST exclude `delegate_task` for **non-orchestrator roles**", which means orchestrator is excluded from this invariant. Orchestrator's `agent.disabled_toolsets` does not list `"delegation"` (per the parenthetical + `MULTI-HERMES-CONTRACT.md` § 5.1 line 126); blocking on the orchestrator is achieved by not loading delegate_task as a built-in skill, not by the disabled_toolsets filter. As committed, the implementation will raise `DelegateTaskCallableError` for orchestrator on boot → marker `RUNTIME_CHECK_FAILED:orchestrator:delegate_task_callable` → exit 78 → systemd unit `failed`. The orchestrator runtime never boots in production.
+- **expected:** Wrap the `delegate_task_callable` check in an `if role != "orchestrator":` guard, mirroring the existing precedent at `runtime_check.py` lines 499–503 (`non_orchestrator_telegram_skill_loaded`). The check should only fire for non-orchestrator roles whose `agent.disabled_toolsets` lists `"delegation"`.
+- **suggestion:** Executor iter-5 fix scope (small, ~10–15 LOC + 2 test cases): (a) add `if role != "orchestrator":` guard at `runtime_check.py:573` mirroring line 499; (b) add unit test `test_orchestrator_role_skips_delegate_task_check` asserting `check_runtime(role="orchestrator", delegate_task_caller=lambda _: "callable", ...)` does NOT raise; (c) verify `skill_manage_callable` check at lines ~588–598 has correct config-driven gating per spec § 1 B(ii) ("for any role whose `agent.disabled_toolsets` lists `"skills"`") — likely add early-return when `"skills"` not in parsed disabled_toolsets, plus a paired test.
+- **cross_reference:** Caught by PR-Agent (DeepSeek V4 Pro) on PR #128 persistent-review block (issue comment id `4409507781`, last updated 2026-05-09T04:00:30Z, link `https://github.com/OpenClown-bot/developer-assistant/pull/128#issuecomment-4409507781`). The block was inaccessible to me at iter-3 verify time due to my transparently-disclosed gh REST API 401 (§ 8.5 BLOCKED hard rule); its content was paste-relay'd to me by SO, and I have independently cross-checked the spec wording + production code at file:line cited above. The test docstring at `tests/test_runtime_check.py` lines 1005–1014 (`test_no_disabled_toolsets_passes_empty_list`) already documents the missing guard ("The orchestrator-role caller-injection at the check_runtime layer guards against raising on this branch — AC-3 (i) only enforces the invariant for non-orchestrator roles…") — the test author knew about the guard and wrote a docstring documenting it, but the production code does not implement it. The test passes only by injecting a fake `delegate_task_caller` that returns `"gated"` for orchestrator, masking the production gap.
 
 ### 8.3 Iter-3 AC matrix delta (iter-2 → iter-3)
 
@@ -187,7 +197,7 @@ Zero new findings at iter-3.
 |---|---|---|---|
 | AC-1 | pass | pass | Branch-cut observations unchanged; iter-4 delta does not touch service templates. |
 | AC-2 | pass | pass | `git diff 90efb29..3e11ff0 -- scripts/templates/` is empty; `RestartPreventExitStatus=78` preserved. |
-| AC-3 (i) | partial | pass | `_attempt_hermes_filter_assertion` at `runtime_check.py:326-409` implements the v0.3.0 amended round-trip against `model_tools.get_tool_definitions(disabled_toolsets=..., quiet_mode=True)`; no broad-catch, no `config_path=` kwarg forwarded to upstream. Verified by Reviewer Hermes recon at `hermes-agent` v2026.4.30 commit `73bf3ab1`: `model_tools.py:271-321` signature + `_compute_tool_definitions:360-368` `difference_update(resolved)`; `tools/registry.py:347-364` dispatch returns JSON (no typed gating exception); `tools/delegate_tool.py:2514` register `toolset="delegation"`; `tools/delegate_tool.py:1812` signature omits `config_path=`. |
+| AC-3 (i) | partial | partial | Mechanism alignment is correct (`_attempt_hermes_filter_assertion` at `runtime_check.py:326-409` correctly implements the v0.3.0 amended round-trip). However, integration into `check_runtime()` at `runtime_check.py:573-584` lacks the `if role != "orchestrator":` guard required by spec § 1 B(i) "non-orchestrator roles" qualifier; production orchestrator boot would fail (Finding 8.2.1). Lifts to `pass` only after Executor iter-5 fix. |
 | AC-3 (ii) | partial | pass | Same helper with `tool_name="skill_manage"`; recon confirms `tools/skill_manager_tool.py:692-702` signature omits `config_path=` and `tools/skill_manager_tool.py:864` register `toolset="skills"`. |
 | AC-3 (iii) | pass | pass | Prompt-manifest path / SHA-256 check unchanged at iter-4; `TestPromptManifest` present. |
 | AC-4 (a) | partial | pass | `TestHermesFilterAssertionDefault` has 7 cases at `test_runtime_check.py:746-1062` (including offline `ImportError` branch, gated/callable branches for both tools, empty disabled-toolsets orchestrator path, and AC-4 (d) probe). |
@@ -206,6 +216,7 @@ Zero new findings at iter-3.
 | Sonnet 4.5 substitution disclosed in Executor 6-point ack | informational | Does not affect review independence or code correctness. |
 | "fresh Devin account" framing imprecise (same iter-3 Executor acct, new session) | informational | Clerical NUDGE wording; not a substantive audit concern. |
 | PR-Agent comments at iter-4 HEAD inaccessible | informational | `gh` REST API returned 401 with the PAT available in this session (git credential manager PAT works for HTTPS clone/fetch but not for `gh api` / REST). All substantive review performed via direct `git diff` / `git show` inspection of iter-4 delta; no PR-Agent actionable findings were surfaced through other channels. |
+| PR-Agent persistent-review block at iter-4 HEAD (issue comment id `4409507781`) | substantive | Closes Finding 8.2.1 (AC-3 (i) role-gating gap); content paste-relay'd by SO since gh REST API was inaccessible at iter-3 verify time (see § 8.5 hard-rule revision below). |
 
 ### 8.5 Iter-3 hard rules check
 
@@ -222,8 +233,8 @@ Zero new findings at iter-3.
 - [x] No commit of secrets (pre-commit secret grep clean on own commit content).
 - [x] No mid-session re-clone after iter-3 review work was started on `rv/rv-code-033`.
 - [x] Independent Hermes recon (4th pass) executed at upstream commit `73bf3ab1b22314ed9dfecbb59242c03742fe72af`; 9 load-bearing claims verified at file:line.
-- [ ] PR-Agent triage at iter-4 HEAD was inspected via `gh pr view 128 --comments` + `gh api .../pulls/128/comments` — **BLOCKED**: GitHub REST API auth gap (PAT from git credential manager valid for HTTPS fetch but rejected by REST API with 401). Flagged as informational in §8.4.
+- [x] PR-Agent triage at iter-4 HEAD: persistent-review block (issue comment id `4409507781`, last updated 2026-05-09T04:00:30Z) content paste-relay'd by SO; cross-validated against TKT-033 v0.3.0 § 1 B(i) wording + `runtime_check.py:573-584` production code; surfaced as Finding 8.2.1 (AC-3 (i) role-gating gap). Native gh REST API access remained unavailable at iter-3 verify time (gh REST 401 from git credential manager PAT); the gap is closed for iter-4 verify cycle via `echo "$GH_TOKEN" | gh auth login --with-token` (or equivalent env-var injection).
 
 ### 8.6 Iter-3 recommendation
 
-Verdict **pass** — PR #128 is merge-safe at iter-4 HEAD. Founder may merge directly to `main`. AUDIT-001 / TKT-033 implementation cycle closes after merge.
+Verdict **pass_with_changes** — PR #128 at iter-4 HEAD `3e11ff0` is **not merge-safe**. Executor iter-5 must add the `if role != "orchestrator":` guard at `runtime_check.py:573-584` per Finding 8.2.1 (mirroring the existing `non_orchestrator_telegram_skill_loaded` precedent at lines 499–503), plus the paired unit test (`test_orchestrator_role_skips_delegate_task_check`) and the verification of the `skill_manage_callable` config-driven gating per spec § 1 B(ii). After Executor iter-5 hand-back, Reviewer iter-4 verify will run on the new HEAD in this same opencode session (cumulative-append § 9 entry to this file), with the gh REST API auth gap closed so PR-Agent triage runs natively. AUDIT-001 / TKT-033 implementation cycle closes after Executor iter-5 + Reviewer iter-4 verify pass + SO pass-2 + Founder merge.
