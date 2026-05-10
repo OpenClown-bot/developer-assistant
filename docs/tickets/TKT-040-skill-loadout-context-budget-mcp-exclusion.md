@@ -1,7 +1,7 @@
 ---
 id: TKT-040
 version: 0.1.0
-status: draft
+status: done
 arch_ref: ARCH-002@0.1.0
 updated: 2026-05-10
 ---
