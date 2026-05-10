@@ -67,6 +67,16 @@ Allowed Reviewer verdicts:
 - `pass_with_changes`
 - `fail`
 
+### Reviewer artifact naming convention
+
+Reviewer artifacts in `docs/reviews/` use one of three prefixes that signal what was reviewed and the audit shape:
+
+- **`RV-CODE-NNN.md`** — Reviews of **code-PR implementations**. The Reviewer audits the PR diff against the ticket's § 4 Acceptance Criteria, runs targeted tests, and triages CI / PR-Agent findings. This is the default form used for the vast majority of PRs (TKT-NNN implementation cycles).
+- **`RV-SPEC-NNN.md`** — Reviews of **architecture-spec PRs** (Architect-authored spec / contract / ADR introductions or revisions). The Reviewer audits the spec change against the prior architecture baseline. Verdict shape includes scope-compliance and cross-reference integrity, not AC-against-code (specs have no implementation surface to test).
+- **`RV-ARCH-NN.md`** — Reviews of **Architect-cycle clerical or amendment PRs** that touch only `docs/architecture/` (e.g. stale-ref corrections, ADR promotions `proposed → accepted`, append-only § 12 amendment-history entries). The Reviewer performs byte-equality and scope-compliance audits against an Architect-zone diff. No AC-against-code and no test runs — these are clerical-amendment cycles, not implementation cycles.
+
+The numbering within each prefix is sequential and independent (`RV-CODE-001`..`RV-CODE-036`, `RV-SPEC-001`..`RV-SPEC-018`, `RV-ARCH-001`..). Early-era artifacts that predate this convention (e.g. `RV-023.md`) are preserved as-is for forensic continuity; new artifacts must use one of the three prefixes above.
+
 ## CI Baseline
 
 Minimum validation:
