@@ -102,4 +102,23 @@ Hard rules for this ticket (governance constraints inherited from ARCH-002 + the
 
 ## 10. Execution Log
 
-(Reserved for Executor cycle; populated during implementation.)
+### iter-1 — 2026-05-10 (Executor)
+
+- **Branch:** `tkt/035-sandbox-capability-protocol` cut from `origin/main` HEAD `ceb8b2b6`.
+- **Implementation HEAD SHA:** `a3d5308` (single commit `tkt-035: Sandbox Capability Protocol v0.1 — DockerSandbox concrete implementation`).
+- **AC-7 docs validation:** `python3 scripts/validate_docs.py` → `Docs validation passed.`
+- **AC-4 pytest counts:**
+  - `tests/test_sandbox.py` (new, this ticket): **36 passed, 0 failed, 0 skipped, 0 subtests** (`pytest tests/test_sandbox.py`).
+  - Full suite (`pytest tests/`): **1187 passed, 62 failed, 2 skipped** — the 62 failures are pre-existing on `origin/main` HEAD `ceb8b2b6` (verified with `git stash -u && pytest tests/` returning 1151 passed / 62 failed / 2 skipped against the same baseline — the +36 net-passing count exactly matches the new `tests/test_sandbox.py` cases). Failures are concentrated in `tests/test_self_deployment_scripts.py` and a handful of `runtime_check` / `runtime_layout_catalog_round_trip` subFAILED rows; all require a real install layout under `/srv/devassist/...` that this Executor environment does not provision and that this ticket does not modify (AC-8 non-regression observation: scripts under `scripts/install-self.sh`, `scripts/verify-self.sh`, and the systemd unit templates are untouched).
+- **Mocked-Docker policy:** the AC-4 happy-path / error-propagation tests use a `unittest.mock.MagicMock` docker client because the Executor environment has no docker-in-docker; matches the § 7 risk-mitigation fallback wording.
+- **Hard-rule observance (ticket § 8):**
+  - No writes outside § 5 Allowed Files (verified via `git diff --stat` post-commit; touched files are `src/sandbox/{__init__,protocol,docker}.py`, `tests/test_sandbox.py`, `docs/architecture/SANDBOX-CONTRACT.md`, and a single-line amendment to `docs/architecture/MULTI-HERMES-CONTRACT.md` § 5.4).
+  - ADR-015 not modified.
+  - `DockerSandbox` dispatches all Docker operations through the `docker` Python SDK (`docker.from_env()` lazy-imported in `sandbox.docker._docker_module()`, `containers.run`, `containers.get`, `container.exec_run`, `container.put_archive`, `container.get_archive`); `subprocess` is not imported anywhere in the new module tree.
+  - No new pip dependencies added; `pyproject.toml` not amended (the `docker` SDK is the v0.1 dep already named by `MULTI-HERMES-CONTRACT.md` § 5.4 / ADR-014 § Correction 5; mocked SDK in tests means the Executor environment doesn't need it installed).
+  - Executor specialist runtime's `terminal.backend: docker` shape in `MULTI-HERMES-CONTRACT.md` § 4 / § 5.4 unchanged — DockerSandbox is registered transparently.
+- **Known limitations:**
+  - `DockerSession.exec` accepts a `timeout` parameter for forward-compat but the docker SDK 7.x `container.exec_run` does not honor a per-call timeout natively; transport-level timeout exceptions are propagated verbatim per § 7. A future iteration can wire a wall-clock timeout via `asyncio` or a subprocess-style watchdog if a ticket consumer requires deterministic per-call cutoffs.
+  - `DockerSession.read` returns the bytes of the first regular-file member of the SDK's `get_archive` tar stream; it is not a directory-recursive read. Documented in § 3 of `SANDBOX-CONTRACT.md`.
+  - Capability negotiation iterates the work item's required-capability `frozenset` and returns the first missing capability — `frozenset` iteration order is hash-stable but not insertion-ordered, so the precise `Err.missing_capability` value may vary across capability sets of size > 1. Tests assert correctness (any missing cap is returned) rather than ordering; sufficient for AC-3.
+- **Surfaceable flags raised this cycle:** none beyond the carry-over flags F1 / F4 named in the iter-1 NUDGE (out of scope per the NUDGE).
