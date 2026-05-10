@@ -34,11 +34,11 @@ Numbers below were captured at TKT-040 implementation time.
 
 | Role | Prompt | Custom skills (in-repo) | Plugins | Total |
 | --- | --- | --- | --- | --- |
-| orchestrator | 1727 (1.7k) | 0 (0.00k) | 10191 (10.2k) | 11918 (11.9k) |
-| planner | 659 (0.66k) | 0 (0.00k) | 10191 (10.2k) | 10850 (10.8k) |
-| architect | 931 (0.93k) | 0 (0.00k) | 10191 (10.2k) | 11122 (11.1k) |
-| executor | 1898 (1.9k) | 0 (0.00k) | 10191 (10.2k) | 12089 (12.1k) |
-| reviewer | 1700 (1.7k) | 0 (0.00k) | 10191 (10.2k) | 11891 (11.9k) |
+| orchestrator | 1727 (1.7k) | 0 (0.00k) | 11749 (11.7k) | 13476 (13.5k) |
+| planner | 659 (0.66k) | 0 (0.00k) | 11749 (11.7k) | 12408 (12.4k) |
+| architect | 931 (0.93k) | 0 (0.00k) | 11749 (11.7k) | 12680 (12.7k) |
+| executor | 1898 (1.9k) | 0 (0.00k) | 11749 (11.7k) | 13647 (13.6k) |
+| reviewer | 1700 (1.7k) | 0 (0.00k) | 11749 (11.7k) | 13449 (13.4k) |
 
 Tokenizer used at capture time: `cl100k_base_chars_per_token_fallback`
 (stdlib fallback path; tiktoken was not importable in the measurement

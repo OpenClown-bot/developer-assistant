@@ -128,3 +128,22 @@ Hard rules for this ticket (governance constraints inherited from ARCH-002 + the
   3. `pytest tests/test_skill_loader_mcp_exclusion.py -v` → 15 passed.
   4. `pytest tests/ -q --tb=no` → `60 failed, 1139 passed, 2 skipped, 84 subtests passed`. Failure count identical to pre-existing baseline (`60 failed, 1124 passed, 2 skipped, 84 subtests passed` on `main`); the 15 additional passes are exactly the new AC-5 tests. No regressions. Baseline failures span `tests/test_self_deployment_scripts.py` (~48 unique + subtests), `tests/test_health_endpoint.py` (1), and `tests/test_runtime_check.py` (1) — all unrelated to the skill-loader / work-queue / contract changes.
 - **Path substitution note:** TKT-040 § 5 Allowed Files lists the speculative path `src/work_queue/skill_loader.py`; the actual repo structure places the plugin at `src/developer_assistant/hermes_plugins/dev_assist_work_queue/`. The plugin-package sibling location was chosen for cleaner separation and to match the `dev_assist_escalation_policy` plugin's hook precedent (`hooks["pre_tool_call"]`). The substitution is within the spirit of § 5 (plugin-side enforcement, before skill-content load) and was approved by SO ratify pass-1.
+
+### Cycle 1 — 2026-05-10 — Iter 2
+
+- **Trigger:** Reviewer RV-CODE-034 § 5 MEDIUM finding (Kimi K2.6 via opencode + OmniRoute, cross-family witness).
+- **Scope:** Refresh stale context-budget numbers only. No code, test, script, or contract-text edits.
+- **Cause:** Iter-1 commit order placed footer-capture (commits `7a4a486` + `7254f70`) before `skill_loader.py` addition (commit `00fc6a8`); footers and reference table undercounted `plugins_tokens` by ~1.5k.
+- **Files modified (3):** `docs/architecture/role-context-budgets.md` (§ 2 table refreshed), `docs/architecture/MULTI-HERMES-CONTRACT.md` (§ 5.1–5.5 footer numbers refreshed), this file (this iter-2 § 10 sub-entry).
+- **Files NOT modified:** `scripts/measure_role_context.py` (measurement is correct; only its captured output was stale), `src/developer_assistant/hermes_plugins/dev_assist_work_queue/skill_loader.py`, `src/developer_assistant/hermes_plugins/dev_assist_work_queue/tools.py`, `tests/test_skill_loader_mcp_exclusion.py`. Iter-1 implementation untouched.
+- **Refreshed numbers (from `python3 scripts/measure_role_context.py --markdown` on iter-1 final HEAD `6c02f7b`, byte-identical to SO independent re-run):**
+  - orchestrator: prompt 1727 + skills 0 + plugins 11749 = 13476 (~13.5k)
+  - planner: prompt 659 + skills 0 + plugins 11749 = 12408 (~12.4k)
+  - architect: prompt 931 + skills 0 + plugins 11749 = 12680 (~12.7k)
+  - executor: prompt 1898 + skills 0 + plugins 11749 = 13647 (~13.6k)
+  - reviewer: prompt 1700 + skills 0 + plugins 11749 = 13449 (~13.4k)
+- **Validation:**
+  - `python3 scripts/measure_role_context.py --check-deterministic` → `Deterministic: OK`.
+  - `python3 scripts/validate_docs.py` → `Docs validation passed.`
+  - `pytest tests/ -q --tb=no` → `60 failed, 1139 passed, 2 skipped, 84 subtests passed`. No regressions vs iter-1 (test suite unchanged).
+- **AC re-affirmation:** AC-1 and AC-2 remain PASS — numbers are now empirical for the final iter-2 HEAD of branch `exe/tkt-040-skill-loadout-context-budget`.
