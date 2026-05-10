@@ -1,0 +1,105 @@
+---
+id: TKT-035
+version: 0.1.0
+status: draft
+arch_ref: ARCH-002@0.1.0
+adr_ref: ADR-015@0.1.0
+updated: 2026-05-10
+---
+
+# TKT-035: Sandbox Capability Protocol v0.1 — DockerSandbox concrete implementation
+
+## 1. Scope
+
+Implement ADR-015 (Sandbox Capability Protocol) as a thin Python abstraction layer between Hermes' `terminal` toolset and the concrete Docker backend. This ticket ships the protocol interfaces plus a single concrete `DockerSandbox` backend; v0.2+ backends (`WorktreeSandbox`, `ModalSandbox`, `E2BSandbox`) are explicitly deferred. The Executor specialist runtime's runtime-visible behaviour does not change in v0.1 — this ticket is purely the abstraction layer.
+
+The work also authors a new boundary contract `docs/architecture/SANDBOX-CONTRACT.md` (Architect-zone authorship within this Executor ticket is permitted because the contract's content is fully specified by ADR-015; the Architect cycle has signed off via ADR-018 ratify). `MULTI-HERMES-CONTRACT.md` § 5.4 receives a one-line cross-reference amendment to point at SANDBOX-CONTRACT.md for the Executor's terminal-backend definition.
+
+
+## 2. Non-scope
+
+- WorktreeSandbox implementation — Future Possibility per ARCH-002 § 10, triggered by parallel-ticket execution.
+- ModalSandbox / E2BSandbox implementations — Future Possibility per ARCH-002 § 10, triggered by build-too-large-for-Docker.
+- GPU / SNAPSHOT / PERSISTENT_VOLUMES capability *implementations* — only the enum values exist; raising `CapabilityNotAvailable` is sufficient for v0.1.
+- Capability matrix for backends beyond DockerSandbox — covered by future ADRs.
+- Performance benchmarks of the abstraction layer overhead — assumed negligible for v0.1; revisit if observability shows >5% latency increase.
+
+
+## 3. Required Context
+
+- ADR-015 v0.1.0 § Decision (final spec).
+- ARCH-002 v0.1.0 § 3.6 (App-6 isolation), § 5.2 (Q-RESEARCH-002-02), § 6.1 (amendment).
+- `MULTI-HERMES-CONTRACT.md` v0.2.1 § 5.4 (Executor terminal toolset baseline).
+- `bernstein@f950c71eddf0:docs/architecture/sandbox.md:L21-L91` (reference implementation; not for direct copy — for vocabulary alignment).
+- ADR-014 § Correction 5 (current Docker-backed terminal in production).
+
+
+## 4. Acceptance Criteria
+
+**AC-1.** `src/sandbox/protocol.py` defines a `SandboxBackend` abstract base class plus `Session` abstract base class plus `SandboxCapability` enum exactly matching ADR-015 § Decision point 1 and 2. The capability enum has exactly six values: `FILE_RW`, `EXEC`, `NETWORK`, `GPU`, `SNAPSHOT`, `PERSISTENT_VOLUMES`.
+
+**AC-2.** `src/sandbox/docker.py` implements `DockerSandbox(SandboxBackend)` with declared capabilities `{FILE_RW, EXEC, NETWORK}`. Methods `create`, `resume`, `destroy` plus `Session` methods `read`, `write`, `exec`, `ls`, `shutdown` are functional. `snapshot` raises `CapabilityNotAvailable`.
+
+**AC-3.** Capability negotiation: a new helper `negotiate_capabilities(work_item, backend) -> Result` returns `Ok` if all required capabilities are declared, else `Err(missing_capability)`. Tested with a unit test covering all six capabilities.
+
+**AC-4.** `tests/test_sandbox.py` covers: protocol shape (interfaces enforce abstract methods), DockerSandbox happy path (create-exec-shutdown), DockerSandbox capability declaration (only `{FILE_RW, EXEC, NETWORK}`), `CapabilityNotAvailable` raised on unsupported requests, negotiation helper returning `Err` for missing caps. All tests pass under `pytest`.
+
+**AC-5.** `docs/architecture/SANDBOX-CONTRACT.md` v0.1.0 (status: draft, arch_ref: ARCH-002@0.1.0, adr_ref: ADR-015@0.1.0) authored with sections: § 1 Purpose, § 2 Backend interface, § 3 Session interface, § 4 Capability enum, § 5 Negotiation algorithm, § 6 v0.1 backend matrix (DockerSandbox only), § 7 Future backends (worktree, Modal, E2B per ARCH-002 § 10).
+
+**AC-6.** `MULTI-HERMES-CONTRACT.md` § 5.4 amended with one-line cross-reference: "Executor terminal-backend protocol authoritative in `SANDBOX-CONTRACT.md` v0.1.0."
+
+**AC-7.** `python3 scripts/validate_docs.py` passes (frontmatter, cross-link to ADR-015, status flow).
+
+**AC-8.** No runtime-visible behavioural change for the Executor specialist runtime pre/post deployment (verified by re-running the existing TKT-008 / TKT-016 GitHub-executor smoke pattern locally; this AC is a non-regression observation, not a new test).
+
+
+## 5. Allowed Files
+
+- `src/sandbox/__init__.py` (NEW)
+- `src/sandbox/protocol.py` (NEW)
+- `src/sandbox/docker.py` (NEW)
+- `tests/test_sandbox.py` (NEW)
+- `docs/architecture/SANDBOX-CONTRACT.md` (NEW; Architect-zone authorship within this Executor ticket is justified by ADR-015 § Decision point 6 explicit pointer to TKT-035 as authoring vehicle)
+- `docs/architecture/MULTI-HERMES-CONTRACT.md` (one-line amendment in § 5.4 only)
+- `pyproject.toml` (only if a new test fixture or runtime dep is required; if so, must be added to ADR-014-style amendment)
+
+
+## 6. Test Strategy
+
+Test pyramid for this ticket:
+
+- **Unit (`tests/test_sandbox.py`):** protocol shape (abstract base classes enforce method presence), `SandboxCapability` enum integrity, capability-negotiation helper happy/error paths, `DockerSandbox` capability declaration, `CapabilityNotAvailable` raised on unsupported requests.
+- **Integration:** `DockerSandbox` round-trip — `create → write → exec → read → shutdown` against a real local Docker daemon (CI runner has docker-in-docker available per ARCH-001 § 17 baseline; if not, gate this layer behind an env flag).
+- **Non-regression:** the existing TKT-008/TKT-016 GitHub-executor smoke pattern is re-run locally; no behavioural change observed.
+
+
+## 7. Risk Notes
+
+Primary risk: the abstraction layer adds one indirection between the Executor's Hermes terminal toolset and the Docker backend. If the indirection is implemented sloppily, it could mask Docker errors that the Executor previously saw directly. Mitigation: error-passthrough tests at the protocol layer; unit-test that `DockerSandbox.exec` propagates non-zero exit codes, stderr content, and timeout exceptions verbatim. Secondary risk: CI runner Docker-in-Docker availability — if absent, fall back to mocked Docker SDK for AC-2 happy-path test.
+
+
+## 8. Spec Amendment Notes
+
+Hard rules for this ticket (governance constraints inherited from ARCH-002 + the source ADR; Executor MUST observe):
+
+
+- Do NOT touch any other file under `src/` or `tests/` unless it was on the Allowed Files list.
+- Do NOT modify ADR-015 (contracts at `proposed` status are amended via Architect cycles, not Executor cycles; if ADR-015 needs amendment, raise a Q-TKT and stop).
+- Do NOT bypass the Hermes terminal toolset — `DockerSandbox.exec` calls Docker via the existing `docker` Python SDK pathway used by Hermes, not via raw `subprocess.run("docker exec ...")`.
+- Do NOT add new external pip dependencies without an accompanying ADR amendment per NUDGE § 5.4 (the Docker SDK is already a v0.1 dependency).
+- The Executor specialist runtime's terminal-toolset configuration MUST NOT change shape in v0.1 — DockerSandbox is registered as the backend transparently.
+
+
+## 9. Cross-references
+
+- ADR-015 v0.1.0 (Sandbox Capability Protocol).
+- ARCH-002 v0.1.0 § 3.6, § 5.2, § 6.1.
+- RESEARCH-002 § 6.3 (Bernstein), § 7.1 (work isolation).
+- `bernstein@f950c71eddf0:docs/architecture/sandbox.md:L21-L91`.
+- `MULTI-HERMES-CONTRACT.md` v0.2.1 § 5.4.
+- ADR-005 (multi-Hermes runtime isolation), ADR-014 § Correction 5.
+
+
+## 10. Execution Log
+
+(Reserved for Executor cycle; populated during implementation.)
