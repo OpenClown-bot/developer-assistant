@@ -1154,6 +1154,127 @@ class TestPreReqVerificationStubsInDryRun(unittest.TestCase):
 
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestGhAuthEmbeddedCredentialDetection(unittest.TestCase):
+    """TKT-034 v0.3.1 § 4 AC-8(2) (RV-CODE-033 MEDIUM-3):
+    check_gh_cli_authenticated() must capture `gh auth status` stderr
+    (no longer redirected to /dev/null) and FAIL when the captured
+    stderr contains the substring "embedded credential". The stderr
+    content itself MUST NOT be logged because it can carry partial
+    credential fragments.
+    """
+
+    BASE_BASH = (
+        "set +e; "
+        f'source "{SCRIPTS_DIR}/verify-self.sh" 2>/dev/null; '
+        # verify-self.sh re-enables `set -euo pipefail`; relax it so a
+        # stubbed gh returning rc != 0 inside `gh_rc=$?` does not abort
+        # the test harness.
+        "set +e; set +u; "
+        "FIXTURE=0; DRY_RUN=0; "
+        "PASS_COUNT=0; FAIL_COUNT=0; FAIL_SUMMARY=\"\"; "
+        # Stub `sudo -u devassist env HOME=/home/devassist gh auth status -h github.com`
+        # by recognizing the prefix and forwarding the trailing command.
+        "sudo() { "
+        "  if [ \"$1\" = \"-u\" ]; then "
+        "    shift; shift; "  # drop -u devassist
+        "    if [ \"$1\" = \"env\" ]; then "
+        "      shift; "  # drop env
+        "      while [ $# -gt 0 ] && [ \"${1#*=}\" != \"$1\" ]; do shift; done; "
+        "    fi; "
+        "    \"$@\"; "
+        "  else "
+        "    builtin command sudo \"$@\"; "
+        "  fi; "
+        "}; "
+    )
+    TAIL_BASH = (
+        "check_gh_cli_authenticated; "
+        "echo \"--PASS_COUNT:$PASS_COUNT\"; "
+        "echo \"--FAIL_COUNT:$FAIL_COUNT\"; "
+    )
+
+    def _run(self, gh_stub: str) -> subprocess.CompletedProcess:
+        bash_cmd = self.BASE_BASH + gh_stub + self.TAIL_BASH
+        return subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+
+    def test_clean_stderr_passes(self) -> None:
+        # `gh auth status` exits 0 with the normal "Logged in to github.com"
+        # message on stderr (no "embedded credential" substring).
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "github.com" >&2; '
+            '    echo "  Logged in to github.com account openclown-bot" >&2; '
+            '    echo "  Active account: true" >&2; '
+            '    echo "  Token: gho_******" >&2; '
+            '    return 0; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("PASS: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn("--PASS_COUNT:1", result.stdout)
+        self.assertIn("--FAIL_COUNT:0", result.stdout)
+
+    def test_embedded_credential_in_stderr_fails(self) -> None:
+        # `gh auth status` exits 0 but its stderr contains "embedded
+        # credential" — the marker we now detect.
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "github.com" >&2; '
+            '    echo "  X github.com: invalid token (embedded credential found in remote URL)" >&2; '
+            '    return 0; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("FAIL: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn(
+            "embedded credential detected",
+            result.stdout,
+            "FAIL message must surface the embedded-credential failure marker",
+        )
+        # The stderr content itself must NOT be logged (only the known
+        # marker and the FAIL reason). Defensively check that the raw
+        # leak-shaped substring did not slip into the verify-self log.
+        self.assertNotIn(
+            "embedded credential found in remote URL",
+            result.stdout,
+            "stderr content must NOT be logged — may contain credential fragments",
+        )
+
+    def test_nonzero_rc_fails_with_auth_failed_message(self) -> None:
+        # `gh auth status` exits non-zero (the normal "not authenticated"
+        # path) — must FAIL with the existing auth-failed message and
+        # NOT trigger the embedded-credential branch.
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "X github.com: not logged in" >&2; '
+            '    return 1; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("FAIL: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn(
+            "gh auth status -h github.com failed for devassist",
+            result.stdout,
+        )
+        self.assertNotIn("embedded credential detected", result.stdout)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestPrereqBaselineSubChecks(unittest.TestCase):
     """TKT-034 v0.3.1 § 4 AC-8(8) (RV-CODE-033 HIGH-2): verify-time
     check_prereq_baseline() mirrors 7 of the 8 install-time

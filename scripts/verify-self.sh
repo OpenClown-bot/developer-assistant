@@ -378,10 +378,25 @@ check_gh_cli_authenticated() {
         fi
         return 0
     fi
-    if ! sudo -u devassist env HOME=/home/devassist gh auth status -h github.com >/dev/null 2>&1; then
+    # TKT-034 v0.3.1 § 4 AC-8(2) (RV-CODE-033 MEDIUM-3): capture stderr
+    # and check for the "embedded credential" failure substring that gh
+    # emits when the host config carries a token leaked into the URL or
+    # config file. We MUST NOT log the stderr content itself — it can
+    # contain partial credential fragments — so we only inspect for the
+    # known failure marker and report its presence/absence.
+    local gh_stderr gh_rc
+    gh_stderr=$(sudo -u devassist env HOME=/home/devassist gh auth status -h github.com 2>&1 >/dev/null)
+    gh_rc=$?
+    if [ "$gh_rc" -ne 0 ]; then
         record_fail "$name" "gh auth status -h github.com failed for devassist"
         return 0
     fi
+    case "$gh_stderr" in
+        *"embedded credential"*)
+            record_fail "$name" "gh CLI not authenticated as devassist (embedded credential detected)"
+            return 0
+            ;;
+    esac
     record_pass "$name"
 }
 
