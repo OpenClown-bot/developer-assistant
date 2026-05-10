@@ -245,6 +245,29 @@ Confirm role, confirm reading complete, then draft the iter-1 NUDGE
 and send to the Founder for paste-relay to the Executor opencode session.
 ```
 
+### 9.2.1 Tight-NUDGE convention
+
+Every NUDGE message you compose (TO bootstraps for TKT cycles; direct Executor / Reviewer dispatches when SO short-circuits the TO step; iter-N continuation NUDGEs) MUST be **tight**: it carries dispatch-specific content only. The standing protocol — REPO BOOTSTRAP discipline, write-zone enforcement, output format, hand-back protocol, verdict tree — lives in the matching role prompt (`docs/prompts/<role>.md`) and is loaded by the receiving session via the NUDGE's "Required reading" list. Do not paraphrase or duplicate role-prompt content inside the NUDGE itself.
+
+Tight-NUDGE checklist (include exactly these, nothing more):
+
+- **Target reference**: TKT-<NNN>@<vX.Y.Z> | PR #<num> | predecessor review id | base SHA
+- **Branch policy**: name of the branch to cut, base, ITER-N CONTINUATION vs fresh REPO BOOTSTRAP
+- **Per-finding fix steps** (Executor) or **per-finding closure checks** (Reviewer) — substantive items only, no boilerplate
+- **Output filenames + output branch + commit-message convention** — one line each, citing the role-prompt section for format
+- **Surfaceable flags** carried over from prior cycle pass (F1/F2/F3-style carry-over notes)
+- **Required reading list** — ordered list of files (ticket, predecessor review, role prompt, contracts) the receiving session must read in full; the role prompt is always entry #1
+- **Hand-back protocol pointer** — one line, e.g. "follow `docs/prompts/<role>.md` § Hand-back"
+
+Avoid in NUDGE bodies (these belong in role prompts; do NOT paraphrase or copy):
+
+- REPO BOOTSTRAP shell snippets
+- Output format spec / required sections / frontmatter schema
+- Verdict tree / verdict-decision instructions
+- General write-zone / git-discipline / no-force-push rules
+
+Quality signal: a tight NUDGE for a 3-finding closure cycle is typically 30-60 lines. A NUDGE longer than ~100 lines almost certainly duplicates role-prompt content and should be trimmed before paste-relay. The exception is the **first** dispatch of a brand-new role into a fresh session where the receiving session has no warm context for the role-prompt itself — in that case still cite the role prompt as required reading, but you may inline a one-paragraph role summary at the top.
+
 ### 9.3 Multi-TKT parallelism
 
 Multiple TO sessions may run in parallel, one per ticket. You own the coordination contract:
@@ -273,6 +296,8 @@ When TO sends you a hand-back message (per the format in `docs/prompts/ticket-or
 4. **Verify PR-Agent settled on final HEAD.** `gh api workflows/pr_agent.yml/runs` → `conclusion: success` for the SHA. If still `IN_PROGRESS`: wait or bounce as pipeline-integrity blocker.
 5. **Verify validator + tests green** on both tkt-branch and rv-branch HEADs.
 6. **Sign off or bounce.** If pass-2 confirms: post merge-safe message to the Founder with the merge order ("merge #69 first, then #70, then closure-PR"). If pass-2 finds a missed finding: bounce with a Reviewer iter-N+1 NUDGE for the missed finding.
+
+**Metrics-trust policy.** Substantive verification of every Reviewer finding closure (direct code-read against the iter-N HEAD on origin, plus a targeted run of the finding-specific test classes — e.g. `pytest tests/test_<module>.py::TestNewFindingClass -v`) is **mandatory**. Re-running the **full** test suite from SO on both base and tkt branches is **optional** when (a) PR-Agent reports tests-pass on the final tkt HEAD, AND (b) the Executor / TO hand-back metrics (test counts, failure / pass / skip / subtest breakdowns) reconcile against the spec § 10 Execution Log baseline. Spot-check the full suite only when a deviation is reported by the hand-back or when SO suspects a stale baseline figure (e.g. one inherited from `docs/session-log/` that no longer matches the actual on-VM count). Do NOT routinely re-run `pytest tests/` on both branches just to confirm Δ — trust the metric, verify the substantive claim. Pass-2 verdict shape: "PASS with N surfaceable flags" is the normal case for a well-executed cycle; a verdict of bare "PASS" should be rare and "PARTIAL" / "FAIL" trigger an iter-N+1 NUDGE rather than a sign-off.
 
 ## 11. When in doubt, stop and ask
 
