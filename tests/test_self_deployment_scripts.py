@@ -1154,6 +1154,204 @@ class TestPreReqVerificationStubsInDryRun(unittest.TestCase):
 
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestPrereqBaselineSubChecks(unittest.TestCase):
+    """TKT-034 v0.3.1 § 4 AC-8(8) (RV-CODE-033 HIGH-2): verify-time
+    check_prereq_baseline() mirrors 7 of the 8 install-time
+    verify_prereqs() checks (sudo-posture excluded per Founder
+    Decision α). One negative-path test per sub-check + one positive
+    aggregation test, exercised by sourcing verify-self.sh and
+    overriding the underlying CLIs as bash functions.
+    """
+
+    DEFAULT_GOOD_STUBS = r"""
+lsb_release() {
+    case "$1" in
+        -is) echo "Ubuntu" ;;
+        -rs) echo "22.04" ;;
+        *) echo "" ;;
+    esac
+}
+curl() {
+    # Mimic `curl -fsS -o /dev/null -w "%{http_code}" --max-time 10 https://api.github.com`
+    echo "200"
+    return 0
+}
+df() {
+    # Mimic `df --output=avail /srv` → header line + KB count
+    printf 'Avail\n9999999\n'
+    return 0
+}
+docker() { return 0; }
+systemctl() { return 0; }
+getent() {
+    case "$1 $2" in
+        "group docker") echo "docker:x:999:devassist" ;;
+        *) echo "" ;;
+    esac
+    return 0
+}
+id() { return 0; }
+python3() {
+    if [ "$1" = "--version" ]; then
+        echo "Python 3.12.0"
+        return 0
+    fi
+    builtin command python3 "$@"
+}
+gh() {
+    if [ "$1" = "--version" ]; then
+        echo "gh version 2.55.0 (2024-08-01)"
+        return 0
+    fi
+    return 1
+}
+command() {
+    if [ "$1" = "-v" ]; then
+        case "$2" in
+            bash|systemctl|sqlite3|curl|tar|git|python3|sudo|lsb_release|stat|sha256sum|useradd|usermod|chmod|chown|ln|mkdir|gh|docker)
+                echo "/stub/$2"
+                return 0
+                ;;
+            *)
+                builtin command "$@"
+                return $?
+                ;;
+        esac
+    fi
+    builtin command "$@"
+}
+"""
+
+    def _run_check(self, extra_stubs: str = "") -> subprocess.CompletedProcess:
+        bash_cmd = (
+            "set +e; "
+            f'source "{SCRIPTS_DIR}/verify-self.sh" 2>/dev/null; '
+            "FIXTURE=0; DRY_RUN=0; "
+            "PASS_COUNT=0; FAIL_COUNT=0; FAIL_SUMMARY=\"\"; "
+            f"{self.DEFAULT_GOOD_STUBS}\n"
+            f"{extra_stubs}\n"
+            "check_prereq_baseline; "
+            "echo \"--RC:$?\"; "
+            "echo \"--PASS_COUNT:$PASS_COUNT\"; "
+            "echo \"--FAIL_COUNT:$FAIL_COUNT\"; "
+        )
+        return subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+
+    def test_positive_path_all_stubs_satisfied(self) -> None:
+        result = self._run_check()
+        self.assertIn("PASS: VPS prereq baseline", result.stdout)
+        self.assertIn("--PASS_COUNT:1", result.stdout)
+        self.assertIn("--FAIL_COUNT:0", result.stdout)
+
+    def test_subcheck_1_os_wrong_distro_fails(self) -> None:
+        override = r"""
+lsb_release() {
+    case "$1" in
+        -is) echo "Debian" ;;
+        -rs) echo "11" ;;
+    esac
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("OS(expected Ubuntu 22.04, got Debian 11)", result.stdout)
+
+    def test_subcheck_2_network_unreachable_fails(self) -> None:
+        # Stub curl to print non-200 HTTP code
+        override = r"""
+curl() { echo "503"; return 0; }
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("network(api.github.com HTTP 503)", result.stdout)
+
+    def test_subcheck_3_disk_too_small_fails(self) -> None:
+        # Stub df to print only 100 KB free on /srv
+        override = r"""
+df() { printf 'Avail\n100\n'; return 0; }
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("disk(/srv 100 KB < 5000000)", result.stdout)
+
+    def test_subcheck_4_required_cli_missing_fails(self) -> None:
+        # Stub `command -v sqlite3` to fail (rest stay present)
+        override = r"""
+command() {
+    if [ "$1" = "-v" ]; then
+        case "$2" in
+            sqlite3)
+                return 1
+                ;;
+            bash|systemctl|curl|tar|git|python3|sudo|lsb_release|stat|sha256sum|useradd|usermod|chmod|chown|ln|mkdir|gh|docker)
+                echo "/stub/$2"
+                return 0
+                ;;
+            *)
+                builtin command "$@"
+                return $?
+                ;;
+        esac
+    fi
+    builtin command "$@"
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("required-CLIs(missing: sqlite3)", result.stdout)
+
+    def test_subcheck_5_docker_daemon_inactive_fails(self) -> None:
+        # docker command present, but `systemctl is-active docker` fails
+        override = r"""
+systemctl() {
+    if [ "$1" = "is-active" ] && [ "$2" = "docker" ]; then
+        return 1
+    fi
+    return 0
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("docker(daemon-inactive", result.stdout)
+
+    def test_subcheck_6_python_below_311_fails(self) -> None:
+        # Stub python3 --version to print 3.10.x
+        override = r"""
+python3() {
+    if [ "$1" = "--version" ]; then
+        echo "Python 3.10.12"
+        return 0
+    fi
+    builtin command python3 "$@"
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("python(3.10.12 below 3.11)", result.stdout)
+
+    def test_subcheck_7_gh_below_240_fails(self) -> None:
+        # Stub gh --version to print 2.39.0
+        override = r"""
+gh() {
+    if [ "$1" = "--version" ]; then
+        echo "gh version 2.39.0 (2023-12-01)"
+        return 0
+    fi
+    return 1
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("gh(2.39.0 below 2.40.0)", result.stdout)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestNoSecretsInTokenizedSurfaces(unittest.TestCase):
     """TKT-034 AC-12: scan repository surfaces for token-shaped patterns."""
 

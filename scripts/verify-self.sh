@@ -589,25 +589,122 @@ check_prereq_baseline() {
         record_pass "$name"
         return 0
     fi
-    # Re-check the lightweight subset: required CLIs present; python ≥ 3.11;
-    # gh CLI present (versions are checked by check_gh_cli_installed).
+    # TKT-034 v0.3.1 § 4 AC-8(8): mirror 7 of the 8 install-time
+    # verify_prereqs() checks at verify-time. The 8th check
+    # (sudo-posture, id -u == 0) is install-only per Founder Decision α
+    # — verify-self runs as devassist by design, so MUST NOT call
+    # `id -u == 0` here. Sub-checks aggregate into a single umbrella
+    # FAIL/PASS to keep the invariant count stable.
+    local failures=""
+
+    # Sub-check 1: OS — Ubuntu 22.04
+    local os_id os_rel
+    os_id=$(lsb_release -is 2>/dev/null || echo "unknown")
+    os_rel=$(lsb_release -rs 2>/dev/null || echo "unknown")
+    if [ "$os_id" != "Ubuntu" ] || [ "$os_rel" != "22.04" ]; then
+        failures="${failures} OS(expected Ubuntu 22.04, got ${os_id} ${os_rel})"
+    fi
+
+    # Sub-check 2: Network — api.github.com reachable (HTTP 200)
+    local code
+    code=$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 10 https://api.github.com 2>/dev/null) || code="000"
+    if [ "$code" != "200" ]; then
+        failures="${failures} network(api.github.com HTTP ${code})"
+    fi
+
+    # Sub-check 3: Disk — /srv ≥ 5_000_000 KB free
+    local avail_kb
+    avail_kb=$(df --output=avail /srv 2>/dev/null | tail -1 | tr -d ' ')
+    case "$avail_kb" in
+        ''|*[!0-9]*)
+            failures="${failures} disk(/srv df --output=avail unparseable)"
+            ;;
+        *)
+            if [ "$avail_kb" -lt 5000000 ]; then
+                failures="${failures} disk(/srv ${avail_kb} KB < 5000000)"
+            fi
+            ;;
+    esac
+
+    # Sub-check 4: Required CLIs (full canonical list, install-self.sh
+    # check_deps() / verify_prereqs() parity).
     local missing=""
     local cli
-    for cli in bash systemctl sqlite3 curl tar git python3 sudo lsb_release stat sha256sum useradd usermod chmod chown ln mkdir gh docker; do
+    for cli in bash systemctl sqlite3 curl tar git python3 sudo lsb_release stat sha256sum useradd usermod chmod chown ln mkdir; do
         if ! command -v "$cli" >/dev/null 2>&1; then
             missing="${missing} ${cli}"
         fi
     done
     if [ -n "$missing" ]; then
-        record_fail "$name" "missing CLIs:${missing}"
-        return 0
+        failures="${failures} required-CLIs(missing:${missing})"
     fi
-    local pyver pymaj pymin
-    pyver=$(python3 --version 2>&1 | awk '{print $2}')
-    pymaj=$(echo "$pyver" | cut -d. -f1)
-    pymin=$(echo "$pyver" | cut -d. -f2)
-    if [ "$pymaj" -lt 3 ] || { [ "$pymaj" = "3" ] && [ "$pymin" -lt 11 ]; }; then
-        record_fail "$name" "python3 ${pyver} below 3.11"
+
+    # Sub-check 5: Docker — daemon active, group present, devassist
+    # group membership (when devassist exists). 5 sub-conditions.
+    local docker_problems=""
+    if ! command -v docker >/dev/null 2>&1; then
+        docker_problems="${docker_problems} command-missing"
+    else
+        if ! systemctl is-active docker >/dev/null 2>&1; then
+            docker_problems="${docker_problems} daemon-inactive"
+        fi
+        if ! docker info >/dev/null 2>&1; then
+            docker_problems="${docker_problems} info-failed"
+        fi
+        if ! getent group docker >/dev/null 2>&1; then
+            docker_problems="${docker_problems} group-missing"
+        elif id devassist >/dev/null 2>&1; then
+            if ! getent group docker | grep -qw devassist; then
+                docker_problems="${docker_problems} devassist-not-in-group"
+            fi
+        fi
+    fi
+    if [ -n "$docker_problems" ]; then
+        failures="${failures} docker(${docker_problems# })"
+    fi
+
+    # Sub-check 6: Python — ≥ 3.11
+    if ! command -v python3 >/dev/null 2>&1; then
+        failures="${failures} python(command-missing)"
+    else
+        local pyver pymaj pymin
+        pyver=$(python3 --version 2>&1 | awk '{print $2}')
+        pymaj=$(echo "$pyver" | cut -d. -f1)
+        pymin=$(echo "$pyver" | cut -d. -f2)
+        case "${pymaj}.${pymin}" in
+            ''|*[!0-9.]*)
+                failures="${failures} python(unparsed-${pyver:-empty})"
+                ;;
+            *)
+                if [ "$pymaj" -lt 3 ] || { [ "$pymaj" = "3" ] && [ "$pymin" -lt 11 ]; }; then
+                    failures="${failures} python(${pyver} below 3.11)"
+                fi
+                ;;
+        esac
+    fi
+
+    # Sub-check 7: gh CLI — present and ≥ 2.40.0
+    if ! command -v gh >/dev/null 2>&1; then
+        failures="${failures} gh(command-missing)"
+    else
+        local ghver ghmaj ghmin
+        ghver=$(gh --version 2>/dev/null | head -1 | awk '{print $3}')
+        ghmaj=$(echo "$ghver" | cut -d. -f1)
+        ghmin=$(echo "$ghver" | cut -d. -f2)
+        case "${ghmaj}.${ghmin}" in
+            ''|*[!0-9.]*)
+                failures="${failures} gh(unparsed-${ghver:-empty})"
+                ;;
+            *)
+                if [ "$ghmaj" -lt 2 ] || { [ "$ghmaj" = "2" ] && [ "$ghmin" -lt 40 ]; }; then
+                    failures="${failures} gh(${ghver} below 2.40.0)"
+                fi
+                ;;
+        esac
+    fi
+
+    if [ -n "$failures" ]; then
+        record_fail "$name" "prereq sub-checks failed:${failures}"
         return 0
     fi
     record_pass "$name"
