@@ -6,6 +6,10 @@ import sqlite3
 from typing import Any, Optional
 
 from developer_assistant import state_store
+from developer_assistant.hermes_plugins.dev_assist_work_queue.skill_loader import (
+    filter_skills as _filter_mcp_excluded_skills,
+    is_mcp_excluded as _is_mcp_excluded,
+)
 from developer_assistant.work_queue import (
     claim_work_item,
     complete_work_item,
@@ -166,4 +170,8 @@ def register(hooks: dict) -> None:
             "schema": TOOL_SCHEMAS["work_queue.write"],
             "handler": work_queue_write,
         },
+    }
+    hooks["skill_loader"] = {
+        "is_excluded": _is_mcp_excluded,
+        "filter": _filter_mcp_excluded_skills,
     }
