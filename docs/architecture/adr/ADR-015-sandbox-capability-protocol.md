@@ -1,14 +1,16 @@
 ---
 id: ADR-015
-version: 0.1.0
-status: proposed
+version: 0.2.0
+status: accepted
+updated: 2026-05-10
+ratified_by: TKT-035 implementation merge (PR #155, commit 4fea58c, 2026-05-10) + RV-CODE-036 cross-family witness (PR #156, Kimi K2.6 Moonshot, verdict pass_with_changes)
 ---
 
 # ADR-015: Sandbox Capability Protocol — Bernstein-style typed abstraction
 
 ## Status
 
-**Proposed**, pending Founder approval as part of the ARCH-002 synthesis cycle. Supersedes none; coordinates with ADR-005 (multi-Hermes runtime isolation), ADR-014 § Correction 5 (Docker terminal backend in production), and `MULTI-HERMES-CONTRACT.md` v0.2.1 § 5.4 Executor toolset. Implements RESEARCH-002 § 9 Q-RESEARCH-002-02 (minimum isolation boundary) and ARCH-002 § 5.2.
+**Accepted** 2026-05-10 via TKT-035 implementation merge (PR #155, commit 4fea58c) + RV-CODE-036 cross-family witness (PR #156, Kimi K2.6 Moonshot, verdict `pass_with_changes`) + TKT-035 ticket promotion `draft` → `done` (PR #157 closure cycle). Founder ratify happened implicitly via the PR #155 merge button click; this version formalizes the documentary state. Supersedes none; coordinates with ADR-005 (multi-Hermes runtime isolation), ADR-014 § Correction 5 (Docker terminal backend in production), and `MULTI-HERMES-CONTRACT.md` v0.2.1 § 5.4 Executor toolset. Implements RESEARCH-002 § 9 Q-RESEARCH-002-02 (minimum isolation boundary) and ARCH-002 § 5.2.
 
 ## Context
 
@@ -80,4 +82,4 @@ Rejected: ARCH-002 § 3.4 / § 3.7 records the storage-sink abstraction as Futur
 - ARCH-002 § 3.6 (App-6 isolation), § 5.2 (Q-RESEARCH-002-02), § 6.1 (amendment proposal).
 - `bernstein@f950c71eddf0:docs/architecture/sandbox.md:L21-L91` (sandbox protocol source).
 - ADR-005 (multi-Hermes runtime isolation), ADR-014 § Correction 5 (Docker backend in production).
-- TKT-035 (implementation ticket, status: draft).
+- TKT-035 (implementation ticket, status: done v0.1.1, merged 2026-05-10 via PR #155; RV-CODE-036 PR #156 verdict pass_with_changes; SO closure PR #157 promote draft → done).

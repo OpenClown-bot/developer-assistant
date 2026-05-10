@@ -1,9 +1,9 @@
 ---
 id: MULTI-HERMES-CONTRACT
-version: 0.2.1
+version: 0.2.2
 status: draft
 amendments: ADR-014 (live deployment corrections from TKT-032, 2026-05-08)
-updated: 2026-05-09
+updated: 2026-05-10
 ---
 
 # Multi-Hermes Runtime Contract
@@ -24,7 +24,7 @@ The five roles map 1:1 to the existing role prompts under `docs/prompts/`:
 
 | Runtime role id | Runtime directory | Role prompt | Founder-facing? |
 | --- | --- | --- | --- |
-| `orchestrator` | `runtimes/orchestrator/.hermes/` | `docs/prompts/orchestrator.md` | Yes (the only one) |
+| `orchestrator` | `runtimes/orchestrator/.hermes/` | `docs/prompts/runtime-hermes-orchestrator.md` | Yes (the only one) |
 | `planner` | `runtimes/planner/.hermes/` | `docs/prompts/business_planner.md` | No |
 | `architect` | `runtimes/architect/.hermes/` | `docs/prompts/architect.md` | No |
 | `executor` | `runtimes/executor/.hermes/` | `docs/prompts/executor.md` | No |

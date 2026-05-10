@@ -1,6 +1,6 @@
 ---
 id: ARCH-002
-version: 0.1.0
+version: 0.1.1
 status: draft
 arch_ref: ARCH-001@0.3.0
 audit_ref: RESEARCH-002@0.1.0
@@ -375,7 +375,7 @@ This synthesis proposes four ADRs at status: `proposed`. Per NUDGE § 12.3, ADRs
 
 | ADR | Title | Status | Decision summary | Adopts from | Maps to | Implements |
 | --- | --- | --- | --- | --- | --- | --- |
-| ADR-015 | Sandbox Capability Protocol — Bernstein-style typed abstraction | proposed | Adopt typed sandbox interface with capability set `{FILE_RW, EXEC, NETWORK, GPU, SNAPSHOT, PERSISTENT_VOLUMES}`. v0.1 ships single `DockerSandbox` with `{FILE_RW, EXEC, NETWORK}`. v0.2+ adds `WorktreeSandbox`/`ModalSandbox`/`E2BSandbox` without changing specialist runtimes. | `bernstein@f950c71eddf0:docs/architecture/sandbox.md:L21-L91` | App-6, App-7, Q-RESEARCH-002-02 | TKT-035 |
+| ADR-015 | Sandbox Capability Protocol — Bernstein-style typed abstraction | accepted (2026-05-10) | Adopt typed sandbox interface with capability set `{FILE_RW, EXEC, NETWORK, GPU, SNAPSHOT, PERSISTENT_VOLUMES}`. v0.1 ships single `DockerSandbox` with `{FILE_RW, EXEC, NETWORK}`. v0.2+ adds `WorktreeSandbox`/`ModalSandbox`/`E2BSandbox` without changing specialist runtimes. | `bernstein@f950c71eddf0:docs/architecture/sandbox.md:L21-L91` | App-6, App-7, Q-RESEARCH-002-02 | TKT-035 (done v0.1.1) |
 | ADR-016 | Backpressure Gates As Orchestration Primitive — Ralph adoption | proposed | Promote tests/lint/typecheck/docs gates from CI-only to work-queue-level. Dispatcher refuses to promote `ticket_review → completed` while required CI checks at `failure`. Reviewer rubric tags findings by gate name. | `ralph-orchestrator@3eca5177db33:README.md:L136-L142`, `kodo@9758a0a1d0b1:docs/orchestration-tenets.md:L11-L13`, `opencastle@18c6f2cf4e5c:README.md:L114-L122` | App-3, App-10, Q-RESEARCH-002-03 | TKT-036, TKT-038 |
 | ADR-017 | Escalation Modalities — Gas Town Mail/Nudge/Peek split | proposed | Split single-shape escalation queue into three modalities. Add `modality` column to `escalations` table. Add `paused_on_founder` work-item status. Surface formatter branches by modality. | `gastown@18b1f4170c5f:docs/research/w-gc-004-agent-framework-survey.md:L83-L99`, `ralph-orchestrator@3eca5177db33:README.md:L144-L168` | App-8, Q-RESEARCH-002-04 | TKT-037 |
 | ADR-018 | Anti-Drift Concept-Anchor Freshness Ledger | proposed | Add `CONCEPT-ANCHOR-FRESHNESS.md` mapping each contract to asserted anchors. Extend `validate_docs.py` with two membership/consistency checks. Reviewer rubric injects relevant anchors at dispatch (CLITrigger wiki-injection pattern). | `CLITrigger@fd4731bb3e20:README.md:L107-L115`, `OpenHands@9482ab1a666d:skills/agent_memory.md:L10-L30` | App-1, App-4, Q-RESEARCH-002-06 | TKT-039 |
@@ -524,7 +524,7 @@ Each cited repo above is anchored by RESEARCH-002 § 10 SHA-pins; this synthesis
 | Document | Version | Sections cited |
 | --- | --- | --- |
 | ARCH-001.md | v0.3.0 | § 8 (state model), § 9 (GitHub flow), § 11.1 (per-runtime layout), § 11.2 (IPC), § 11.3 (shared skills/plugins), § 11.4 (self-learning), § 13 (upstream adapter), § 14 (self-deployment), § 15 (escalation policy), § 16 (model catalog), § 17 (CI), § 21 (future possibilities) |
-| MULTI-HERMES-CONTRACT.md | v0.2.1 | § 2 (five runtimes), § 3 (per-runtime identity), § 4 (per-runtime config), § 5 (skills loadout per role), § 5.0 (custom skill allowlist), § 5.0.1-5.6 (per-role tables), § 6.2 (work_items table), § 6.3 (escalations table), § 7 (decision capture) |
+| MULTI-HERMES-CONTRACT.md | v0.2.1 | § 2 (five runtimes), § 3 (per-runtime identity), § 4 (per-runtime config), § 5 (skills loadout per role), § 5.0 (custom skill allowlist), § 5.0.1 (MCP exclusion at load time), § 5.0.2-5.6 (per-role tables), § 6.2 (work_items table), § 6.3 (escalations table), § 7 (decision capture) |
 | HERMES-RUNTIME-CONTRACT.md | v0.2.0 | § 3 (governance state authority), § 4 (runtime input), § 5 (runtime output), § 9 (constraints) |
 | HERMES-SKILL-ALLOWLIST.md | v0.1.2 | § 2 (deny-by-default), § 3 (deployment assumptions), § 4 (allowlist + gating mechanism), § 4.1 (Telegram), § 4.2-4.4 (bundled GitHub blocked), § 4.5 (delegate_task blocked), § 6 (project-local plugin policy), § 8 (credential scoping) |
 | ESCALATION-POLICY.md | v0.1.1 | § 1 (purpose), § 2 (where it runs), § 3 (decision tree + fail-closed defaults), § 4 (deterministic rules), § 5 (concept-deviation classifier), § 5.5 (advisory narrative), § 9 (versioning) |
@@ -541,3 +541,39 @@ Each cited repo above is anchored by RESEARCH-002 § 10 SHA-pins; this synthesis
 | RESEARCH-001-hermes-and-openclaw-ecosystems.md | v0.1.x | § 3.2 (one Hermes = one process), § 3.5 (memory model), § 6.2 (memory broker rejection), § 7 (skill_manage open item) |
 | RESEARCH-002-multi-agent-dev-systems-survey.md | v0.1.0 | full document — § 3 pain points, § 5 comparative table, § 6 deep dives, § 7 themes, § 8 shortlist, § 9 open questions, § 10 bibliography |
 | SESSION-STATE.md | v0.2.8 | (referenced for current-phase context only; not amended by this synthesis) |
+
+## 12. Amendment History
+
+This section is append-only. Each entry documents an Architect mini-cycle that touches ARCH-002 itself or its tightly-coupled peers (`MULTI-HERMES-CONTRACT.md`, ADRs co-authored in this synthesis). Editorial / clerical patches that do not alter architectural posture are recorded here rather than via a major-version bump.
+
+### 12.1 Architect mini-cycle 2026-05-10 (stale-refs + ADR-015 promotion)
+
+**Cycle scope.** Single Architect iter against `origin/main` post-PR-#159 HEAD `8c8a249` (TKT-021 closure ratify). Three deferred SO-maintenance F-flags closed in this cycle: ARCH-002 line 527 stale § 5.0.1-5.6 cross-reference, MULTI-HERMES-CONTRACT.md line 27 stale `docs/prompts/orchestrator.md` path, ADR-015 promotion `proposed` → `accepted`. ARCH-016/017/018 deliberately remain at `proposed` because their implementing tickets (TKT-036/037/038/039) are not yet merged; per ARCH-002 § 7 promotion semantics they cannot promote in this cycle.
+
+**Edits applied (verbatim text replacements per NUDGE).**
+
+1. **ARCH-002 § 11.2 line ~527 cross-ref cell.** Updated MULTI-HERMES-CONTRACT.md cell to reflect the post-TKT-040 § 5.0 renumber: § 5.0.1 is now "MCP exclusion at load time" (new content); § 5.0.2-5.6 are the per-role loadout tables (the prior § 5.0.1). Reference now reads `§ 5.0.1 (MCP exclusion at load time), § 5.0.2-5.6 (per-role tables)` instead of `§ 5.0.1-5.6 (per-role tables)`.
+2. **MULTI-HERMES-CONTRACT.md § 2 role table line 27.** Corrected the Orchestrator runtime's role-prompt path from the non-existent `docs/prompts/orchestrator.md` to the actual file `docs/prompts/runtime-hermes-orchestrator.md` (the prompt loaded by the deployed Hermes Agent runtime persona, per `AGENTS.md` and `CONTRIBUTING.md` § Roles). Verified via `ls docs/prompts/` on origin/main: only `runtime-hermes-orchestrator.md` and `ticket-orchestrator.md` exist for the orchestrator-family files; `orchestrator.md` does not. Frontmatter bumped v0.2.1 → v0.2.2 + `updated: 2026-05-10` (path-correction patch bump).
+3. **ADR-015 frontmatter + Status section + References.** Promoted `proposed` → `accepted`, version 0.1.0 → 0.2.0, added `updated: 2026-05-10` and `ratified_by: TKT-035 implementation merge (PR #155, commit 4fea58c, 2026-05-10) + RV-CODE-036 cross-family witness (PR #156, Kimi K2.6 Moonshot, verdict pass_with_changes)`. The Status section's first paragraph rewritten to record "Accepted 2026-05-10" with the same ratify chain; coordinates / implements clauses preserved verbatim. References last bullet updated: TKT-035 status `draft` → `done v0.1.1, merged 2026-05-10 via PR #155; RV-CODE-036 PR #156 verdict pass_with_changes; SO closure PR #157 promote draft → done`.
+4. **ARCH-002 § 7 ADR-proposal table ADR-015 row.** Status column `proposed` → `accepted (2026-05-10)`; Implements column `TKT-035` → `TKT-035 (done v0.1.1)` to mirror ADR-015 frontmatter. Decision-summary, Adopts-from, and Maps-to cells preserved verbatim.
+
+**Frontmatter bumps in this cycle.**
+
+- ARCH-002: `version: 0.1.0 → 0.1.1`; `updated: 2026-05-10` (already current). Patch bump for synthesis-doc clerical correction + ADR-015 promotion reflection.
+- MULTI-HERMES-CONTRACT.md: `version: 0.2.1 → 0.2.2`; `updated: 2026-05-09 → 2026-05-10`. Patch bump for path correction.
+- ADR-015: `version: 0.1.0 → 0.2.0`; `status: proposed → accepted`; added `updated: 2026-05-10`, `ratified_by: …`. Minor bump per ADR convention (status promotion is a substantive frontmatter change; the ADR body decision is unchanged but its binding force is new).
+
+**ADR-015 ratification chain (evidence trail).**
+
+- TKT-035 implementation merge: PR #155, commit 4fea58c, 2026-05-10 (Sandbox Capability Protocol v0.1 — DockerSandbox concrete implementation).
+- RV-CODE-036 cross-family witness: PR #156, Kimi K2.6 Moonshot, verdict `pass_with_changes` (clerical SHA drift F1, closed in PR #157).
+- TKT-035 ticket promotion `draft` → `done` (v0.1.1): PR #157 (SO closure cycle 2026-05-10).
+- Founder ratify: implicit via PR #155 merge button click (ARCH-002 § 7 promotion semantics treat the merge as the binding event when the Founder is the merger).
+- This Architect mini-cycle: formalizes the documentary state on the ADR itself + the § 7 table + the ARCH-002 line 527 cross-ref. No code change; clerical-only.
+
+**Out of scope (explicitly carried as surfaceable flags, NOT actioned this cycle).**
+
+- F1: TKT-034 § 10 attribution convention (canonical-default vs actual Executor attribution) — Founder/Architect convention decision, separate cycle.
+- F4: TKT-022/023/025 frontmatter `ready` vs impl-on-main drift — deep code-presence audit needed per AC, separate dispatch.
+- F5: Handoff doc § 6 TKT-021/TKT-025 scope mix-up — lives outside git in `/home/ubuntu/.devin/`, not actionable here.
+- ADR-016/017/018 promotions — gated on TKT-036/037/038/039 merges, which have not happened.
