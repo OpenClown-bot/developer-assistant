@@ -168,6 +168,8 @@ Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): pr
 
 Purpose: implements one ticket per PR. The `dev-assist-write-zone-enforcer` skill checks the ticket's allowed write zones before any file write. The `dev-assist-github-workflow` skill wraps the project's reviewed REST API + git orchestration code for branch creation, commit, PR open/update, and merge prompting (`HERMES-RUNTIME-CONTRACT.md` § 9 Constraints). The Docker terminal backend gives the runtime a sandboxed shell for build/test commands without granting host access.
 
+Executor terminal-backend protocol authoritative in `SANDBOX-CONTRACT.md` v0.1.0.
+
 Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~1.9k) + skills loadout (~0k) + plugins (~11.7k) ≈ 13.6k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
 
 ### 5.5 Reviewer runtime
