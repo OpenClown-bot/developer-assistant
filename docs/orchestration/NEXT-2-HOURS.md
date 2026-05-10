@@ -1,10 +1,17 @@
 ---
 id: NEXT-2-HOURS
-version: 0.1.0
-status: active
+version: 0.1.1
+status: superseded
+updated: 2026-05-10
 ---
 
 # Next 2 Hours
+
+> **Superseded 2026-05-10.** This document is a bootstrap-time scaffold from the empty-repo era. Its goals (write PRD-001, write ARCH-001, dispatch first Architect session) are all complete — PRD-001 is at v0.2.1, ARCH-001 is at v0.3.0, ARCH-002 is at v0.1.0, and TKT-020/021/022/023/025/030/032/033/034/035/040 are all merged on `main` as of 2026-05-10. Step 3 ("Start a Business Planner session") and Step 5 ("Start an Architect session after PRD approval") no longer reflect the project state.
+>
+> **Authoritative replacement:** `docs/orchestration/SESSION-STATE.md` is now the live state tracker. For the active SO pipeline, see `docs/meta/strategic-orchestrator.md`. For the role pipeline, see `docs/prompts/<role>.md`. For per-cycle handoffs, see `docs/session-log/<date>-session-N.md`.
+>
+> Body preserved below for historical reference.
 
 This guide explains what to do next and why.
 
