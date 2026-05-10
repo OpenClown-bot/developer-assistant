@@ -493,6 +493,79 @@ shellcheck scripts/install-self.sh \
 
 No blocking questions for iter-1.
 
+### iter-2 — 2026-05-10 — Code Executor (DeepSeek V4 Pro main) — branch `exe/tkt-034-rv-code-033-iter2`
+
+**Trigger:** Reviewer Kimi K2.6 returned RV-CODE-033 verdict `fail` on the iter-1 PR #135 (now merged to main as `61a51ab`); 3 findings (2 HIGH + 1 MEDIUM) per the v0.3.1 enforcement clauses. SO Hermes Strategic Orchestrator dispatched iter-2 (FRESH, not ITER-N CONTINUATION) on 2026-05-10 with REPO BOOTSTRAP from main HEAD `b5b3d4be3f7863d7eedcb834606c8663270b8110`.
+
+**Branch cut from main HEAD:** `b5b3d4be3f7863d7eedcb834606c8663270b8110` (iter-1 + RV-CODE-033 already merged: `61a51ab`, `6650270`).
+
+**Per-finding fix summary:**
+
+- **HIGH-1 (AC-2 / Architecture, § 1.A.iv enforcement)** — silent absent-fallback removed.
+  - `scripts/install-self.sh::render_shared_skills_manifest()` now pre-validates all 15 shared-skills/`<skill>`/SKILL.md before opening the manifest_tmp redirect. On absence: `log "FATAL: shared-skills source missing: shared-skills/<skill>/SKILL.md"; exit 1`. The `"absent_at_install_time"` sentinel branch is removed; every recorded `sha256_of_skill_md` is now a real 64-char hex digest.
+  - `scripts/verify-self.sh::check_shared_skills_manifest_match()` no longer skips entries where `recorded == "absent_at_install_time"`. Any such entry now appends `<skill>(absent_at_install_time-sentinel-disallowed)` to the umbrella mismatch list and FAILs the invariant (no degradation path).
+  - 15 NEW placeholder `shared-skills/dev-assist-*/SKILL.md` files created — exactly the names enumerated in `MULTI-HERMES-CONTRACT.md` § 5.0 (`dev-assist-classifier`, `dev-assist-progress-report`, `dev-assist-escalation-surface`, `dev-assist-work-queue-write`, `dev-assist-work-queue-poll`, `dev-assist-prd-writer`, `dev-assist-questions-writer`, `dev-assist-arch-writer`, `dev-assist-adr-writer`, `dev-assist-tickets-writer`, `dev-assist-executor-discipline`, `dev-assist-write-zone-enforcer`, `dev-assist-github-workflow`, `dev-assist-reviewer-rubric`, `dev-assist-review-writer`). Content per v0.3.0 spec: minimal frontmatter (`skill`, `version: 0.1.0`, `status: placeholder`) + 3-line body. Real content will be populated by follow-on TKT-021/TKT-025.
+  - 3 new tests: `TestSharedSkillsManifestRender::test_manifest_skips_no_absent_sentinels` (positive — clean install yields 15 hex SHAs, zero sentinels), `test_render_aborts_when_skill_md_missing` (negative — removing one SKILL.md → renderer exits with FATAL log line), `TestVerifySelfNewInvariants::test_verify_fails_when_manifest_has_absent_sentinel` (negative — tampered manifest with sentinel → verify FAIL with disallowed-sentinel marker).
+  - Commit `27913a2da66399c0dcd8178585a1e32a9de1d500`.
+
+- **HIGH-2 (AC-8(8) / AC-10 v0.3.1)** — verify-time prereq baseline expanded from 2 lightweight checks to 7 of 8 install-time prereqs.
+  - `scripts/verify-self.sh::check_prereq_baseline()` now mirrors install-self.sh `verify_prereqs()` for: (1) OS Ubuntu 22.04, (2) network api.github.com HTTP 200, (3) /srv disk ≥ 5_000_000 KB, (4) full 16-CLI canonical list (`bash systemctl sqlite3 curl tar git python3 sudo lsb_release stat sha256sum useradd usermod chmod chown ln mkdir`), (5) Docker (5 sub-conditions: command, daemon active, info, group present, devassist group membership), (6) Python ≥ 3.11, (7) gh CLI ≥ 2.40.0. Sub-checks aggregate into a single umbrella `record_pass`/`record_fail` so the invariant tally remains 19/19. The 8th install-time check (sudo-posture, `id -u == 0`) is deliberately excluded per v0.3.1 § 4 AC-8(8) Founder Decision α (verify-self runs as `devassist`; root posture is install-only via AC-10(b)).
+  - 8 new tests in `TestPrereqBaselineSubChecks`: 1 positive aggregation test + 1 negative test per sub-check. Each negative test installs a "default-good stubs" baseline (bash function overrides on `lsb_release`, `curl`, `df`, `docker`, `systemctl`, `getent`, `id`, `python3`, `gh`, `command -v`) and overrides exactly one stub to isolate the targeted sub-check. Asserted FAIL messages include the expected sub-check token (e.g. `OS(expected Ubuntu 22.04, got Debian 11)`, `network(api.github.com HTTP 503)`, `disk(/srv 100 KB < 5000000)`, `required-CLIs(missing: sqlite3)`, `docker(daemon-inactive)`, `python(3.10.12 below 3.11)`, `gh(2.39.0 below 2.40.0)`).
+  - Commit `aa90dd4639466e9374bbf292781333fd4e440d02`.
+
+- **MEDIUM-3 (AC-8(2) security)** — `gh auth status` stderr capture for embedded-credential detection.
+  - `scripts/verify-self.sh::check_gh_cli_authenticated()` no longer redirects stderr to `/dev/null`. New idiom: `gh_stderr=$(sudo -u devassist env HOME=/home/devassist gh auth status -h github.com 2>&1 >/dev/null); gh_rc=$?` captures stderr while suppressing stdout. If `gh_rc != 0` → existing `record_fail` with `gh auth status -h github.com failed for devassist`. If captured stderr matches glob `*embedded credential*` → new `record_fail` with `gh CLI not authenticated as devassist (embedded credential detected)`. Otherwise → `record_pass`. Per v0.3.1 § 4 AC-8(2) the captured stderr value is **never** echoed or written to logs (it can carry partial credential fragments); only the known failure marker is consulted.
+  - 3 new tests in `TestGhAuthEmbeddedCredentialDetection`: clean-stderr PASS, embedded-credential FAIL (with defensive assertion that the raw stderr substring is NOT in the verify-self log), and non-zero-rc FAIL with the existing auth-failed message (no false-positive embedded-credential detection).
+  - Commit `2704bd51e506a4c6986b247b40eb29e726609a98`.
+
+**Files modified (4) + created (15) = 19 paths in iter-2 (additionally + this § 10 entry = 20):**
+
+- Modified: `scripts/install-self.sh`, `scripts/verify-self.sh`, `tests/test_self_deployment_scripts.py`, `docs/tickets/TKT-034-interactive-installer-and-operator-hygiene.md` (§ 10 only).
+- Created: `shared-skills/dev-assist-{classifier,progress-report,escalation-surface,work-queue-write,work-queue-poll,prd-writer,questions-writer,arch-writer,adr-writer,tickets-writer,executor-discipline,write-zone-enforcer,github-workflow,reviewer-rubric,review-writer}/SKILL.md` (15 placeholder SKILL.md).
+- NOT modified: `tests/test_install_interactive_prompts.py`, `tests/fixtures/self-deploy.env.fixture`, all systemd templates, all architecture docs, all `src/` runtime code. Iter-1 implementation untouched outside the 3 functions named above.
+
+**AC re-affirmation (post-iter-2 state):**
+
+- AC-1 PASS — diagnosis re-verify unchanged from iter-1.
+- AC-2 PASS — A.i + A.ii + A.iii unchanged; A.iv now enforced (no silent fallback; positive + negative tests; 15 placeholder SKILL.md present).
+- AC-3 PASS — flag set unchanged.
+- AC-4 PASS — 11 prompts unchanged.
+- AC-5 PASS — TTY detection unchanged.
+- AC-6 PASS — secrets ACL unchanged.
+- AC-7 PASS — re-run idempotency unchanged.
+- AC-8 PASS — operator-hygiene invariants now complete: (2) stderr capture + embedded-credential detection landed; (5) shared-skills-manifest-match now treats sentinel as FAIL; (8) verify-time prereq baseline mirrors 7 of 8 install-time checks (sudo-posture excluded per v0.3.1 Founder Decision α).
+- AC-9 PASS — cleanup detection unchanged.
+- AC-10 PASS — install-time `verify_prereqs()` unchanged; verify-time mirror added by AC-8(8).
+- AC-11 PASS — interactive-test grid unchanged.
+- AC-12 PASS — token scan still green; embedded-credential stderr capture is grep-only, never logged.
+- AC-13 PASS — `validate_docs.py` green on iter-2 HEAD.
+
+**Local validation (iter-2 HEAD):**
+
+```
+python3 scripts/validate_docs.py        → "Docs validation passed."  (exit 0)
+python3 -m pytest tests/ -q --tb=no     → 12 failed / 1201 passed / 2 skipped /
+                                          84 subtests  (baseline preserved;
+                                          +14 passed = exactly the 14 new tests
+                                          this iter; 0 net-new failures)
+python3 -m pytest \
+    tests/test_self_deployment_scripts.py::TestSharedSkillsManifestRender \
+    tests/test_self_deployment_scripts.py::TestVerifySelfNewInvariants \
+    tests/test_self_deployment_scripts.py::TestPrereqBaselineSubChecks \
+    tests/test_self_deployment_scripts.py::TestGhAuthEmbeddedCredentialDetection
+                                        → 30 passed (16 pre-existing + 14 new
+                                          for iter-2: 3 HIGH-1 + 8 HIGH-2 +
+                                          3 MEDIUM-3)
+bash -n scripts/install-self.sh \
+    && bash -n scripts/verify-self.sh   → syntax OK
+```
+
+**Baseline correction.** The dispatching iter-2 NUDGE stated the pre-existing pytest baseline on `main` was `60 failed / 1139 passed / 2 skipped / 84 subtests`. An independent re-clone of `main` HEAD `b5b3d4b…` and pytest run produced `12 failed / 1187 passed / 2 skipped / 84 subtests`. Iter-2 adds 14 new tests (all green), yielding `12 / 1201 / 2 / 84` — confirming zero regressions on the TKT-034 surface. The 12 pre-existing failures (`test_health_endpoint.py::TestHealthEndpointNonLocalhost`, `test_runtime_check.py::TestOperationalDbPath`, `test_runtime_check.py::TestAllRolesPass` × 5 subtests, `test_runtime_layout_catalog_round_trip.py::TestRoundTrip` × 5 subtests) are all in files explicitly outside v0.3.1 § 5 write zone (`src/developer_assistant/runtime_check.py`, `src/developer_assistant/model_catalog.py`, network-isolation assumptions). The NUDGE's `60/1139` figure appears to have come from a different test environment / stale measurement; surfaced in this log as a clerical reconciliation, not a blocker.
+
+**Open questions for SO/Founder:**
+
+- **No new blocking questions for iter-2.** Q-TKT-034-01 / Q-TKT-034-02 from iter-1 carry over unchanged.
+
 ## 11. Amendment Delta — v0.2.0 → v0.3.0
 
 Amendment trigger: RV-CODE-033 verdict `fail` on PR #135 (TKT-034 v0.2.0 implementation iter-1) returned 2 HIGH-severity blockers + 1 MEDIUM gap. Independently re-verified by SO pass-2 ratify-ack on PR #137. Founder approved iter-2 dispatch with Architect amendment first (path 4a — add real `shared-skills/<skill>/SKILL.md` source tree).
