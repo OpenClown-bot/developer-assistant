@@ -101,4 +101,30 @@ Hard rules for this ticket (governance constraints inherited from ARCH-002 + the
 
 ## 10. Execution Log
 
-(Reserved for Executor cycle.)
+### Cycle 1 — 2026-05-10
+
+- **Branch:** `exe/tkt-040-skill-loadout-context-budget`
+- **Base:** `main` at `ce62fa1998a0a9d9970e2ff1a3bad14e02e09c53`
+- **Executor:** Devin platform, acct id `devin-d060f47aadf34bbba9807912a35ceb71`. Underlying model not directly introspectable per Devin product identity rules; assigned model per `AGENTS.md` is DeepSeek V4 Pro main / GLM 5.1 fallback.
+- **SO ratify pass-1:** `devin-3babca2c0809445da4d3badb8645e199` at 2026-05-10 (pre-implementation).
+- **Files created (4):** `scripts/measure_role_context.py`, `docs/architecture/role-context-budgets.md`, `src/developer_assistant/hermes_plugins/dev_assist_work_queue/skill_loader.py`, `tests/test_skill_loader_mcp_exclusion.py`.
+- **Files modified (3):** `docs/architecture/MULTI-HERMES-CONTRACT.md` (§ 5.0.1 NEW + § 5.0.2 renumbered + § 5.1–5.5 footers), `src/developer_assistant/hermes_plugins/dev_assist_work_queue/tools.py` (register hook), this file (§ 10 entry).
+- **Acceptance criteria:**
+  - **AC-1 PASS** — five `Context budget:` footers added under § 5.1–5.5; numbers from `scripts/measure_role_context.py` empirical run.
+  - **AC-2 PASS** — `scripts/measure_role_context.py` produces deterministic JSON; `python3 scripts/measure_role_context.py --check-deterministic` reports `Deterministic: OK`. Reference table at `docs/architecture/role-context-budgets.md`.
+  - **AC-3 PASS** — new § 5.0.1 "MCP exclusion at load time" paragraph added; cross-references `ARCH-001.md` § 21 and `OBSERVABILITY-CONTRACT.md` § 4. Numbering deviation: existing § 5.0.1 "Per-Role Loadout Tables" was renumbered to § 5.0.2 (verbatim content preserved) to honor AC-3's literal § 5.0.1 number for the new MCP-exclusion subsection. ARCH-002 line 527 carries a stale "§ 5.0.1-5.6 (per-role tables)" reference; ARCH-002 is read-only for Executor and surfaced for follow-up Architect cycle.
+  - **AC-4 PASS** — `dev_assist_work_queue.skill_loader.is_mcp_excluded` + `filter_skills` implement the rule; `register(hooks)` exposes both via `hooks["skill_loader"] = {"is_excluded": ..., "filter": ...}`. Each rejection emits a structured journald-compatible log entry (`event: skill_loader.mcp_exclusion`).
+  - **AC-5 PASS** — `tests/test_skill_loader_mcp_exclusion.py` runs 15 tests across 4 classes covering all required cases plus integration tests (15/15 pass).
+  - **AC-6 PASS** — `python3 scripts/validate_docs.py` reports `Docs validation passed.`
+  - **AC-7 PASS** — backward compatibility verified by grep: no skill currently in `MULTI-HERMES-CONTRACT.md` § 5 matches the `mcp:*` / `mcp/*` / `/mcp/` exclusion pattern.
+- **Hard Rules § 8 observance:**
+  - **Rule 1 (no new pip deps for tokenizer):** observed — `scripts/measure_role_context.py` uses `tiktoken` only if it is already importable; otherwise it falls back to a stdlib `max(1, ceil(len(text) / 4))` estimator clearly labeled `cl100k_base_chars_per_token_fallback` in the JSON output and in MULTI-HERMES-CONTRACT.md § 5.1–5.5 footer parentheticals. The script imports nothing outside the Python stdlib at module level.
+  - **Rule 2 (no MCP-named skill enabled):** observed — exclusion is forward-only; no skill in v0.1 allowlist matches the pattern (verified by AC-7 grep).
+  - **Rule 3 (empirical measurement, not estimation):** observed — every footer number is derived from a `scripts/measure_role_context.py` run; numbers and methodology are reproducible via `python3 scripts/measure_role_context.py`.
+  - **Rule 4 (path-segment / prefix strict, NOT substring `mcp`):** observed — `is_mcp_excluded` checks `name.startswith("mcp:")`, `name.startswith("mcp/")`, and the literal `"/mcp/"` segment in `path`. The `dev-assist-mcp-bridge` and `mcphelper` and `dev-assist-mcp-not-actually` cases are explicit unit tests proving non-greedy substring behaviour.
+- **Validation order before push:**
+  1. `python3 scripts/measure_role_context.py --check-deterministic` → `Deterministic: OK`.
+  2. `python3 scripts/validate_docs.py` → `Docs validation passed.`
+  3. `pytest tests/test_skill_loader_mcp_exclusion.py -v` → 15 passed.
+  4. `pytest tests/ -q --tb=no` → `60 failed, 1139 passed, 2 skipped, 84 subtests passed`. Failure count identical to pre-existing baseline (`60 failed, 1124 passed, 2 skipped, 84 subtests passed` on `main`); the 15 additional passes are exactly the new AC-5 tests. No regressions. Baseline failures span `tests/test_self_deployment_scripts.py` (~48 unique + subtests), `tests/test_health_endpoint.py` (1), and `tests/test_runtime_check.py` (1) — all unrelated to the skill-loader / work-queue / contract changes.
+- **Path substitution note:** TKT-040 § 5 Allowed Files lists the speculative path `src/work_queue/skill_loader.py`; the actual repo structure places the plugin at `src/developer_assistant/hermes_plugins/dev_assist_work_queue/`. The plugin-package sibling location was chosen for cleaner separation and to match the `dev_assist_escalation_policy` plugin's hook precedent (`hooks["pre_tool_call"]`). The substitution is within the spirit of § 5 (plugin-side enforcement, before skill-content load) and was approved by SO ratify pass-1.
