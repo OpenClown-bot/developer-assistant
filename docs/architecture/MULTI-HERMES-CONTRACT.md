@@ -114,7 +114,11 @@ Version pins resolve to a specific git commit at `releases/<release-id>/` activa
 
 The two custom Hermes plugins (`dev-assist-escalation-policy`, `dev-assist-work-queue`) are listed in § 5.6.
 
-### 5.0.1 Per-Role Loadout Tables
+### 5.0.1 MCP exclusion at load time
+
+Skill names matching the `mcp:*` or `mcp/*` prefix patterns, or paths under `/srv/devassist/shared-skills/mcp/`, are excluded at skill-loader init — before any skill content is read or counted against the per-role context budget. The match is path-segment / prefix-strict so future legitimate names containing the substring `mcp` (for example, a hypothetical `dev-assist-mcp-bridge` v0.2+ skill) are not falsely rejected. The exclusion is forward-only defensive: no skill in the v0.1 allowlist (§ 5.0) matches the pattern, and no MCP-named skill is enabled. This subsection makes the existing v0.1 posture from `ARCH-001.md` § 21 (cross-runtime MCP servers listed as a Future Possibility, NOT a v0.1 commitment) enforceable at the skill-loader level inside the `dev-assist-work-queue` plugin's `register(hooks)` init path; rejected skills emit a structured journald-compatible log entry per `OBSERVABILITY-CONTRACT.md` § 4 (`event: skill_loader.mcp_exclusion`).
+
+### 5.0.2 Per-Role Loadout Tables
 
 The full per-role loadout. Each runtime's `config.yaml` enables only the listed Hermes built-in skills/toolsets and loads the listed custom skills via `skills.external_dirs`. Plugins are listed separately in § 5.6.
 
@@ -128,6 +132,8 @@ The full per-role loadout. Each runtime's `config.yaml` enables only the listed 
 
 Purpose: the Orchestrator runtime is the only one that talks to the Founder. It receives Telegram messages, classifies them with `dev-assist-classifier`, writes follow-up work to the SQLite queue with `dev-assist-work-queue-write`, surfaces pending escalations with `dev-assist-escalation-surface`, and delivers progress reports with `dev-assist-progress-report` driven by `cronjob`.
 
+Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~1.7k) + skills loadout (~0k) + plugins (~10.2k) ≈ 11.9k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
+
 ### 5.2 Business Planner runtime
 
 | Category | Loaded |
@@ -137,6 +143,8 @@ Purpose: the Orchestrator runtime is the only one that talks to the Founder. It 
 | NOT loaded | `telegram-gateway`, `terminal`, bundled `github-*`, `delegate_task`, `web`, `browser` |
 
 Purpose: produces PRDs (write zone: `docs/prd/`) and questions (write zone: `docs/questions/`). Polls the work queue for items targeting role `planner`.
+
+Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~0.7k) + skills loadout (~0k) + plugins (~10.2k) ≈ 10.9k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
 
 ### 5.3 Architect runtime
 
@@ -148,6 +156,8 @@ Purpose: produces PRDs (write zone: `docs/prd/`) and questions (write zone: `doc
 
 Purpose: produces architecture specs (write zone: `docs/architecture/`), ADRs (write zone: `docs/architecture/adr/`), and ticket Sections 1-9 (write zone: `docs/tickets/`). Polls the work queue for items targeting role `architect`.
 
+Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~0.9k) + skills loadout (~0k) + plugins (~10.2k) ≈ 11.1k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
+
 ### 5.4 Executor runtime
 
 | Category | Loaded |
@@ -158,6 +168,8 @@ Purpose: produces architecture specs (write zone: `docs/architecture/`), ADRs (w
 
 Purpose: implements one ticket per PR. The `dev-assist-write-zone-enforcer` skill checks the ticket's allowed write zones before any file write. The `dev-assist-github-workflow` skill wraps the project's reviewed REST API + git orchestration code for branch creation, commit, PR open/update, and merge prompting (`HERMES-RUNTIME-CONTRACT.md` § 9 Constraints). The Docker terminal backend gives the runtime a sandboxed shell for build/test commands without granting host access.
 
+Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~1.9k) + skills loadout (~0k) + plugins (~10.2k) ≈ 12.1k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
+
 ### 5.5 Reviewer runtime
 
 | Category | Loaded |
@@ -167,6 +179,8 @@ Purpose: implements one ticket per PR. The `dev-assist-write-zone-enforcer` skil
 | NOT loaded | `telegram-gateway`, bundled `github-*`, `delegate_task`, `web`, `browser` |
 
 Purpose: produces RV-SPEC and RV-CODE reviews (write zone: `docs/reviews/`). Reads the diff, applies the rubric encoded in `dev-assist-reviewer-rubric`, and emits one of the verdicts (`pass`, `pass_with_changes`, `pass_with_recommendations`, `fail`) via `dev-assist-review-writer`. The Docker terminal backend has read-only mounts so the Reviewer can run static checks without modifying the codebase.
+
+Context budget (empirical, tokenizer `cl100k_base_chars_per_token_fallback`): prompt (~1.7k) + skills loadout (~0k) + plugins (~10.2k) ≈ 11.9k tokens of static context per dispatch. Skills count covers in-repo custom skills only; Hermes built-in skills external. See `docs/architecture/role-context-budgets.md` for methodology and reproduce command.
 
 ### 5.6 Plugins (loaded by all five runtimes)
 
