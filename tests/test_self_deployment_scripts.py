@@ -826,6 +826,79 @@ class TestSharedSkillsManifestRender(unittest.TestCase):
         for f in manifest_dir.glob("shared-skills-manifest.json.tmp.*"):
             self.fail(f"staging file survived: {f}")
 
+    def test_manifest_skips_no_absent_sentinels(self) -> None:
+        # TKT-034 v0.3.1 § 1.A.iv enforcement (RV-CODE-033 HIGH-1):
+        # a clean install with all 15 SKILL.md present on disk MUST
+        # produce a manifest where every sha256_of_skill_md is a real
+        # hex digest. The legacy "absent_at_install_time" sentinel is
+        # disallowed.
+        import json
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stdout[-500:])
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        for skill, entry in data["skills"].items():
+            sha = entry["sha256_of_skill_md"]
+            self.assertNotEqual(
+                sha,
+                "absent_at_install_time",
+                f"sentinel SHA recorded for {skill}; § 1.A.iv enforcement violated",
+            )
+            self.assertEqual(
+                len(sha), 64, f"{skill}: SHA-256 hex digest must be 64 chars, got {len(sha)}",
+            )
+            self.assertRegex(
+                sha,
+                r"^[0-9a-f]{64}$",
+                f"{skill}: SHA-256 must be lowercase hex, got {sha!r}",
+            )
+
+    def test_render_aborts_when_skill_md_missing(self) -> None:
+        # TKT-034 v0.3.1 § 4 AC-2 (A.iv) negative test pair (1/2):
+        # if any one shared-skills/<skill>/SKILL.md is absent at install
+        # time, render_shared_skills_manifest() MUST abort the install
+        # with exit 1 and a FATAL log message naming the missing path.
+        # We exercise the renderer in isolation by sourcing install-self.sh
+        # and invoking render_shared_skills_manifest() against a sandboxed
+        # SCRIPT_DIR/BASE so the production source tree is not mutated.
+        import shutil as _shutil
+        repo_root = Path(__file__).resolve().parents[1]
+        sandbox = Path(self.tmpdir) / "sandbox-repo"
+        (sandbox / "scripts").mkdir(parents=True)
+        _shutil.copytree(repo_root / "shared-skills", sandbox / "shared-skills")
+        victim = sandbox / "shared-skills" / "dev-assist-classifier" / "SKILL.md"
+        victim.unlink()
+        base_dir = Path(self.tmpdir) / "srv-target"
+        bash_cmd = (
+            f'set +e; '
+            f'source "{repo_root / "scripts" / "install-self.sh"}" 2>/dev/null; '
+            f'SCRIPT_DIR="{sandbox}/scripts"; '
+            f'BASE="{base_dir}"; '
+            f'DRY_RUN=1; '
+            f'render_shared_skills_manifest; '
+            f'echo "EXIT_CODE:$?"'
+        )
+        result = subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertIn(
+            "FATAL: shared-skills source missing: shared-skills/dev-assist-classifier/SKILL.md",
+            result.stdout,
+            f"FATAL log line missing or wrong format. stdout={result.stdout!r}",
+        )
+        # The function must exit (non-zero) before reaching the EXIT_CODE
+        # echo, since `exit 1` from inside a sourced script terminates the
+        # entire shell. The marker MUST NOT appear.
+        self.assertNotIn(
+            "EXIT_CODE:0",
+            result.stdout,
+            "render_shared_skills_manifest must abort, not return cleanly",
+        )
+
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestSecretsFileAcl(unittest.TestCase):
@@ -917,6 +990,25 @@ class TestVerifySelfNewInvariants(unittest.TestCase):
         result = _run_script("verify-self.sh", self.env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("dev-assist-classifier", result.stdout)
+
+    def test_verify_fails_when_manifest_has_absent_sentinel(self) -> None:
+        # TKT-034 v0.3.1 § 4 AC-2 (A.iv) negative test pair (2/2)
+        # (RV-CODE-033 HIGH-1): a manifest where any
+        # sha256_of_skill_md == "absent_at_install_time" MUST cause
+        # check_shared_skills_manifest_match to FAIL with no skip clause.
+        import json
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        data["skills"]["dev-assist-classifier"]["sha256_of_skill_md"] = "absent_at_install_time"
+        manifest.write_text(json.dumps(data))
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared-skills manifest parity: FAIL", result.stdout)
+        self.assertIn(
+            "dev-assist-classifier(absent_at_install_time-sentinel-disallowed)",
+            result.stdout,
+            "FAIL message must surface the disallowed sentinel for the offending skill",
+        )
 
     def test_verify_fails_when_gh_hosts_missing(self) -> None:
         marker = Path(self.tmpdir) / "home" / "devassist" / ".config" / "gh" / "hosts.yml"
@@ -1059,6 +1151,325 @@ class TestPreReqVerificationStubsInDryRun(unittest.TestCase):
             self.assertIn("verify_prereqs (8 checks) skipped", result.stdout)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestGhAuthEmbeddedCredentialDetection(unittest.TestCase):
+    """TKT-034 v0.3.1 § 4 AC-8(2) (RV-CODE-033 MEDIUM-3):
+    check_gh_cli_authenticated() must capture `gh auth status` stderr
+    (no longer redirected to /dev/null) and FAIL when the captured
+    stderr contains the substring "embedded credential". The stderr
+    content itself MUST NOT be logged because it can carry partial
+    credential fragments.
+    """
+
+    BASE_BASH = (
+        "set +e; "
+        f'source "{SCRIPTS_DIR}/verify-self.sh" 2>/dev/null; '
+        # verify-self.sh re-enables `set -euo pipefail`; relax it so a
+        # stubbed gh returning rc != 0 inside `gh_rc=$?` does not abort
+        # the test harness.
+        "set +e; set +u; "
+        "FIXTURE=0; DRY_RUN=0; "
+        "PASS_COUNT=0; FAIL_COUNT=0; FAIL_SUMMARY=\"\"; "
+        # Stub `sudo -u devassist env HOME=/home/devassist gh auth status -h github.com`
+        # by recognizing the prefix and forwarding the trailing command.
+        "sudo() { "
+        "  if [ \"$1\" = \"-u\" ]; then "
+        "    shift; shift; "  # drop -u devassist
+        "    if [ \"$1\" = \"env\" ]; then "
+        "      shift; "  # drop env
+        "      while [ $# -gt 0 ] && [ \"${1#*=}\" != \"$1\" ]; do shift; done; "
+        "    fi; "
+        "    \"$@\"; "
+        "  else "
+        "    builtin command sudo \"$@\"; "
+        "  fi; "
+        "}; "
+    )
+    TAIL_BASH = (
+        "check_gh_cli_authenticated; "
+        "echo \"--PASS_COUNT:$PASS_COUNT\"; "
+        "echo \"--FAIL_COUNT:$FAIL_COUNT\"; "
+    )
+
+    def _run(self, gh_stub: str) -> subprocess.CompletedProcess:
+        bash_cmd = self.BASE_BASH + gh_stub + self.TAIL_BASH
+        return subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+
+    def test_clean_stderr_passes(self) -> None:
+        # `gh auth status` exits 0 with the normal "Logged in to github.com"
+        # message on stderr (no "embedded credential" substring).
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "github.com" >&2; '
+            '    echo "  Logged in to github.com account openclown-bot" >&2; '
+            '    echo "  Active account: true" >&2; '
+            '    echo "  Token: gho_******" >&2; '
+            '    return 0; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("PASS: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn("--PASS_COUNT:1", result.stdout)
+        self.assertIn("--FAIL_COUNT:0", result.stdout)
+
+    def test_embedded_credential_in_stderr_fails(self) -> None:
+        # `gh auth status` exits 0 but its stderr contains "embedded
+        # credential" — the marker we now detect.
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "github.com" >&2; '
+            '    echo "  X github.com: invalid token (embedded credential found in remote URL)" >&2; '
+            '    return 0; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("FAIL: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn(
+            "embedded credential detected",
+            result.stdout,
+            "FAIL message must surface the embedded-credential failure marker",
+        )
+        # The stderr content itself must NOT be logged (only the known
+        # marker and the FAIL reason). Defensively check that the raw
+        # leak-shaped substring did not slip into the verify-self log.
+        self.assertNotIn(
+            "embedded credential found in remote URL",
+            result.stdout,
+            "stderr content must NOT be logged — may contain credential fragments",
+        )
+
+    def test_nonzero_rc_fails_with_auth_failed_message(self) -> None:
+        # `gh auth status` exits non-zero (the normal "not authenticated"
+        # path) — must FAIL with the existing auth-failed message and
+        # NOT trigger the embedded-credential branch.
+        gh_stub = (
+            'gh() { '
+            '  if [ "$1" = "auth" ] && [ "$2" = "status" ]; then '
+            '    echo "X github.com: not logged in" >&2; '
+            '    return 1; '
+            '  fi; '
+            '  return 1; '
+            '}; '
+        )
+        result = self._run(gh_stub)
+        self.assertIn("FAIL: gh CLI authenticated as devassist", result.stdout)
+        self.assertIn(
+            "gh auth status -h github.com failed for devassist",
+            result.stdout,
+        )
+        self.assertNotIn("embedded credential detected", result.stdout)
+
+
+@unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
+class TestPrereqBaselineSubChecks(unittest.TestCase):
+    """TKT-034 v0.3.1 § 4 AC-8(8) (RV-CODE-033 HIGH-2): verify-time
+    check_prereq_baseline() mirrors 7 of the 8 install-time
+    verify_prereqs() checks (sudo-posture excluded per Founder
+    Decision α). One negative-path test per sub-check + one positive
+    aggregation test, exercised by sourcing verify-self.sh and
+    overriding the underlying CLIs as bash functions.
+    """
+
+    DEFAULT_GOOD_STUBS = r"""
+lsb_release() {
+    case "$1" in
+        -is) echo "Ubuntu" ;;
+        -rs) echo "22.04" ;;
+        *) echo "" ;;
+    esac
+}
+curl() {
+    # Mimic `curl -fsS -o /dev/null -w "%{http_code}" --max-time 10 https://api.github.com`
+    echo "200"
+    return 0
+}
+df() {
+    # Mimic `df --output=avail /srv` → header line + KB count
+    printf 'Avail\n9999999\n'
+    return 0
+}
+docker() { return 0; }
+systemctl() { return 0; }
+getent() {
+    case "$1 $2" in
+        "group docker") echo "docker:x:999:devassist" ;;
+        *) echo "" ;;
+    esac
+    return 0
+}
+id() { return 0; }
+python3() {
+    if [ "$1" = "--version" ]; then
+        echo "Python 3.12.0"
+        return 0
+    fi
+    builtin command python3 "$@"
+}
+gh() {
+    if [ "$1" = "--version" ]; then
+        echo "gh version 2.55.0 (2024-08-01)"
+        return 0
+    fi
+    return 1
+}
+command() {
+    if [ "$1" = "-v" ]; then
+        case "$2" in
+            bash|systemctl|sqlite3|curl|tar|git|python3|sudo|lsb_release|stat|sha256sum|useradd|usermod|chmod|chown|ln|mkdir|gh|docker)
+                echo "/stub/$2"
+                return 0
+                ;;
+            *)
+                builtin command "$@"
+                return $?
+                ;;
+        esac
+    fi
+    builtin command "$@"
+}
+"""
+
+    def _run_check(self, extra_stubs: str = "") -> subprocess.CompletedProcess:
+        bash_cmd = (
+            "set +e; "
+            f'source "{SCRIPTS_DIR}/verify-self.sh" 2>/dev/null; '
+            "FIXTURE=0; DRY_RUN=0; "
+            "PASS_COUNT=0; FAIL_COUNT=0; FAIL_SUMMARY=\"\"; "
+            f"{self.DEFAULT_GOOD_STUBS}\n"
+            f"{extra_stubs}\n"
+            "check_prereq_baseline; "
+            "echo \"--RC:$?\"; "
+            "echo \"--PASS_COUNT:$PASS_COUNT\"; "
+            "echo \"--FAIL_COUNT:$FAIL_COUNT\"; "
+        )
+        return subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+
+    def test_positive_path_all_stubs_satisfied(self) -> None:
+        result = self._run_check()
+        self.assertIn("PASS: VPS prereq baseline", result.stdout)
+        self.assertIn("--PASS_COUNT:1", result.stdout)
+        self.assertIn("--FAIL_COUNT:0", result.stdout)
+
+    def test_subcheck_1_os_wrong_distro_fails(self) -> None:
+        override = r"""
+lsb_release() {
+    case "$1" in
+        -is) echo "Debian" ;;
+        -rs) echo "11" ;;
+    esac
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("OS(expected Ubuntu 22.04, got Debian 11)", result.stdout)
+
+    def test_subcheck_2_network_unreachable_fails(self) -> None:
+        # Stub curl to print non-200 HTTP code
+        override = r"""
+curl() { echo "503"; return 0; }
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("network(api.github.com HTTP 503)", result.stdout)
+
+    def test_subcheck_3_disk_too_small_fails(self) -> None:
+        # Stub df to print only 100 KB free on /srv
+        override = r"""
+df() { printf 'Avail\n100\n'; return 0; }
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("disk(/srv 100 KB < 5000000)", result.stdout)
+
+    def test_subcheck_4_required_cli_missing_fails(self) -> None:
+        # Stub `command -v sqlite3` to fail (rest stay present)
+        override = r"""
+command() {
+    if [ "$1" = "-v" ]; then
+        case "$2" in
+            sqlite3)
+                return 1
+                ;;
+            bash|systemctl|curl|tar|git|python3|sudo|lsb_release|stat|sha256sum|useradd|usermod|chmod|chown|ln|mkdir|gh|docker)
+                echo "/stub/$2"
+                return 0
+                ;;
+            *)
+                builtin command "$@"
+                return $?
+                ;;
+        esac
+    fi
+    builtin command "$@"
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("required-CLIs(missing: sqlite3)", result.stdout)
+
+    def test_subcheck_5_docker_daemon_inactive_fails(self) -> None:
+        # docker command present, but `systemctl is-active docker` fails
+        override = r"""
+systemctl() {
+    if [ "$1" = "is-active" ] && [ "$2" = "docker" ]; then
+        return 1
+    fi
+    return 0
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("docker(daemon-inactive", result.stdout)
+
+    def test_subcheck_6_python_below_311_fails(self) -> None:
+        # Stub python3 --version to print 3.10.x
+        override = r"""
+python3() {
+    if [ "$1" = "--version" ]; then
+        echo "Python 3.10.12"
+        return 0
+    fi
+    builtin command python3 "$@"
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("python(3.10.12 below 3.11)", result.stdout)
+
+    def test_subcheck_7_gh_below_240_fails(self) -> None:
+        # Stub gh --version to print 2.39.0
+        override = r"""
+gh() {
+    if [ "$1" = "--version" ]; then
+        echo "gh version 2.39.0 (2023-12-01)"
+        return 0
+    fi
+    return 1
+}
+"""
+        result = self._run_check(override)
+        self.assertIn("FAIL: VPS prereq baseline", result.stdout)
+        self.assertIn("gh(2.39.0 below 2.40.0)", result.stdout)
 
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")

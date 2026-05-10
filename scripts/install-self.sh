@@ -1281,6 +1281,21 @@ render_shared_skills_manifest() {
     local release_commit
     release_commit=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo "unknown")
     mkdir -p "$manifest_dir" "$skills_dst"
+    # TKT-034 v0.3.1 § 1.A.iv enforcement: silent fallback (e.g. recording
+    # a sentinel SHA value like "absent_at_install_time" and continuing) is
+    # explicitly disallowed. The on-disk source tree at
+    # shared-skills/<skill>/SKILL.md is the single source of truth; absence
+    # is a hard error, not a degradation path. Pre-validate the full set
+    # before opening the manifest_tmp redirect so the FATAL log line lands
+    # on stdout/journald rather than inside the staged JSON.
+    local skill src_md
+    for skill in $SHARED_SKILLS; do
+        src_md="${repo_root}/shared-skills/${skill}/SKILL.md"
+        if [ ! -f "$src_md" ]; then
+            log "FATAL: shared-skills source missing: shared-skills/${skill}/SKILL.md"
+            exit 1
+        fi
+    done
     {
         printf '{\n'
         printf '  "schema_version": "1.0",\n'
@@ -1288,21 +1303,13 @@ render_shared_skills_manifest() {
         printf '  "release_commit": "%s",\n' "$release_commit"
         printf '  "skills": {\n'
         local first=1
-        local skill src_dir src_md sha
+        local src_dir sha
         for skill in $SHARED_SKILLS; do
             src_dir="${repo_root}/shared-skills/${skill}"
             src_md="${src_dir}/SKILL.md"
             mkdir -p "${skills_dst}/${skill}"
-            if [ -f "$src_md" ]; then
-                cp -r "${src_dir}/." "${skills_dst}/${skill}/" 2>/dev/null || true
-                sha=$(sha256sum "$src_md" | awk '{print $1}')
-            else
-                # TKT-034 iter-1 reality: shared-skills/ source tree absent
-                # at HEAD 8bc5288. Renderer records the absent state so
-                # verify-self check_shared_skills_manifest_match can detect
-                # drift if/when the source tree lands.
-                sha="absent_at_install_time"
-            fi
+            cp -r "${src_dir}/." "${skills_dst}/${skill}/" 2>/dev/null || true
+            sha=$(sha256sum "$src_md" | awk '{print $1}')
             if [ "$first" = "1" ]; then
                 first=0
             else

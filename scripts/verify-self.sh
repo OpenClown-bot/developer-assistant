@@ -378,10 +378,25 @@ check_gh_cli_authenticated() {
         fi
         return 0
     fi
-    if ! sudo -u devassist env HOME=/home/devassist gh auth status -h github.com >/dev/null 2>&1; then
+    # TKT-034 v0.3.1 § 4 AC-8(2) (RV-CODE-033 MEDIUM-3): capture stderr
+    # and check for the "embedded credential" failure substring that gh
+    # emits when the host config carries a token leaked into the URL or
+    # config file. We MUST NOT log the stderr content itself — it can
+    # contain partial credential fragments — so we only inspect for the
+    # known failure marker and report its presence/absence.
+    local gh_stderr gh_rc
+    gh_stderr=$(sudo -u devassist env HOME=/home/devassist gh auth status -h github.com 2>&1 >/dev/null)
+    gh_rc=$?
+    if [ "$gh_rc" -ne 0 ]; then
         record_fail "$name" "gh auth status -h github.com failed for devassist"
         return 0
     fi
+    case "$gh_stderr" in
+        *"embedded credential"*)
+            record_fail "$name" "gh CLI not authenticated as devassist (embedded credential detected)"
+            return 0
+            ;;
+    esac
     record_pass "$name"
 }
 
@@ -468,13 +483,16 @@ check_shared_skills_manifest_match() {
         record_fail "$name" "manifest missing skill entries:${missing}"
         return 0
     fi
-    # On-disk SHA parity: for every skill with a non-absent recorded SHA,
-    # the on-disk SKILL.md must hash to the same value.
+    # On-disk SHA parity: every recorded SHA must be a real hex digest of
+    # the corresponding on-disk SKILL.md. Any "absent_at_install_time"
+    # sentinel is a manifest-render-time silent fallback that TKT-034
+    # v0.3.1 § 1.A.iv enforcement explicitly disallows; treat it as FAIL.
     local mismatch=""
     for skill in $SHARED_SKILLS; do
         local recorded
         recorded=$(python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print(m['skills'][sys.argv[2]]['sha256_of_skill_md'])" "$manifest" "$skill" 2>/dev/null || echo "")
         if [ "$recorded" = "absent_at_install_time" ]; then
+            mismatch="${mismatch} ${skill}(absent_at_install_time-sentinel-disallowed)"
             continue
         fi
         local on_disk="${BASE}/shared-skills/${skill}/SKILL.md"
@@ -586,25 +604,122 @@ check_prereq_baseline() {
         record_pass "$name"
         return 0
     fi
-    # Re-check the lightweight subset: required CLIs present; python ≥ 3.11;
-    # gh CLI present (versions are checked by check_gh_cli_installed).
+    # TKT-034 v0.3.1 § 4 AC-8(8): mirror 7 of the 8 install-time
+    # verify_prereqs() checks at verify-time. The 8th check
+    # (sudo-posture, id -u == 0) is install-only per Founder Decision α
+    # — verify-self runs as devassist by design, so MUST NOT call
+    # `id -u == 0` here. Sub-checks aggregate into a single umbrella
+    # FAIL/PASS to keep the invariant count stable.
+    local failures=""
+
+    # Sub-check 1: OS — Ubuntu 22.04
+    local os_id os_rel
+    os_id=$(lsb_release -is 2>/dev/null || echo "unknown")
+    os_rel=$(lsb_release -rs 2>/dev/null || echo "unknown")
+    if [ "$os_id" != "Ubuntu" ] || [ "$os_rel" != "22.04" ]; then
+        failures="${failures} OS(expected Ubuntu 22.04, got ${os_id} ${os_rel})"
+    fi
+
+    # Sub-check 2: Network — api.github.com reachable (HTTP 200)
+    local code
+    code=$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 10 https://api.github.com 2>/dev/null) || code="000"
+    if [ "$code" != "200" ]; then
+        failures="${failures} network(api.github.com HTTP ${code})"
+    fi
+
+    # Sub-check 3: Disk — /srv ≥ 5_000_000 KB free
+    local avail_kb
+    avail_kb=$(df --output=avail /srv 2>/dev/null | tail -1 | tr -d ' ')
+    case "$avail_kb" in
+        ''|*[!0-9]*)
+            failures="${failures} disk(/srv df --output=avail unparseable)"
+            ;;
+        *)
+            if [ "$avail_kb" -lt 5000000 ]; then
+                failures="${failures} disk(/srv ${avail_kb} KB < 5000000)"
+            fi
+            ;;
+    esac
+
+    # Sub-check 4: Required CLIs (full canonical list, install-self.sh
+    # check_deps() / verify_prereqs() parity).
     local missing=""
     local cli
-    for cli in bash systemctl sqlite3 curl tar git python3 sudo lsb_release stat sha256sum useradd usermod chmod chown ln mkdir gh docker; do
+    for cli in bash systemctl sqlite3 curl tar git python3 sudo lsb_release stat sha256sum useradd usermod chmod chown ln mkdir; do
         if ! command -v "$cli" >/dev/null 2>&1; then
             missing="${missing} ${cli}"
         fi
     done
     if [ -n "$missing" ]; then
-        record_fail "$name" "missing CLIs:${missing}"
-        return 0
+        failures="${failures} required-CLIs(missing:${missing})"
     fi
-    local pyver pymaj pymin
-    pyver=$(python3 --version 2>&1 | awk '{print $2}')
-    pymaj=$(echo "$pyver" | cut -d. -f1)
-    pymin=$(echo "$pyver" | cut -d. -f2)
-    if [ "$pymaj" -lt 3 ] || { [ "$pymaj" = "3" ] && [ "$pymin" -lt 11 ]; }; then
-        record_fail "$name" "python3 ${pyver} below 3.11"
+
+    # Sub-check 5: Docker — daemon active, group present, devassist
+    # group membership (when devassist exists). 5 sub-conditions.
+    local docker_problems=""
+    if ! command -v docker >/dev/null 2>&1; then
+        docker_problems="${docker_problems} command-missing"
+    else
+        if ! systemctl is-active docker >/dev/null 2>&1; then
+            docker_problems="${docker_problems} daemon-inactive"
+        fi
+        if ! docker info >/dev/null 2>&1; then
+            docker_problems="${docker_problems} info-failed"
+        fi
+        if ! getent group docker >/dev/null 2>&1; then
+            docker_problems="${docker_problems} group-missing"
+        elif id devassist >/dev/null 2>&1; then
+            if ! getent group docker | grep -qw devassist; then
+                docker_problems="${docker_problems} devassist-not-in-group"
+            fi
+        fi
+    fi
+    if [ -n "$docker_problems" ]; then
+        failures="${failures} docker(${docker_problems# })"
+    fi
+
+    # Sub-check 6: Python — ≥ 3.11
+    if ! command -v python3 >/dev/null 2>&1; then
+        failures="${failures} python(command-missing)"
+    else
+        local pyver pymaj pymin
+        pyver=$(python3 --version 2>&1 | awk '{print $2}')
+        pymaj=$(echo "$pyver" | cut -d. -f1)
+        pymin=$(echo "$pyver" | cut -d. -f2)
+        case "${pymaj}.${pymin}" in
+            ''|*[!0-9.]*)
+                failures="${failures} python(unparsed-${pyver:-empty})"
+                ;;
+            *)
+                if [ "$pymaj" -lt 3 ] || { [ "$pymaj" = "3" ] && [ "$pymin" -lt 11 ]; }; then
+                    failures="${failures} python(${pyver} below 3.11)"
+                fi
+                ;;
+        esac
+    fi
+
+    # Sub-check 7: gh CLI — present and ≥ 2.40.0
+    if ! command -v gh >/dev/null 2>&1; then
+        failures="${failures} gh(command-missing)"
+    else
+        local ghver ghmaj ghmin
+        ghver=$(gh --version 2>/dev/null | head -1 | awk '{print $3}')
+        ghmaj=$(echo "$ghver" | cut -d. -f1)
+        ghmin=$(echo "$ghver" | cut -d. -f2)
+        case "${ghmaj}.${ghmin}" in
+            ''|*[!0-9.]*)
+                failures="${failures} gh(unparsed-${ghver:-empty})"
+                ;;
+            *)
+                if [ "$ghmaj" -lt 2 ] || { [ "$ghmaj" = "2" ] && [ "$ghmin" -lt 40 ]; }; then
+                    failures="${failures} gh(${ghver} below 2.40.0)"
+                fi
+                ;;
+        esac
+    fi
+
+    if [ -n "$failures" ]; then
+        record_fail "$name" "prereq sub-checks failed:${failures}"
         return 0
     fi
     record_pass "$name"
