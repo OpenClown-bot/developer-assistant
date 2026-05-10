@@ -410,7 +410,7 @@ No new ADR is created by this ticket. The chosen Option ψ for B.iv is the exist
 
 <!-- Executor fills below this line, iter-1 onward. The Architect spec body §§ 1–9 is frozen; edits to §§ 1–9 require a sibling Architect amendment ticket. -->
 
-### iter-1 — 2026-05-09 — Code Executor (DeepSeek V4 Pro main) — branch `exe/tkt-034-interactive-installer`
+### iter-1 — 2026-05-09 — Code Executor
 
 **Branch cut from main HEAD**: `8bc5288f248f4b536e2a54756b1826f76cb9e316`
 **v0.2.6 session-state — TKT-034 v0.2.0 spec landed (AUDIT-002 spec cycle CLOSED) (#134)**
@@ -493,7 +493,7 @@ shellcheck scripts/install-self.sh \
 
 No blocking questions for iter-1.
 
-### iter-2 — 2026-05-10 — Code Executor (DeepSeek V4 Pro main) — branch `exe/tkt-034-rv-code-033-iter2`
+### iter-2 — 2026-05-10 — Code Executor
 
 **Trigger:** Reviewer Kimi K2.6 returned RV-CODE-033 verdict `fail` on the iter-1 PR #135 (now merged to main as `61a51ab`); 3 findings (2 HIGH + 1 MEDIUM) per the v0.3.1 enforcement clauses. SO Hermes Strategic Orchestrator dispatched iter-2 (FRESH, not ITER-N CONTINUATION) on 2026-05-10 with REPO BOOTSTRAP from main HEAD `b5b3d4be3f7863d7eedcb834606c8663270b8110`.
 

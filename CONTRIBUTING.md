@@ -77,6 +77,57 @@ Reviewer artifacts in `docs/reviews/` use one of three prefixes that signal what
 
 The numbering within each prefix is sequential and independent (`RV-CODE-001`..`RV-CODE-036`, `RV-SPEC-001`..`RV-SPEC-018`, `RV-ARCH-001`..). Early-era artifacts that predate this convention (e.g. `RV-023.md`) are preserved as-is for forensic continuity; new artifacts must use one of the three prefixes above.
 
+### § 10 Execution Log attribution convention
+
+Every entry in a ticket's `## 10. Execution Log` section MUST begin with a
+header line that names exactly three things:
+
+1. **Entry type and number** — `iter-N` (Executor implementation iteration),
+   `review-N` (Reviewer review pass), `Closure amendment` (SO ratify or
+   clerical post-merge update), or `Architect amendment` (Architect amendment
+   landed in § 10).
+2. **Date in ISO format** — `YYYY-MM-DD`, the date the entry was written or
+   back-filled.
+3. **Role of the writing agent** — exactly one of `Code Executor`,
+   `Reviewer`, `Strategic Orchestrator`, or `Architect`.
+
+Canonical header format:
+
+```
+### iter-N — DATE — Code Executor
+### review-N — DATE — Reviewer
+### Closure amendment — DATE — Strategic Orchestrator
+### Architect amendment — DATE — Architect
+```
+
+Use em-dash `—` (U+2014), not hyphen-minus `-`. The body remains free-form
+narrative; runtime, model family, branch, PR number, and commit SHAs belong
+in the body, not the header.
+
+**Personal information is not permitted in any § 10 entry or any other repo
+artifact (including PR descriptions and PR comments).** Personal information
+means: Devin session identifiers (`devin-<hex>`), Devin session URLs
+(`https://app.devin.ai/sessions/<id>`), email addresses, GitHub handles for
+individual humans, local-machine usernames, or any similar account-level
+identifier. Model family + runtime + host descriptors (`DeepSeek V4 Pro
+main via opencode + OmniRoute on Founder PC`, `Anthropic Claude Sonnet 4.5
+on Devin VM`) are NOT personal information and are permitted — but optional,
+because model identity is not always reliably observable at write time.
+
+**Back-filled entries** use the same header format with an explicit
+provenance label:
+
+```
+### iter-N (SHA) — DATE — Code Executor [back-filled DATE — Strategic Orchestrator]
+```
+
+A back-filled entry MUST include a `**Provenance note.**` paragraph at the
+top of the body distinguishing reconstruction from primary-source narrative.
+
+**Pre-existing entries** were normalized to this convention in the
+2026-05-10 F1 closure sweep PR. Future entries from convention adoption
+forward must conform from creation.
+
 ## CI Baseline
 
 Minimum validation:
