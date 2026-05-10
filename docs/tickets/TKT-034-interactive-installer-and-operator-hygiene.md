@@ -1,13 +1,13 @@
 ---
 id: TKT-034
 version: 0.3.1
-status: ready
+status: done
 arch_ref: ARCH-001@0.3.0
 audit_ref: AUDIT-002
 prior_version: "0.3.0"
 amended_at: 2026-05-09
 amendment_trigger: "v0.3.0 secondary spec-quality issues (Q-AMEND-1 prose drift; AC-8(8) sudo ambiguity); SO ratify-ack PASS-with-changes on PR #139"
-updated: 2026-05-09
+updated: 2026-05-10
 ---
 
 # TKT-034: Interactive installer and operator hygiene (AUDIT-002 spec)
