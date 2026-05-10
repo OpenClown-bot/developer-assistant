@@ -468,13 +468,16 @@ check_shared_skills_manifest_match() {
         record_fail "$name" "manifest missing skill entries:${missing}"
         return 0
     fi
-    # On-disk SHA parity: for every skill with a non-absent recorded SHA,
-    # the on-disk SKILL.md must hash to the same value.
+    # On-disk SHA parity: every recorded SHA must be a real hex digest of
+    # the corresponding on-disk SKILL.md. Any "absent_at_install_time"
+    # sentinel is a manifest-render-time silent fallback that TKT-034
+    # v0.3.1 § 1.A.iv enforcement explicitly disallows; treat it as FAIL.
     local mismatch=""
     for skill in $SHARED_SKILLS; do
         local recorded
         recorded=$(python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print(m['skills'][sys.argv[2]]['sha256_of_skill_md'])" "$manifest" "$skill" 2>/dev/null || echo "")
         if [ "$recorded" = "absent_at_install_time" ]; then
+            mismatch="${mismatch} ${skill}(absent_at_install_time-sentinel-disallowed)"
             continue
         fi
         local on_disk="${BASE}/shared-skills/${skill}/SKILL.md"

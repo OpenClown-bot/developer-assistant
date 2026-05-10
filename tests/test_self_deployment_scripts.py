@@ -826,6 +826,79 @@ class TestSharedSkillsManifestRender(unittest.TestCase):
         for f in manifest_dir.glob("shared-skills-manifest.json.tmp.*"):
             self.fail(f"staging file survived: {f}")
 
+    def test_manifest_skips_no_absent_sentinels(self) -> None:
+        # TKT-034 v0.3.1 § 1.A.iv enforcement (RV-CODE-033 HIGH-1):
+        # a clean install with all 15 SKILL.md present on disk MUST
+        # produce a manifest where every sha256_of_skill_md is a real
+        # hex digest. The legacy "absent_at_install_time" sentinel is
+        # disallowed.
+        import json
+        result = _run_script("install-self.sh", self.env)
+        self.assertEqual(result.returncode, 0, result.stdout[-500:])
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        for skill, entry in data["skills"].items():
+            sha = entry["sha256_of_skill_md"]
+            self.assertNotEqual(
+                sha,
+                "absent_at_install_time",
+                f"sentinel SHA recorded for {skill}; § 1.A.iv enforcement violated",
+            )
+            self.assertEqual(
+                len(sha), 64, f"{skill}: SHA-256 hex digest must be 64 chars, got {len(sha)}",
+            )
+            self.assertRegex(
+                sha,
+                r"^[0-9a-f]{64}$",
+                f"{skill}: SHA-256 must be lowercase hex, got {sha!r}",
+            )
+
+    def test_render_aborts_when_skill_md_missing(self) -> None:
+        # TKT-034 v0.3.1 § 4 AC-2 (A.iv) negative test pair (1/2):
+        # if any one shared-skills/<skill>/SKILL.md is absent at install
+        # time, render_shared_skills_manifest() MUST abort the install
+        # with exit 1 and a FATAL log message naming the missing path.
+        # We exercise the renderer in isolation by sourcing install-self.sh
+        # and invoking render_shared_skills_manifest() against a sandboxed
+        # SCRIPT_DIR/BASE so the production source tree is not mutated.
+        import shutil as _shutil
+        repo_root = Path(__file__).resolve().parents[1]
+        sandbox = Path(self.tmpdir) / "sandbox-repo"
+        (sandbox / "scripts").mkdir(parents=True)
+        _shutil.copytree(repo_root / "shared-skills", sandbox / "shared-skills")
+        victim = sandbox / "shared-skills" / "dev-assist-classifier" / "SKILL.md"
+        victim.unlink()
+        base_dir = Path(self.tmpdir) / "srv-target"
+        bash_cmd = (
+            f'set +e; '
+            f'source "{repo_root / "scripts" / "install-self.sh"}" 2>/dev/null; '
+            f'SCRIPT_DIR="{sandbox}/scripts"; '
+            f'BASE="{base_dir}"; '
+            f'DRY_RUN=1; '
+            f'render_shared_skills_manifest; '
+            f'echo "EXIT_CODE:$?"'
+        )
+        result = subprocess.run(
+            ["bash", "-c", bash_cmd],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertIn(
+            "FATAL: shared-skills source missing: shared-skills/dev-assist-classifier/SKILL.md",
+            result.stdout,
+            f"FATAL log line missing or wrong format. stdout={result.stdout!r}",
+        )
+        # The function must exit (non-zero) before reaching the EXIT_CODE
+        # echo, since `exit 1` from inside a sourced script terminates the
+        # entire shell. The marker MUST NOT appear.
+        self.assertNotIn(
+            "EXIT_CODE:0",
+            result.stdout,
+            "render_shared_skills_manifest must abort, not return cleanly",
+        )
+
 
 @unittest.skipUnless(_bash_available(), "bash unavailable on this platform")
 class TestSecretsFileAcl(unittest.TestCase):
@@ -917,6 +990,25 @@ class TestVerifySelfNewInvariants(unittest.TestCase):
         result = _run_script("verify-self.sh", self.env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("dev-assist-classifier", result.stdout)
+
+    def test_verify_fails_when_manifest_has_absent_sentinel(self) -> None:
+        # TKT-034 v0.3.1 § 4 AC-2 (A.iv) negative test pair (2/2)
+        # (RV-CODE-033 HIGH-1): a manifest where any
+        # sha256_of_skill_md == "absent_at_install_time" MUST cause
+        # check_shared_skills_manifest_match to FAIL with no skip clause.
+        import json
+        manifest = Path(self.tmpdir) / "srv" / "devassist" / "state" / "shared-skills-manifest.json"
+        data = json.loads(manifest.read_text())
+        data["skills"]["dev-assist-classifier"]["sha256_of_skill_md"] = "absent_at_install_time"
+        manifest.write_text(json.dumps(data))
+        result = _run_script("verify-self.sh", self.env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shared-skills manifest parity: FAIL", result.stdout)
+        self.assertIn(
+            "dev-assist-classifier(absent_at_install_time-sentinel-disallowed)",
+            result.stdout,
+            "FAIL message must surface the disallowed sentinel for the offending skill",
+        )
 
     def test_verify_fails_when_gh_hosts_missing(self) -> None:
         marker = Path(self.tmpdir) / "home" / "devassist" / ".config" / "gh" / "hosts.yml"
