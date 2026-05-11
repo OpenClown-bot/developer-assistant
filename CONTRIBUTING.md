@@ -105,14 +105,43 @@ narrative; runtime, model family, branch, PR number, and commit SHAs belong
 in the body, not the header.
 
 **Personal information is not permitted in any § 10 entry or any other repo
-artifact (including PR descriptions and PR comments).** Personal information
-means: Devin session identifiers (`devin-<hex>`), Devin session URLs
+artifact (including PR descriptions, PR comments, commit messages, and
+review artifacts under `docs/reviews/`).** Personal information means: Devin
+session identifiers (`devin-<hex>`), Devin session URLs
 (`https://app.devin.ai/sessions/<id>`), email addresses, GitHub handles for
 individual humans, local-machine usernames, or any similar account-level
 identifier. Model family + runtime + host descriptors (`DeepSeek V4 Pro
 main via opencode + OmniRoute on Founder PC`, `Anthropic Claude Sonnet 4.5
 on Devin VM`) are NOT personal information and are permitted — but optional,
 because model identity is not always reliably observable at write time.
+
+**Redaction-when-citing rule.** When a review artifact
+(`docs/reviews/RV-*-NNN.md`), an audit document, a session-log, a PR
+description, a TKT prose section, or any committed text needs to *cite*
+leaked personal information (e.g., to report a finding, document a
+remediation, trace a violation, or describe a test fixture's negative
+case), the citation MUST use redacted placeholders rather than reproducing
+the verbatim value. Canonical placeholders:
+
+- `<redacted-handle>` (single handle) or `<github-handle-A>`,
+  `<github-handle-B>`, … (multiple identities in one artifact, labeled in
+  order of first occurrence).
+- `<redacted-email>` (single email) or `<email-A>`, `<email-B>`, …
+  (multiple emails, paired with the corresponding `<github-handle-X>`).
+- `<personal-domain>` for personal email domains when the domain itself is
+  identifying.
+- `<redacted-URL>` or `https://<host>/<redacted>/<repo-name>` when the
+  identifier appears inside a URL.
+
+Citing leaked PII verbatim — *even to flag that it is leaked* — perpetuates
+the leak in the citing artifact and counts as a fresh violation of this
+rule. If the verbatim value is required for downstream forensic
+remediation (e.g., to construct a `.mailmap` entry, a `git-filter-repo`
+script, or a `validate_identities.py` test fixture), it MUST be passed
+through an out-of-repo channel (direct message to the Founder, paste-relay
+between agent sessions) and never committed to the repository — including
+as a synthetic-looking string in commit messages, test fixtures, or PR
+comments.
 
 **Back-filled entries** use the same header format with an explicit
 provenance label:
