@@ -1,0 +1,12 @@
+{
+  "loaded_skills": [
+    "cronjob",
+    "dev-assist-classifier",
+    "dev-assist-escalation-surface",
+    "dev-assist-progress-report",
+    "dev-assist-work-queue-write",
+    "memory",
+    "telegram-gateway"
+  ],
+  "prompt_path": "docs/prompts/orchestrator.md"
+}

@@ -23,6 +23,13 @@ from developer_assistant.observability.status_query import (
     query_status,
     render_status_human,
 )
+from developer_assistant.smoke_inject import (
+    DEFAULT_MARKER_FILE_PATH,
+    DEFAULT_OPERATIONAL_DB_PATH,
+    INJECT_PORT,
+    ROLE_PORTS as _SMOKE_ROLE_PORTS,
+    is_smoke_mode_active,
+)
 from developer_assistant.state.observability_store import (
     query_errors,
     query_llm_calls,
@@ -434,6 +441,189 @@ def cmd_escalations(args: argparse.Namespace) -> int:
 
 
 
+def _smoke_print_refusal() -> int:
+    """Emit the structured smoke-mode-not-enabled refusal and return exit 2."""
+    payload = {
+        "status": "refused",
+        "error": "smoke_mode_not_enabled",
+        "hint": (
+            "smoke-mode marker file is absent; this CLI subcommand only "
+            "operates on a smoke-mode install. See TKT-041 \u00a7 1.4 (1)."
+        ),
+    }
+    print(json.dumps(payload, sort_keys=True))
+    return 2
+
+
+def _smoke_http_post(
+    host: str,
+    port: int,
+    path: str,
+    body: dict[str, object],
+    timeout_s: int,
+) -> tuple[int, dict[str, object]]:
+    """POST JSON body to a localhost-only smoke endpoint. Returns (status, body).
+
+    Uses stdlib urllib so the CLI has zero non-stdlib dependencies (matches
+    the existing ``dev-assist-cli`` discipline at the top of this module).
+    """
+    import urllib.error
+    import urllib.request
+
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise ValueError(
+            f"smoke CLI refuses non-localhost host: {host!r}",
+        )
+    url = f"http://{host}:{port}{path}"
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return resp.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            parsed = {"raw": raw}
+        return exc.code, parsed
+
+
+def cmd_smoke_inject_message(args: argparse.Namespace) -> int:
+    """smoke inject-message → POST to Orchestrator inject endpoint."""
+    if not is_smoke_mode_active(args.marker_file):
+        return _smoke_print_refusal()
+    body = {
+        "text": args.text,
+        "from_user_id": args.from_user_id,
+    }
+    try:
+        status, payload = _smoke_http_post(
+            args.inject_host, args.inject_port,
+            "/smoke/inject-message", body, args.timeout_s,
+        )
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True))
+        return 1
+    print(json.dumps(payload, sort_keys=True))
+    return 0 if status == 200 else 1
+
+
+def cmd_smoke_test_tool(args: argparse.Namespace) -> int:
+    """smoke test-tool → POST to per-runtime test-tool endpoint (AC-3)."""
+    if not is_smoke_mode_active(args.marker_file):
+        return _smoke_print_refusal()
+    port = _SMOKE_ROLE_PORTS[args.runtime]
+    body = {"tool": args.tool}
+    try:
+        status, payload = _smoke_http_post(
+            args.test_tool_host, port,
+            "/smoke/test-tool", body, args.timeout_s,
+        )
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True))
+        return 1
+    print(json.dumps(payload, sort_keys=True))
+    if status != 200:
+        return 1
+    # Exit code reflects dispatch result: 0 = dispatched (positive), 3 =
+    # refused (negative AC-3 i/ii expected outcome), 1 = unexpected.
+    result_status = payload.get("status") if isinstance(payload, dict) else None
+    if result_status == "dispatched":
+        return 0
+    if result_status == "refused":
+        return 3
+    return 1
+
+
+def cmd_smoke_wait(args: argparse.Namespace) -> int:
+    """smoke wait → poll operational.db.work_items until target state."""
+    if not is_smoke_mode_active(args.marker_file):
+        return _smoke_print_refusal()
+    import time as _time
+
+    target = args.until
+    db_path = args.db_path or _DEFAULT_DB_PATH
+    deadline = _time.time() + args.timeout_s
+    last_status: str | None = None
+    last_claimed_at: str | None = None
+    last_completed_at: str | None = None
+    last_result: str | None = None
+
+    while _time.time() < deadline:
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT status, claimed_at, completed_at, result_json "
+                    "FROM work_items WHERE id = ?",
+                    (args.work_item_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True))
+            return 1
+
+        if row is None:
+            print(json.dumps({
+                "status": "error", "error": "work_item_not_found",
+                "work_item_id": args.work_item_id,
+            }, sort_keys=True))
+            return 1
+
+        last_status = row["status"]
+        last_claimed_at = row["claimed_at"]
+        last_completed_at = row["completed_at"]
+        last_result = row["result_json"]
+
+        if target == "claimed" and last_status in ("claimed", "completed", "failed"):
+            print(json.dumps({
+                "status": "ok", "target": target,
+                "work_item_id": args.work_item_id,
+                "work_item_status": last_status,
+                "claimed_at": last_claimed_at,
+            }, sort_keys=True))
+            return 0
+        if target == "completed" and last_status in ("completed", "failed"):
+            print(json.dumps({
+                "status": "ok", "target": target,
+                "work_item_id": args.work_item_id,
+                "work_item_status": last_status,
+                "completed_at": last_completed_at,
+                "result_json": last_result,
+            }, sort_keys=True))
+            return 0 if last_status == "completed" else 1
+
+        _time.sleep(args.poll_interval_s)
+
+    # Timeout → emit the structured diagnostic per AC-6.
+    diagnostic = (
+        "planner_claim_timeout" if target == "claimed" else "planner_result_timeout"
+    )
+    print(json.dumps({
+        "status": "timeout", "error": diagnostic,
+        "work_item_id": args.work_item_id,
+        "work_item_status": last_status,
+    }, sort_keys=True))
+    return 1
+
+
+def cmd_smoke(args: argparse.Namespace) -> int:
+    if args.smoke_command == "inject-message":
+        return cmd_smoke_inject_message(args)
+    if args.smoke_command == "test-tool":
+        return cmd_smoke_test_tool(args)
+    if args.smoke_command == "wait":
+        return cmd_smoke_wait(args)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dev-assist-cli",
@@ -484,6 +674,87 @@ def main(argv: list[str] | None = None) -> int:
     p_escalations.add_argument("--since", required=True, help="Time window (e.g. 24h, today, 1h)")
     p_escalations.add_argument("--format", choices=["json", "human"], default="json")
 
+    p_smoke = sub.add_parser(
+        "smoke",
+        help="TKT-041 AUDIT-003 deployment smoke subcommand group (smoke-mode only)",
+    )
+    p_smoke.add_argument(
+        "--marker-file",
+        default=os.environ.get("DEVASSIST_SMOKE_MODE_MARKER_PATH", DEFAULT_MARKER_FILE_PATH),
+        help=f"Smoke-mode marker file path (default: {DEFAULT_MARKER_FILE_PATH})",
+    )
+    smoke_sub = p_smoke.add_subparsers(dest="smoke_command", required=True)
+
+    p_inject = smoke_sub.add_parser(
+        "inject-message",
+        help="Inject synthetic Telegram message into Orchestrator gateway dispatcher",
+    )
+    p_inject.add_argument("--text", required=True, help="Synthetic message text")
+    p_inject.add_argument(
+        "--from-user-id",
+        type=int,
+        default=999999999,
+        help="Synthetic Telegram from_user.id (default: 999999999)",
+    )
+    p_inject.add_argument(
+        "--timeout-s",
+        type=int,
+        default=5,
+        help="HTTP request timeout in seconds (default: 5)",
+    )
+    p_inject.add_argument(
+        "--inject-host",
+        default="127.0.0.1",
+        help="Inject admin port host (default: 127.0.0.1; localhost-only)",
+    )
+    p_inject.add_argument(
+        "--inject-port",
+        type=int,
+        default=INJECT_PORT,
+        help=f"Inject admin port (default: {INJECT_PORT})",
+    )
+
+    p_test_tool = smoke_sub.add_parser(
+        "test-tool",
+        help="Dispatch synthetic tool-call to runtime test-tool endpoint (AC-3)",
+    )
+    p_test_tool.add_argument(
+        "--runtime",
+        required=True,
+        choices=sorted(_SMOKE_ROLE_PORTS.keys()),
+        help="Target runtime role",
+    )
+    p_test_tool.add_argument(
+        "--tool",
+        required=True,
+        help="Tool name to dispatch (e.g. delegate_task, skill_manage, dev-assist-work-queue-poll)",
+    )
+    p_test_tool.add_argument(
+        "--timeout-s", type=int, default=5,
+    )
+    p_test_tool.add_argument(
+        "--test-tool-host", default="127.0.0.1",
+    )
+
+    p_wait = smoke_sub.add_parser(
+        "wait",
+        help="Poll operational.db until a work_item reaches the desired state",
+    )
+    p_wait.add_argument("--work-item-id", type=int, required=True)
+    p_wait.add_argument(
+        "--until",
+        required=True,
+        choices=["claimed", "completed"],
+        help="Target state: claimed (AC-6 N1) or completed (AC-6 N2)",
+    )
+    p_wait.add_argument("--timeout-s", type=int, required=True)
+    p_wait.add_argument(
+        "--poll-interval-s",
+        type=float,
+        default=1.0,
+        help="Poll interval in seconds (default: 1.0)",
+    )
+
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:
@@ -499,6 +770,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_costs(args)
     elif args.command == "escalations":
         return cmd_escalations(args)
+    elif args.command == "smoke":
+        return cmd_smoke(args)
 
     return 0
 

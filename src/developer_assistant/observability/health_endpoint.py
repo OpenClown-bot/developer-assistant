@@ -7,11 +7,20 @@ Binds to 127.0.0.1 only. Serves GET /health with JSON response.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import sqlite3
 import time
 from http import HTTPStatus
 from typing import Any, Optional
+
+from developer_assistant.smoke_inject import (
+    DEFAULT_MARKER_FILE_PATH,
+    DEFAULT_REPO_ROOT,
+    ROLE_LOADOUT_FALLBACK,
+    is_smoke_mode_active,
+)
 
 _HEALTH_ROLES = {
     "orchestrator": 8181,
@@ -21,6 +30,19 @@ _HEALTH_ROLES = {
     "reviewer": 8185,
 }
 
+# Map the historical "business-planner" runtime role onto the prompt-manifest /
+# loaded-skills key "planner". The role names diverge because the systemd unit
+# is named devassist-business-planner.service (TKT-033 v0.3.0) while the prompt
+# / work_items / runtime_check enum uses the shorter "planner" key.
+_ROLE_TO_PROMPT_KEY = {
+    "orchestrator": "orchestrator",
+    "business-planner": "planner",
+    "planner": "planner",
+    "architect": "architect",
+    "executor": "executor",
+    "reviewer": "reviewer",
+}
+
 
 class HealthEndpoint:
     def __init__(
@@ -28,6 +50,9 @@ class HealthEndpoint:
         runtime_role: str,
         port: int,
         operational_db_path: str,
+        repo_root: Optional[str] = None,
+        marker_file_path: str = DEFAULT_MARKER_FILE_PATH,
+        loaded_skills: Optional[frozenset[str]] = None,
     ) -> None:
         self._role = runtime_role
         self._port = port
@@ -38,6 +63,17 @@ class HealthEndpoint:
         self._current_model: Optional[str] = None
         self._version = "0.1.0"
         self._build_commit = "unknown"
+        self._repo_root = repo_root or os.environ.get(
+            "DEVASSIST_REPO_ROOT", DEFAULT_REPO_ROOT,
+        )
+        self._marker_file_path = marker_file_path
+        prompt_key = _ROLE_TO_PROMPT_KEY.get(runtime_role, runtime_role)
+        self._prompt_key = prompt_key
+        self._loaded_skills: frozenset[str] = (
+            loaded_skills
+            if loaded_skills is not None
+            else ROLE_LOADOUT_FALLBACK.get(prompt_key, frozenset())
+        )
 
     def set_current_work_item(self, work_item_id: Optional[str]) -> None:
         self._current_work_item_id = work_item_id
@@ -75,7 +111,7 @@ class HealthEndpoint:
             return
 
         parts = line.decode("utf-8", errors="replace").strip().split()
-        if len(parts) < 2 or parts[0] != "GET" or parts[1] != "/health":
+        if len(parts) < 2 or parts[0] != "GET":
             body = b"Not Found"
             writer.write(
                 f"HTTP/1.1 {HTTPStatus.NOT_FOUND.value} {HTTPStatus.NOT_FOUND.phrase}\r\n"
@@ -88,7 +124,23 @@ class HealthEndpoint:
             writer.close()
             return
 
-        response = self._build_response()
+        request_target = parts[1]
+        path, _, query_string = request_target.partition("?")
+        if path != "/health":
+            body = b"Not Found"
+            writer.write(
+                f"HTTP/1.1 {HTTPStatus.NOT_FOUND.value} {HTTPStatus.NOT_FOUND.phrase}\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"Content-Type: text/plain\r\n"
+                f"Connection: close\r\n\r\n".encode()
+            )
+            writer.write(body)
+            await writer.drain()
+            writer.close()
+            return
+
+        internal_flag = "internal=1" in query_string
+        response = self._build_response(internal=internal_flag)
         body = json.dumps(response, indent=2).encode("utf-8")
         writer.write(
             f"HTTP/1.1 {HTTPStatus.OK.value} {HTTPStatus.OK.phrase}\r\n"
@@ -100,7 +152,7 @@ class HealthEndpoint:
         await writer.drain()
         writer.close()
 
-    def _build_response(self) -> dict[str, Any]:
+    def _build_response(self, internal: bool = False) -> dict[str, Any]:
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         uptime_s = int(time.monotonic() - self._start_time) if self._start_time else 0
         state = "running"
@@ -177,4 +229,39 @@ class HealthEndpoint:
         }
         if queue_stats is not None:
             result["queue_stats"] = queue_stats
+
+        # TKT-041 § 4 AC-2 + AC-4: extended fields are gated by smoke-mode
+        # marker OR ?internal=1 to keep production /health responses from
+        # leaking architecture detail (loaded-skills enumeration, prompt
+        # path) per § 8 risk bullet 1.
+        expose_extended = internal or is_smoke_mode_active(self._marker_file_path)
+        if expose_extended:
+            result["loaded_skills"] = sorted(self._loaded_skills)
+            prompt_path_rel = f"docs/prompts/{self._prompt_key}.md"
+            result["prompt_path"] = prompt_path_rel
+            absolute_prompt = os.path.join(self._repo_root, prompt_path_rel)
+            result["prompt_sha256"] = _sha256_of_file(absolute_prompt)
+        else:
+            result["loaded_skills"] = None
+            result["prompt_path"] = None
+            result["prompt_sha256"] = None
         return result
+
+
+def _sha256_of_file(path: str) -> Optional[str]:
+    """Compute SHA-256 hex of ``path``; return None on any I/O error.
+
+    Computed fresh each /health request so a post-boot tamper is detected
+    (TKT-041 § 4 AC-4 (i)).
+    """
+    try:
+        with open(path, "rb") as fh:
+            hasher = hashlib.sha256()
+            while True:
+                chunk = fh.read(65536)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except OSError:
+        return None

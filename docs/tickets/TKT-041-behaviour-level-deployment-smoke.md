@@ -311,6 +311,76 @@ The downstream Executor's tests MUST be structured as follows. The Architect spe
 
 <!-- Executor fills below this line, iter-1 onward. The Architect spec body §§ 1–9 is frozen; edits to §§ 1–9 require a sibling Architect amendment ticket. -->
 
+### iter-1 (Executor: Devin / Anthropic Claude Sonnet 4.5; 2026-05-11)
+
+- **Model assignment**: Executor = Devin / Anthropic Claude Sonnet 4.5 (Founder-authorized deviation 2026-05-11 from AGENTS.md 2026-05-05 DeepSeek V4 Pro / opencode + OmniRoute default; cross-family discipline preserved vs Kimi K2.6 Reviewer + DeepSeek V4 Pro PR-Agent).
+- **Branch**: `exe/tkt-041-audit-003-behaviour-smoke` cut from `origin/main@9482edb0c5fc1a91d27d9c287f174274ad6f2e4f` (the AUDIT-001 + AUDIT-002 merge point per nudge).
+
+#### AC-1 re-verify (§ 3.1 observations at branch-cut `9482edb` vs spec anchor `3e298c2`)
+
+All 7 § 3.1 observations CONFIRMED stable; **no drift**, no Q-TKT-041-NN filed for AC-1.
+
+1. `/health` JSON does not expose `loaded_skills` / `prompt_path` / `prompt_sha256` (grep over `src/developer_assistant/observability/health_endpoint.py` returns 0 matches; the contract `docs/architecture/OBSERVABILITY-CONTRACT.md` § 11 lists no such field).
+2. `dev-assist-cli` does not expose a `smoke` subcommand (grep over `src/developer_assistant/cli/dev_assist_cli.py` returns 0 matches for `smoke|inject-message`).
+3. No `/srv/devassist/state/smoke-mode.flag` references on the codebase (only in TKT-041 + RV-SPEC-018/019 docs).
+4. `RUNTIME_CHECK_INVARIANTS` has exactly 11 names (verified by reading `src/developer_assistant/runtime_check.py` enum definition).
+5. Planner `dev-assist-work-queue-poll` 60-second cadence confirmed (`docs/architecture/MULTI-HERMES-CONTRACT.md` § 8.1).
+6. `errors` + `llm_calls` + `work_items` tables present (`db/migrations/004_work_queue_and_escalations.sql` + `005_observability_tables.sql`).
+7. `model_tools.get_tool_definitions(disabled_toolsets=["delegation"])` filter at `model_tools.py:271-321` documented (`docs/architecture/HERMES-SKILL-ALLOWLIST.md` § 4 + § 4.1).
+
+#### AC-8 test baseline
+
+- `<count_before>` = **1238** tests (1 fail + 12 errors + 2 skipped + 1223 passing) at `main@9482edb`.
+- `<count_after>` = **1288** tests (1 fail + 12 errors + 2 skipped + 1273 passing) post-implementation.
+- Delta = **+50** tests, all from new TKT-041 files: `test_behaviour_smoke.py` (+16), `test_smoke_inject_endpoint.py` (+21), `test_dev_assist_cli_smoke.py` (+9), `test_observability_manager_smoke.py` (+4).
+- The 1 pre-existing failure (`test_non_localhost_refused`) and 12 pre-existing errors (`test_runtime_layout_catalog_round_trip` × 5, `test_all_five_roles_pass_in_fixture_mode` × 5, `test_correct_symlink_passes`, `test_llm_client_instrumentation`) are env-level / config-level issues on `main@9482edb`, unchanged by this PR. They are NOT masked, removed, or skipped.
+
+#### AC-2..AC-6 + AC-9 implementation summary
+
+- **AC-2** (loaded-skills set-equality): `parse_loaded_skills_from_contract()` in `src/developer_assistant/smoke_inject.py` parses `MULTI-HERMES-CONTRACT.md` § 5.1–5.5 at runtime; `HealthEndpoint` exposes the parsed set as `loaded_skills` in the `/health` JSON when the smoke-mode marker is active OR `?internal=1` is set. Offline assertion in `tests/test_behaviour_smoke.py::TestAC2LoadedSkillsSetEquality`.
+- **AC-3** (dispatch refusal + symmetry): `classify_test_tool_dispatch(runtime_role, tool)` in `smoke_inject.py` returns `{"status":"refused","error":"tool_not_in_assembled_list"}` for `delegate_task` on specialists and `skill_manage` on all 5 roles; returns `{"status":"dispatched","tool_call_id":"smoke-<uuid12>"}` for the per-role positive anchor tool (e.g. `dev-assist-work-queue-poll` on Planner). The HTTP surface is `POST /smoke/test-tool` on `127.0.0.1:8281..8285`.
+- **AC-4** (prompt SHA-256 cross-check): `HealthEndpoint._sha256_of_file()` computes the SHA-256 of `docs/prompts/<role>.md` fresh on every `/health` request (no caching → detects post-boot tamper). Offline assertion in `tests/test_observability_manager_smoke.py::TestHealthExtendedFieldsAsyncRoundtrip::test_prompt_sha256_recomputed_post_tamper`. Mismatch diagnostic format: `smoke.prompt_sha_mismatch:<role>`.
+- **AC-5** (classifier → work_items): `SmokeInjectHandler` POST `/smoke/inject-message` on `127.0.0.1:8186` calls `write_injected_work_item()` which `INSERT`s a `work_items` row with `target_role='planner'`, `kind='smoke_inject'`, `status='pending'`, `payload_json` containing `{"smoke": true, "correlation_id": ..., "synthetic_text": ..., "synthetic_from_user_id": ..., "classifier_label": "intake"}`. Offline assertion in `tests/test_behaviour_smoke.py::TestAC5ClassifierToWorkItem`.
+- **AC-6** (planner round-trip): `dev-assist-cli smoke wait --until claimed|completed --timeout-s N` polls `work_items.status` and emits structured diagnostics on timeout (`planner_claim_timeout` for N1, `planner_result_timeout` for N2). Offline simulation in `tests/test_behaviour_smoke.py::TestAC6PlannerRoundtrip` + `tests/test_dev_assist_cli_smoke.py::TestSmokeWaitDiagnostics`.
+- **AC-9** (secret-leak grep): `tests/test_behaviour_smoke.py::TestAC9SmokeArtefactSecretLeakNegative` grep matrix asserts NO match for `^[0-9]+:[A-Za-z0-9_-]{35,}$` (Telegram bot token), `^ghp_[A-Za-z0-9]{36,}$` (GitHub PAT), `^fw_[A-Za-z0-9]{32,}$` (Fireworks API key) over `tests/fixtures/smoke-mode/` + `src/developer_assistant/smoke_inject.py`. The only allowed token shape in smoke-mode artefacts is `^smoke-fixture-token-[a-z0-9]{8}$`. `scripts/verify-self.sh::check_smoke_artefact_secret_leak` mirrors the grep at deploy time when the marker is present.
+
+#### Q-TKT filings (mandatory at hand-back)
+
+- **Q-TKT-041-01** (`docs/questions/Q-TKT-041-01.md`) — MANDATORY empirical N2 calibration; **BLOCKED** on test VPS availability. Measurement table is placeholder-filled per nudge § Mandatory deliverables item 3; SO must provision a test VPS or dispatch follow-up Executor to fill in the ≥ 3 smoke-run table.
+- **Q-TKT-041-02** (`docs/questions/Q-TKT-041-02.md`) — `smoke_fixture_token_mismatch` 12th `runtime_check` invariant; routed to AUDIT-001-successor sibling cycle per TKT-041 § 5 NOT-list.
+- **Q-TKT-041-03** (`docs/questions/Q-TKT-041-03.md`) — Hermes v2026.4.30 `gateway.telegram.dry_run` override availability check; SO ratification needed for the three defensive layers (marker + fixture token shape + localhost-only bind).
+- **Q-TKT-041-04** (`docs/questions/Q-TKT-041-04.md`) — Reviewer `terminal` skill discrepancy between TKT-041 § 3.2 and MULTI-HERMES-CONTRACT.md § 5.5; Architect amendment needed. The offline test follows § 3.2 closing paragraph's "parse the contract; do not hard-code the table" directive so the test passes either way.
+
+#### Allowed-files compliance (TKT-041 § 5)
+
+Files touched in this iter, all within the § 5 STRICT write-zone:
+
+- `src/developer_assistant/smoke_inject.py` (NEW)
+- `src/developer_assistant/cli/dev_assist_cli.py` (EXTEND `smoke` subcommand)
+- `src/developer_assistant/observability/health_endpoint.py` (EXTEND `/health` JSON — equivalent module per § 4 AC-2 "or equivalent existing module")
+- `src/developer_assistant/observability/observability_manager.py` (EXTEND constructor + `from_env()`)
+- `scripts/install-self.sh` (EXTEND `--smoke-mode` flag + marker render + fixture-token assertion + mutual exclusion)
+- `scripts/verify-self.sh` (EXTEND smoke-mode invariants — only registered when marker present, baseline count stays at 19/19)
+- `scripts/templates/dev-assist-smoke.sh` (NEW operator-facing runner)
+- `tests/test_behaviour_smoke.py` (NEW; AC-2..AC-6 + AC-9 offline harness)
+- `tests/test_smoke_inject_endpoint.py` (NEW)
+- `tests/test_dev_assist_cli_smoke.py` (NEW)
+- `tests/test_observability_manager_smoke.py` (NEW)
+- `tests/fixtures/smoke-mode/` (NEW; README + synthetic_message + expected_work_item + expected_health_orchestrator + expected_health_planner + smoke_fixture_token)
+- `docs/questions/Q-TKT-041-{01,02,03,04}.md` (NEW)
+- `docs/tickets/TKT-041-behaviour-level-deployment-smoke.md` § 10 (THIS APPEND)
+
+Files NOT touched (per § 5 NOT-list): all frozen architecture contracts (`MULTI-HERMES-CONTRACT.md`, `HERMES-SKILL-ALLOWLIST.md`, `OBSERVABILITY-CONTRACT.md`, `SELF-DEPLOYMENT-CONTRACT.md`, `MODEL-CATALOG.md`); all ADRs; `SESSION-STATE.md`; `docs/prompts/<role>.md` (read-only for SHA-256 computation); `scripts/templates/devassist-<role>.service.j2` (5 files); `src/developer_assistant/runtime_check.py` (12th invariant routed via Q-TKT-041-02); `src/developer_assistant/runtime_layout.py` / `model_catalog.py`; frozen tickets TKT-020/021/026/031/033/034/032.
+
+#### Validation commands (per § 6)
+
+```
+python3 scripts/validate_docs.py     # Docs validation passed.
+python3 -m unittest discover -s tests -p "test_*.py" -v
+# Ran 1288 tests; failures=1, errors=12, skipped=2 — all pre-existing
+# baseline issues on main@9482edb; unchanged by this PR.
+```
+
 ## 11. Cross-References
 
 - `docs/session-log/2026-05-08-session-2.md` § 5.3 — the AUDIT-003 scope stub promoted to this ticket.

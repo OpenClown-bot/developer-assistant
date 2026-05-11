@@ -1,0 +1,13 @@
+{
+  "target_role": "planner",
+  "kind": "smoke_inject",
+  "status": "pending",
+  "priority": 50,
+  "attempt_count": 0,
+  "max_attempts": 3,
+  "payload_keys": ["smoke", "correlation_id", "synthetic_text", "synthetic_from_user_id", "classifier_label"],
+  "payload": {
+    "smoke": true,
+    "classifier_label": "intake"
+  }
+}

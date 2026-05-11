@@ -37,6 +37,15 @@ REPROMPT_SECRETS=0
 ROTATE_SECRETS=0
 INSTALL_MODE=""
 
+# TKT-041 § 1.4 + § 5 — smoke-mode posture flag. When 1, install-self.sh
+# renders a marker file at /srv/devassist/state/smoke-mode.flag (mode 0400,
+# owner devassist:devassist) and asserts at config-render time that
+# TELEGRAM_BOT_TOKEN matches ^smoke-fixture-token-[a-z0-9]{8}$. Mutually
+# exclusive with --rotate-secrets.
+SMOKE_MODE=0
+SMOKE_MARKER_FILE_PATH="/srv/devassist/state/smoke-mode.flag"
+SMOKE_FIXTURE_TOKEN_REGEX='^smoke-fixture-token-[a-z0-9]{8}$'
+
 MODEL_MAIN_ORCHESTRATOR="accounts/fireworks/models/minimax-m2p7"
 MODEL_MAIN_PLANNER="accounts/fireworks/models/qwen3p6-plus"
 MODEL_MAIN_ARCHITECT="accounts/fireworks/models/deepseek-v3p2"
@@ -587,6 +596,15 @@ Options:
                             v0.2.0; deferred to a future ticket".
   --rotate-secrets          RESERVED. Aborts with "Not implemented in
                             v0.2.0; deferred to a future ticket".
+  --smoke-mode              TKT-041 AUDIT-003 smoke posture. Renders a
+                            marker file at /srv/devassist/state/smoke-mode.flag
+                            (mode 0400, owner devassist:devassist) and asserts
+                            TELEGRAM_BOT_TOKEN matches
+                            ^smoke-fixture-token-[a-z0-9]{8}$. Mutually
+                            exclusive with --rotate-secrets. Requires an
+                            interactive TTY confirmation. WARNING: enables
+                            synthetic-message injection on localhost; never
+                            use on a Founder-facing production install.
   --help, -h                Print this usage block and exit.
 
 Environment overrides:
@@ -636,6 +654,9 @@ parse_flags() {
             --rotate-secrets)
                 ROTATE_SECRETS=1
                 ;;
+            --smoke-mode)
+                SMOKE_MODE=1
+                ;;
             --help|-h)
                 usage
                 exit 0
@@ -652,6 +673,13 @@ parse_flags() {
         log "FATAL: --interactive and --non-interactive are mutually exclusive"
         exit 2
     fi
+    # TKT-041 § 1.4 (1) + § 5: --smoke-mode and --rotate-secrets are mutually
+    # exclusive. Smoke-mode pins a fixture token by design; --rotate-secrets
+    # changes secrets in place. Combining them is incoherent.
+    if [ "$SMOKE_MODE" = "1" ] && [ "$ROTATE_SECRETS" = "1" ]; then
+        log "FATAL: --smoke-mode and --rotate-secrets are mutually exclusive"
+        exit 2
+    fi
     # TKT-034 § 4 AC-9 (b): --rotate-secrets (alone or combined) aborts.
     if [ "$ROTATE_SECRETS" = "1" ]; then
         log "FATAL: --rotate-secrets is RESERVED; not implemented in v0.2.0; deferred to a future v0.3.0+ ticket"
@@ -661,6 +689,76 @@ parse_flags() {
         log "FATAL: --reprompt-secrets is RESERVED; not implemented in v0.2.0; deferred to a future v0.3.0+ ticket"
         exit 2
     fi
+}
+
+confirm_smoke_mode_tty() {
+    # TKT-041 § 1.4 (1) — render the warning copy on stdout and reject
+    # unless an interactive TTY confirms with literal `yes`. The TTY
+    # detection rule is the same as AUDIT-002 B.iii (stdin AND stdout).
+    if [ "$SMOKE_MODE" != "1" ]; then
+        return 0
+    fi
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        log "FATAL: --smoke-mode requires an interactive TTY for confirmation"
+        exit 2
+    fi
+    printf '%s\n' \
+        "WARNING: smoke mode enables synthetic-message injection on localhost." \
+        "Do NOT enable on a Founder-facing production install. Continue? [yes/no]"
+    local reply=""
+    IFS= read -r reply
+    if [ "$reply" != "yes" ]; then
+        log "FATAL: --smoke-mode TTY confirmation declined (got '${reply}'); aborting"
+        exit 2
+    fi
+    log "smoke-mode TTY confirmation accepted"
+}
+
+assert_smoke_fixture_token_shape() {
+    # TKT-041 § 1.4 (3) + § 5 — when --smoke-mode is set, the TELEGRAM_BOT_TOKEN
+    # in the rendered env MUST match ^smoke-fixture-token-[a-z0-9]{8}$. A
+    # production-shaped BotFather token (`^[0-9]+:[A-Za-z0-9_-]+$`) is
+    # disallowed at install time. The 12th runtime_check invariant
+    # `smoke_fixture_token_mismatch` (proposed in TKT-041 § 1.4 (3)) is
+    # routed via Q-TKT-041-02 for a sibling AUDIT-001-successor cycle.
+    if [ "$SMOKE_MODE" != "1" ]; then
+        return 0
+    fi
+    local token="${TELEGRAM_BOT_TOKEN:-}"
+    if [ -z "$token" ]; then
+        log "FATAL: --smoke-mode requires TELEGRAM_BOT_TOKEN to be set"
+        exit 2
+    fi
+    if ! printf '%s' "$token" | grep -Eq "$SMOKE_FIXTURE_TOKEN_REGEX"; then
+        log "FATAL: --smoke-mode TELEGRAM_BOT_TOKEN does not match fixture shape (${SMOKE_FIXTURE_TOKEN_REGEX})"
+        exit 2
+    fi
+}
+
+render_smoke_mode_marker() {
+    # TKT-041 § 1.4 (1) — write the marker file at /srv/devassist/state/smoke-mode.flag,
+    # mode 0400, owner devassist:devassist. Marker presence is the gate for
+    # smoke_inject.py refusal logic and the dev-assist-cli smoke subcommand.
+    if [ "$SMOKE_MODE" != "1" ]; then
+        return 0
+    fi
+    local target="${PREFIX}${SMOKE_MARKER_FILE_PATH}"
+    local target_dir
+    target_dir="$(dirname "$target")"
+    mkdir -p "$target_dir"
+    cat >"$target" <<MARKER
+# TKT-041 v0.1.1 AUDIT-003 smoke-mode marker
+# Rendered by scripts/install-self.sh --smoke-mode at $(date -u '+%Y-%m-%dT%H:%M:%SZ').
+# Presence of this file enables the synthetic-message inject endpoint
+# (127.0.0.1:8186) and the per-runtime test-tool endpoints
+# (127.0.0.1:8281..8285). Absence is the production posture.
+smoke_mode_active=true
+MARKER
+    chmod 0400 "$target"
+    if [ "$DRY_RUN" != "1" ]; then
+        chown devassist:devassist "$target" 2>/dev/null || true
+    fi
+    log "smoke-mode marker rendered at ${target} (mode 0400, owner devassist:devassist)"
 }
 
 detect_install_mode() {
@@ -1334,8 +1432,9 @@ render_shared_skills_manifest() {
 main() {
     parse_flags "$@"
     detect_install_mode
+    confirm_smoke_mode_tty
 
-    log "install-self.sh v${SELF_DEPLOY_VERSION} starting (DRY_RUN=${DRY_RUN}, PREFIX=${PREFIX}, MODE=${INSTALL_MODE}, GH_AUTH=${GH_AUTH_MODE})"
+    log "install-self.sh v${SELF_DEPLOY_VERSION} starting (DRY_RUN=${DRY_RUN}, PREFIX=${PREFIX}, MODE=${INSTALL_MODE}, GH_AUTH=${GH_AUTH_MODE}, SMOKE_MODE=${SMOKE_MODE})"
 
     detect_prior_deploy
     verify_prereqs
@@ -1346,6 +1445,7 @@ main() {
     else
         validate_required_env_vars
     fi
+    assert_smoke_fixture_token_shape
     create_users
     create_filesystem
     init_operational_db
@@ -1354,6 +1454,7 @@ main() {
     render_self_deploy_env
     render_runtime_configs
     render_shared_skills_manifest
+    render_smoke_mode_marker
     authenticate_gh_for_devassist
     configure_devassist_git_identity
     install_hermes_agent
