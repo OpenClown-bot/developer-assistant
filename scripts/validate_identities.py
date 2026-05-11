@@ -46,6 +46,7 @@ WHITELIST: list[tuple[str, str]] = [
 ]
 
 WHITELIST_EMAILS = {email.lower() for _name, email in WHITELIST}
+WHITELIST_PAIRS = {(name.lower(), email.lower()) for name, email in WHITELIST}
 
 # ---------------------------------------------------------------------------
 # PII patterns forbidden in commit message bodies. These are NOT identities
@@ -86,7 +87,24 @@ def run(*args: str) -> str:
     return subprocess.check_output(list(args), text=True).strip()
 
 
-def identity_allowed(email: str) -> bool:
+def identity_allowed(name: str, email: str) -> bool:
+    """Return True iff the (name, email) pair matches a whitelist entry.
+
+    Both fields are compared case-insensitively. Email-only matches are
+    insufficient — a commit must use BOTH a whitelisted name AND its paired
+    whitelisted email. This prevents the trivial bypass of authoring a commit
+    as `personal_handle <bot@openclown-bot.dev>` (whitelisted email + non-
+    whitelisted name).
+    """
+    return (name.lower(), email.lower()) in WHITELIST_PAIRS
+
+
+def email_in_whitelist(email: str) -> bool:
+    """Return True iff the email alone is in the whitelist (no name check).
+
+    Used by the PII regex pass to exclude defensively any whitelist email
+    that the personal-email-domain pattern might match incidentally.
+    """
     return email.lower() in WHITELIST_EMAILS
 
 
@@ -98,7 +116,7 @@ def check_commit(sha: str, body: str) -> list[Violation]:
     committer_name = run("git", "log", "-1", "--format=%cN", sha)
     committer_email = run("git", "log", "-1", "--format=%cE", sha)
 
-    if not identity_allowed(author_email):
+    if not identity_allowed(author_name, author_email):
         violations.append(
             Violation(
                 sha,
@@ -106,7 +124,7 @@ def check_commit(sha: str, body: str) -> list[Violation]:
                 f"author {author_name!r} <{author_email}> not in whitelist",
             )
         )
-    if not identity_allowed(committer_email):
+    if not identity_allowed(committer_name, committer_email):
         violations.append(
             Violation(
                 sha,
@@ -118,13 +136,13 @@ def check_commit(sha: str, body: str) -> list[Violation]:
     for line in body.splitlines():
         m = COAUTH_RE.match(line)
         if m:
-            _name, email = m.group(1), m.group(2)
-            if not identity_allowed(email):
+            name, email = m.group(1), m.group(2)
+            if not identity_allowed(name, email):
                 violations.append(
                     Violation(
                         sha,
                         "coauth",
-                        f"Co-authored-by email {email!r} not in whitelist",
+                        f"Co-authored-by {name!r} <{email}> not in whitelist",
                     )
                 )
 
@@ -133,7 +151,7 @@ def check_commit(sha: str, body: str) -> list[Violation]:
             # Exclude legitimate whitelist emails that the regex may match
             # incidentally (it should not, but be defensive).
             matched = m.group(0)
-            if "@" in matched and identity_allowed(matched):
+            if "@" in matched and email_in_whitelist(matched):
                 continue
             violations.append(
                 Violation(sha, "pii", f"{label}: {matched!r}")
@@ -173,7 +191,7 @@ def main() -> int:
     if args.pre_commit:
         name = run("git", "config", "--get", "user.name")
         email = run("git", "config", "--get", "user.email")
-        if not identity_allowed(email):
+        if not identity_allowed(name, email):
             print(
                 f"identity-check: refusing to commit — local git identity "
                 f"{name!r} <{email}> is not in the whitelist. "
