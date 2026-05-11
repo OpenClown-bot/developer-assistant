@@ -157,6 +157,85 @@ top of the body distinguishing reconstruction from primary-source narrative.
 2026-05-10 F1 closure sweep PR. Future entries from convention adoption
 forward must conform from creation.
 
+### Identity policy
+
+All commits in this repository MUST be authored by one of the
+whitelisted identities listed in `scripts/validate_identities.py`. As of
+2026-05-11 the whitelist is:
+
+| Name | Email |
+|---|---|
+| `OpenClown-bot` | `bot@openclown-bot.dev` |
+| `Devin AI` | `158243242+devin-ai-integration[bot]@users.noreply.github.com` |
+| `devin-ai-integration[bot]` | `158243242+devin-ai-integration[bot]@users.noreply.github.com` |
+| `GitHub` | `noreply@github.com` |
+| `Strategic Orchestrator` | `strategic-orchestrator@developer-assistant.local` |
+| `dependabot[bot]` | `49699333+dependabot[bot]@users.noreply.github.com` |
+
+Personal GitHub handles, personal email addresses, local-machine
+usernames, or any other non-whitelisted identity are forbidden in:
+
+1. The `author` field of any commit.
+2. The `committer` field of any commit (exception: `GitHub <noreply@github.com>`
+   is the legitimate committer on web-merged PRs).
+3. Any `Co-authored-by:` trailer in a commit message.
+
+In addition, **commit message bodies MUST NOT contain** any of the
+following PII patterns:
+
+- Devin session identifiers (`devin-<hex>`, where `<hex>` is 8+
+  hexadecimal characters). The word `devin` itself is allowed; only the
+  specific hex-identifier portion is forbidden. Use `devin-[REDACTED]`
+  in attestation prose if a placeholder is needed.
+- Devin session URLs (`https://app.devin.ai/sessions/<id>`).
+- Personal email addresses (any address with a non-whitelisted domain).
+
+Model identity, runtime, and host descriptors (`Anthropic Claude Sonnet
+4.5 on Devin VM`, `DeepSeek V4 Pro main via opencode + OmniRoute on
+Founder PC`, etc.) are **NOT** PII and are permitted — but optional,
+because model identity is not always reliably observable at write time.
+
+**Configuring your local git identity.** Executors running on Devin or
+any other automated runtime MUST configure their local git identity
+before committing:
+
+```
+git config user.name "OpenClown-bot"
+git config user.email "bot@openclown-bot.dev"
+```
+
+**Enforcement.** Three layers of enforcement guard this policy:
+
+1. **CI:** `.github/workflows/identity-check.yml` runs
+   `python scripts/validate_identities.py` on every PR and push to
+   `main`. The job fails if any commit introduced by the branch (relative
+   to the base) violates the whitelist or contains a PII pattern in its
+   message body.
+2. **Pre-commit hook (recommended for local development):**
+   `.pre-commit-config.yaml` runs `validate_identities.py --pre-commit`
+   on every commit, validating the local git identity before the commit
+   object is created. Install once per clone with:
+   `pre-commit install --hook-type pre-commit --hook-type commit-msg`.
+3. **Reviewer gate:** Reviewers MUST refuse any PR whose
+   `identity-check` CI job is failing, regardless of whether the change
+   would otherwise pass review.
+
+**Mailmap.** A repository-root `.mailmap` file defensively remaps every
+historical pre-rewrite author email to the bot identity. This protects
+against accidental resurfacing of old commits via cherry-pick or
+backup-restore. The mailmap is consumed by `git log --use-mailmap`,
+GitHub's UI rendering, and the identity-check CI.
+
+**Why this policy exists.** The project's pre-2026-05-11 history
+contained 15 distinct personal identifiers (email addresses and
+GitHub-style handles) across author/committer fields and
+`Co-authored-by:` trailers, plus Devin session identifiers in
+attestation prose. The 2026-05-10 F1 closure cycle (PR #165 +
+Phase 2 force-push) eliminated all of these from current state; this
+policy prevents reintroduction. The companion ADR-019 documents the
+v1.0 milestone migration that will eliminate the remaining
+GitHub-side edit-history residue at project deployment time.
+
 ## CI Baseline
 
 Minimum validation:

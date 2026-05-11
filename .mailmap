@@ -1,0 +1,32 @@
+# Repo identity mailmap.
+#
+# Format (per git-mailmap(5)):  <preferred-name> <preferred-email>  <commit-email>
+#
+# Every historical author email that has appeared in this repo is mapped to the
+# `OpenClown-bot <bot@openclown-bot.dev>` bot identity. This file is consumed
+# by `git log --use-mailmap`, `git shortlog`, GitHub's UI rendering, and CI
+# identity-check tooling.
+#
+# Preserved identities (NOT remapped — these are legitimate bot / role accounts):
+#   - Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+#   - devin-ai-integration[bot] <…@users.noreply.github.com>
+#   - GitHub <noreply@github.com>  (web-merge committer)
+#   - Strategic Orchestrator <strategic-orchestrator@developer-assistant.local>
+#   - dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+#
+# Defensive mappings — if any pre-rewrite commit ever resurfaces (e.g. via
+# `git cherry-pick` from a fork or backup), these mappings keep `git log` and
+# GitHub's UI rendering it under the bot identity.
+
+OpenClown-bot <bot@openclown-bot.dev>  <yourmomsenpai@yandex.ru>
+OpenClown-bot <bot@openclown-bot.dev>  <JuaresPresswood75@hotmail.com>
+OpenClown-bot <bot@openclown-bot.dev>  <polfkfn1s@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <jojonomo8827@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <ohemaeeee232@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <lowlakjd@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <eppeppe@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <nikgpinxx@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <ponlonbjohn@pinmx.net>
+OpenClown-bot <bot@openclown-bot.dev>  <ayers.brooke.4@outlook.com>
+OpenClown-bot <bot@openclown-bot.dev>  <heather-20021939@outlook.com>
+OpenClown-bot <bot@openclown-bot.dev>  <maria.199066@outlook.com>

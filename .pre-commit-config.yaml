@@ -1,0 +1,16 @@
+# Pre-commit hook configuration.
+#
+# Install once per local clone: `pre-commit install --hook-type pre-commit --hook-type commit-msg`
+# (See CONTRIBUTING.md § Identity policy.)
+
+repos:
+  - repo: local
+    hooks:
+      - id: identity-check
+        name: Validate local git identity is whitelisted
+        entry: python3 scripts/validate_identities.py --pre-commit
+        language: system
+        # Run on every commit (no file filter needed — we check git config, not files).
+        always_run: true
+        pass_filenames: false
+        stages: [pre-commit]
