@@ -1,7 +1,8 @@
 ---
 id: OBSERVABILITY-CONTRACT
-version: 0.1.1
+version: 0.1.2
 status: draft
+updated: 2026-05-11
 ---
 
 # Observability Contract
@@ -338,7 +339,7 @@ Each Hermes runtime exposes an HTTP health endpoint on a unique localhost-only p
 | Executor | 8184 |
 | Reviewer | 8185 |
 
-Bind address MUST be `127.0.0.1` (or `::1`). Binding to `0.0.0.0` is forbidden. The VPS firewall rules (`SELF-DEPLOYMENT-CONTRACT.md` § 7) further enforce that ports 8181..8185 are not exposed to the public network.
+Bind address MUST be `127.0.0.1` (or `::1`). Binding to `0.0.0.0` is forbidden. The localhost-only bind is the sole network-exposure gate for ports 8181..8185 — no public listener exists on any interface, and `SELF-DEPLOYMENT-CONTRACT.md` does not specify a network-firewall section (the loopback bind is the contractual gate).
 
 Response body:
 
@@ -358,7 +359,18 @@ Response body:
     "failed": 0
   },
   "version": "0.1.0",
-  "build_commit": "abcdef0"
+  "build_commit": "abcdef0",
+  "loaded_skills": [                            // only present when smoke-mode active OR /health?internal=1 (see § 11.1); per-role expected set pinned in MULTI-HERMES-CONTRACT.md § 5.1–5.5
+    "telegram-gateway",
+    "cronjob",
+    "memory",
+    "dev-assist-classifier",
+    "dev-assist-progress-report",
+    "dev-assist-escalation-surface",
+    "dev-assist-work-queue-write"
+  ],
+  "prompt_path": "docs/prompts/runtime-hermes-orchestrator.md",  // only present when smoke-mode active OR /health?internal=1; resolved agent.system_prompt_path relative to /srv/devassist/repo/ per SELF-DEPLOYMENT-CONTRACT.md § 5
+  "prompt_sha256": "0123abcd… (64 hex chars) …"  // only present when smoke-mode active OR /health?internal=1; SHA-256 hex of file at prompt_path, computed at request time (NOT cached at boot)
 }
 ```
 
@@ -367,6 +379,24 @@ Response body:
 `dev-assist-cli status` (§ 6.1) calls each health endpoint to populate `health_endpoint_status`. If the endpoint does not respond within 5 seconds, the runtime is reported as `down`.
 
 The endpoints are read-only — no POST/PUT/DELETE methods are defined.
+
+### 11.1 Smoke-mode / internal-admin-gated optional fields (v0.1.2 amendment)
+
+Three additional optional fields are added to the `/health` JSON to support the behaviour-level deployment smoke specified by `TKT-041` v0.1.1 § 4 AC-2 + AC-4. The fields are **backward-compatible additions**: existing consumers that ignore them are unaffected, and they are **absent from production-posture `/health` responses by default** — the gate (described below) controls whether they appear.
+
+| Field | Type | Semantics | Source contract |
+| --- | --- | --- | --- |
+| `loaded_skills` | `list[str]` | The set of skill names currently loaded into the runtime. The per-role expected sets are owned by `MULTI-HERMES-CONTRACT.md` § 5.1–5.5 (each role's authoritative loadout table); this contract does NOT duplicate the per-role values — cite § 5.1–5.5 as the source of truth. | `TKT-041` v0.1.1 § 4 AC-2 (behaviour-level skill-loadout probe). |
+| `prompt_path` | `string` | The resolved `agent.system_prompt_path` for the runtime, as a path relative to `/srv/devassist/repo/` (the install root per `SELF-DEPLOYMENT-CONTRACT.md` § 5). The per-role canonical filename under `docs/prompts/` is owned by `MULTI-HERMES-CONTRACT.md` § 5.1–5.5 role table (e.g., `docs/prompts/architect.md` for the architect runtime; `docs/prompts/runtime-hermes-orchestrator.md` for the orchestrator runtime per the ARCH-002 § 12.1 path correction). | `TKT-041` v0.1.1 § 4 AC-4 (i), (iii). |
+| `prompt_sha256` | `string` | SHA-256 hex digest of the file content at the resolved `prompt_path`. Computed **at request time on every `/health` GET** — NOT cached at runtime boot. Computing at request time is load-bearing for AC-4's post-boot tamper detection (a boot-cached value would miss a tamper that occurred after the runtime started). | `TKT-041` v0.1.1 § 4 AC-4 (i), (ii). |
+
+**Production-posture gate (default: absent).** Production `/health` responses MUST NOT include `loaded_skills` / `prompt_path` / `prompt_sha256` unless the request is **either** (a) made while the smoke-mode marker file `/srv/devassist/state/smoke-mode.flag` (mode `0400`, owner `devassist:devassist` per `TKT-041` v0.1.1 § 1.4 (1)) is present, **or** (b) authenticated as an internal admin probe via the `?internal=1` query-string parameter on the localhost-only `/health` endpoint. The Executor implementation chooses the exact authentication mechanism for the `?internal=1` path within this constraint (`TKT-041` v0.1.1 § 5 Allowed Files note on `tests/test_observability_manager_smoke.py`).
+
+**Rationale for the gate (per `TKT-041` v0.1.1 § 8 risk bullet 1).** A loaded-skills enumeration on an unrestricted production endpoint would leak architecture details (the per-role skill loadout reveals the project's role-separation topology, which is a defense-in-depth concern even though the contract itself is public). The gate keeps the surface available to the smoke and to internal admin probes while denying it on the default production `/health` posture. Residual risk — a leaked internal-admin probe reaching the `/health` endpoint via a co-located process — is mitigated by the localhost-only bind posture (per § 11 above: the `/health` listener never accepts a non-loopback connection) plus the smoke-mode marker file's `0400` / `devassist:devassist` permissions per `TKT-041` v0.1.1 § 1.4 (1) (only the `devassist` system user can read the marker, so smoke-mode-gated visibility is bounded by that filesystem ACL).
+
+**Backward compatibility.** Existing `/health` consumers (`dev-assist-cli status` per § 6.1; daily-digest assembly per § 8; the Telegram `/status` command per § 7) ignore unknown fields. Adding three optional fields gated to smoke-mode / internal-admin posture does not change the response shape any existing consumer observes. The on-VPS-only observability shape (`ADR-010-observability-shape.md`) is preserved unchanged — these fields are emitted by the same localhost-only `/health` endpoint and do NOT introduce a new transport, daemon, or surface.
+
+**Cross-references.** `TKT-041` v0.1.1 § 4 AC-2 + AC-4 (source contract for the field additions and the smoke assertions that consume them); `MULTI-HERMES-CONTRACT.md` § 5.1–5.5 (source of truth for the per-role `loaded_skills` expected values and the per-role canonical `prompt_path`); `SELF-DEPLOYMENT-CONTRACT.md` § 5 (install root for resolving `prompt_path`); `ADR-010-observability-shape.md` (on-VPS-only observability shape — unchanged by this amendment).
 
 ## 12. FR-OBS-09 — Log retention and rotation (split into testable sub-requirements per RV-SPEC-014 M-002)
 
@@ -532,9 +562,10 @@ Per RV-SPEC-014 M-002 split, the manager's responsibilities map cleanly to FR-OB
 - `ESCALATION-POLICY.md` § 4.6 (escalation events appear in journald + `escalations` table; daily digest summarizes)
 - `MULTI-HERMES-CONTRACT.md` § 6.2 (`work_items` table; `work_item_id` propagation source), § 7.3 (dequeue path that sets `work_item_id` context), § 9.4 (backoff cadence informs heartbeat thresholds)
 - `OPERATIONAL-STATE-STORE.md` § 3 (schema for `errors`, `llm_calls`)
-- `SELF-DEPLOYMENT-CONTRACT.md` § 5.2 (systemd units), § 5.3 (`dev-assist-cli`), § 6 (verify step), § 7 (firewall rules for 8181..8185)
+- `SELF-DEPLOYMENT-CONTRACT.md` § 5.2 (systemd units), § 5.3 (`dev-assist-cli`), § 6 (verify step)
 - `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 5.4, § 6.7 (on-VPS observability findings; rejection of paid services)
 - `ADR-010-observability-shape.md` (decision: on-VPS only, paid-service alternatives rejected)
 - `ADR-011-routing-layer.md` (`routing_path` enum source for `llm_calls`)
 - `docs/operations/RECOVERY-PLAYBOOK.md` (FR-OBS-10 integration target)
+- `docs/tickets/TKT-041-behaviour-level-deployment-smoke.md` v0.1.1 § 4 AC-2 + AC-4 — source contract for the `loaded_skills` / `prompt_path` / `prompt_sha256` `/health` fields specified in § 11.1 (v0.1.2 amendment)
 - Implementation: TKT-027 (CLI), TKT-028 (structured logging + work_item_id propagation), TKT-029 (daily digest + Telegram /status), TKT-030 (recovery playbook execution discipline), TKT-031 (`errors` + `llm_calls` tables + health endpoints)
