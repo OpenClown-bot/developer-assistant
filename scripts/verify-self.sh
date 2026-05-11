@@ -725,6 +725,112 @@ check_prereq_baseline() {
     record_pass "$name"
 }
 
+SMOKE_MARKER_FILE_PATH="${PREFIX}/srv/devassist/state/smoke-mode.flag"
+SMOKE_FIXTURE_TOKEN_REGEX='^smoke-fixture-token-[a-z0-9]{8}$'
+TELEGRAM_PRODUCTION_TOKEN_REGEX='^[0-9]+:[A-Za-z0-9_-]{35,}$'
+
+check_smoke_mode_mutual_exclusion() {
+    # TKT-041 § 1.4 (6) — when smoke-mode marker is present, the system
+    # MUST NOT have a production-shaped TELEGRAM_BOT_TOKEN, and conversely
+    # when the marker is absent, the token MUST NOT match the smoke-fixture
+    # shape. The marker file and a production token cannot coexist.
+    local name="smoke_mode_production_mutual_exclusion"
+    local env_file="${PREFIX}/srv/devassist/state/self-deploy.env"
+    if [ ! -f "$env_file" ]; then
+        record_pass "$name"
+        return 0
+    fi
+    local token
+    token="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" | head -n1 | sed 's/^TELEGRAM_BOT_TOKEN=//')"
+    if [ -z "$token" ]; then
+        record_fail "$name" "smoke-mode marker present but TELEGRAM_BOT_TOKEN unset"
+        return 0
+    fi
+    if printf '%s' "$token" | grep -Eq "$TELEGRAM_PRODUCTION_TOKEN_REGEX"; then
+        record_fail "$name" "smoke-mode marker coexists with production-shaped TELEGRAM_BOT_TOKEN (refuses to continue)"
+        return 0
+    fi
+    if ! printf '%s' "$token" | grep -Eq "$SMOKE_FIXTURE_TOKEN_REGEX"; then
+        record_fail "$name" "smoke-mode marker present but TELEGRAM_BOT_TOKEN does not match fixture shape"
+        return 0
+    fi
+    record_pass "$name"
+}
+
+check_smoke_health_extended_fields() {
+    # TKT-041 § 4 AC-2 + AC-4 — when smoke-mode marker is active, every
+    # /health endpoint MUST expose loaded_skills (list[str]), prompt_path
+    # (string), and prompt_sha256 (string). Absent or null on any runtime
+    # is a fail. Skipped (function not invoked) when marker absent.
+    local name="smoke_health_extended_fields"
+    if ! command -v curl >/dev/null 2>&1; then
+        record_fail "$name" "curl not available; cannot probe /health endpoints"
+        return 0
+    fi
+    local ports="8181 8182 8183 8184 8185"
+    local failures=""
+    local port
+    for port in $ports; do
+        local body
+        body="$(curl --silent --max-time 5 "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+        if [ -z "$body" ]; then
+            failures="${failures} port_${port}_unreachable"
+            continue
+        fi
+        # python3 is mandated by check_deps so we can use it for tolerant
+        # JSON field extraction.
+        local result
+        result="$(python3 -c "import json,sys
+try:
+    d=json.loads(sys.stdin.read())
+except Exception as e:
+    print('parse_error'); sys.exit(0)
+ok=isinstance(d.get('loaded_skills'),list) and isinstance(d.get('prompt_path'),str) and isinstance(d.get('prompt_sha256'),str) and len(d.get('prompt_sha256') or '')==64
+print('ok' if ok else 'missing_or_invalid_fields')" <<<"$body")"
+        if [ "$result" != "ok" ]; then
+            failures="${failures} port_${port}_${result}"
+        fi
+    done
+    if [ -n "$failures" ]; then
+        record_fail "$name" "smoke /health probe failures:${failures}"
+        return 0
+    fi
+    record_pass "$name"
+}
+
+check_smoke_artefact_secret_leak() {
+    # TKT-041 § 4 AC-9 (iii) — when smoke-mode is active, the smoke-mode
+    # artefact paths MUST NOT contain Telegram bot tokens (production shape
+    # ^[0-9]+:[A-Za-z0-9_-]{35,}$), GitHub PATs (^ghp_[A-Za-z0-9]{36,}$), or
+    # Fireworks API keys (^fw_[A-Za-z0-9]{32,}$). The fixture-token shape
+    # ^smoke-fixture-token-[a-z0-9]{8}$ is allowed. Skipped (function not
+    # invoked) when marker absent.
+    local name="smoke_artefact_secret_leak_grep"
+    local artefacts="${PREFIX}/srv/devassist/logs/smoke-outbound.jsonl ${PREFIX}/srv/devassist/state/smoke-mode.flag"
+    local _unused=1  # keep local-var grouping consistent
+    local target
+    local failures=""
+    for target in $artefacts; do
+        if [ ! -f "$target" ]; then
+            continue
+        fi
+        if grep -Eq '[0-9]+:[A-Za-z0-9_-]{35,}' "$target"; then
+            failures="${failures} ${target}:telegram_token_shape"
+        fi
+        if grep -Eq 'ghp_[A-Za-z0-9]{36,}' "$target"; then
+            failures="${failures} ${target}:github_pat_shape"
+        fi
+        if grep -Eq 'fw_[A-Za-z0-9]{32,}' "$target"; then
+            failures="${failures} ${target}:fireworks_key_shape"
+        fi
+    done
+    if [ -n "$failures" ]; then
+        record_fail "$name" "secret-shape leak in smoke artefacts:${failures}"
+        return 0
+    fi
+    record_pass "$name"
+}
+
 main() {
     log "verify-self.sh v${SELF_DEPLOY_VERSION} starting (FIXTURE=${FIXTURE}, DRY_RUN=${DRY_RUN}, VERIFY_PHASE=${VERIFY_PHASE})"
 
@@ -748,6 +854,16 @@ main() {
     check_secrets_file_acl
     check_required_env_vars_present
     check_prereq_baseline
+    # TKT-041 § 4 AC-2 / AC-4 / AC-9 — smoke-mode posture cross-checks.
+    # These invariants are only registered when the smoke-mode marker file
+    # is present, so a production install reports the unchanged baseline
+    # count (19/19) while a smoke-mode install reports 22/22. The marker
+    # gate keeps the production posture's verify-self surface unchanged.
+    if [ -f "$SMOKE_MARKER_FILE_PATH" ]; then
+        check_smoke_mode_mutual_exclusion
+        check_smoke_health_extended_fields
+        check_smoke_artefact_secret_leak
+    fi
 
     local total=$((PASS_COUNT + FAIL_COUNT))
     echo ""

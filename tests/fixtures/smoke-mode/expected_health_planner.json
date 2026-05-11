@@ -1,0 +1,10 @@
+{
+  "loaded_skills": [
+    "cronjob",
+    "dev-assist-prd-writer",
+    "dev-assist-questions-writer",
+    "dev-assist-work-queue-poll",
+    "memory"
+  ],
+  "prompt_path": "docs/prompts/planner.md"
+}

@@ -14,6 +14,10 @@ import time
 from typing import Any, Optional, Protocol
 
 from developer_assistant.observability.health_endpoint import HealthEndpoint
+from developer_assistant.smoke_inject import (
+    DEFAULT_MARKER_FILE_PATH,
+    DEFAULT_REPO_ROOT,
+)
 from developer_assistant.state.observability_store import (
     ensure_wal_mode,
     record_error as _store_record_error,
@@ -45,6 +49,9 @@ class ObservabilityManager:
         operational_db_path: str,
         health_endpoint_port: int,
         catalog_parser: CatalogParserProtocol,
+        repo_root: Optional[str] = None,
+        marker_file_path: str = DEFAULT_MARKER_FILE_PATH,
+        loaded_skills: Optional[frozenset[str]] = None,
     ) -> None:
         self._runtime_role = runtime_role
         self._db_path = operational_db_path
@@ -55,6 +62,11 @@ class ObservabilityManager:
         self._work_item_id: Optional[str] = None
         self._current_model: Optional[str] = None
         self._started = False
+        self._repo_root = repo_root or os.environ.get(
+            "DEVASSIST_REPO_ROOT", DEFAULT_REPO_ROOT,
+        )
+        self._marker_file_path = marker_file_path
+        self._loaded_skills = loaded_skills
 
     @classmethod
     def from_env(cls, catalog_parser: CatalogParserProtocol) -> "ObservabilityManager":
@@ -67,7 +79,14 @@ class ObservabilityManager:
             port = int(port_str)
         else:
             port = _HEALTH_PORT_DEFAULTS.get(role, 8184)
-        return cls(role, db_path, port, catalog_parser)
+        repo_root = os.environ.get("DEVASSIST_REPO_ROOT", DEFAULT_REPO_ROOT)
+        marker = os.environ.get(
+            "DEVASSIST_SMOKE_MODE_MARKER_PATH", DEFAULT_MARKER_FILE_PATH,
+        )
+        return cls(
+            role, db_path, port, catalog_parser,
+            repo_root=repo_root, marker_file_path=marker,
+        )
 
     async def start(self) -> None:
         if self._started:
@@ -81,6 +100,9 @@ class ObservabilityManager:
             self._runtime_role,
             self._health_port,
             self._db_path,
+            repo_root=self._repo_root,
+            marker_file_path=self._marker_file_path,
+            loaded_skills=self._loaded_skills,
         )
         await self._health.start()
         self._started = True
