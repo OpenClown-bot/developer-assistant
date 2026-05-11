@@ -566,6 +566,128 @@ bash -n scripts/install-self.sh \
 
 - **No new blocking questions for iter-2.** Q-TKT-034-01 / Q-TKT-034-02 from iter-1 carry over unchanged.
 
+### Closure amendment — 2026-05-11 — Strategic Orchestrator
+
+Filed by SO (Anthropic Claude Sonnet 4.5 on Devin VM) as part of the
+2026-05-10 / 2026-05-11 F1 closure dual-phase privacy-scrub cycle.
+This subsection records the closure of SO maintenance backlog flag **F1**
+(TKT-034 § 10 attribution convention) — first opened against this
+ticket as a "personal info present in repo artifacts" follow-up — via
+two coordinated PRs that together eliminate all personal information
+from both file content and git metadata across the repository.
+
+- **Phase 1 (file-content scrub) — PR #165.** Merged 2026-05-11 00:52
+  UTC at merge commit `f92cb19df1584e16be0bff7286b6f8ec61eb35e2`.
+  Three deliverables in one PR per the dispatching NUDGE: (a)
+  personal-info scrub across all 19 ticket files, `CONTRIBUTING.md`,
+  every open and closed PR description, and every PR/issue/review
+  comment on the GitHub side; (b) new `### § 10 Execution Log
+  attribution convention` subsection co-located with the existing
+  `### Reviewer artifact naming convention` subsection in `CONTRIBUTING.md`
+  § Review Gates; (c) header normalization of ~32 pre-existing § 10
+  entries across 19 tickets to canonical `### iter-N — YYYY-MM-DD —
+  Role` format using em-dash separators. Acceptance criteria AC-1
+  (no PII matches via repo-wide regex on the F-NEW-1 baseline) verified
+  by Executor pre-merge and SO post-merge.
+
+- **Phase 1.5 (GitHub Actions workflow_runs cleanup) — out-of-band.**
+  Executed 2026-05-11 00:38 UTC. All 706 GitHub Actions workflow run
+  records (`Docs CI` × 427 + `PR Agent` × 279) were deleted via
+  `DELETE /repos/.../actions/runs/{id}`. The `head_commit.message`
+  snapshots in those run records contained PII residue (Co-authored-by
+  trailers, devin-session IDs, personal email addresses) that
+  survived Phase 1 because GitHub stores workflow_run metadata
+  independently of repo git state. Result: `GET /actions/runs?per_page=1` →
+  `total_count: 0`. CI badge history reset; future runs will be cleanly
+  authored from `OpenClown-bot` post-Phase-2.
+
+- **Phase 2 (git-history rewrite) — out-of-band, 2026-05-11.**
+  Executed by SO using `git-filter-repo` 2.47.0 with a mailmap of 12
+  email mappings + a Python message-callback implementing scope
+  Option C (strip Co-authored-by trailers referencing non-whitelist
+  identities + replace 15 personal handles + redact `devin-<hex>`
+  session IDs to `devin-[REDACTED]` in commit message bodies). The
+  rewrite was run on a fresh clone of post-#165 `main`, validated
+  through preview branch `phase2-rewrite-preview` (Founder spot-check
+  passed), then force-pushed to `origin` `--all` + `--tags`.
+
+  - **Post-Phase-2 main HEAD SHA:** `71e18b06cbbaeb608d5d7d485e652d73d2e38e5d`.
+  - **Pre-Phase-2 main HEAD SHA** (= PR #165 merge commit, now overwritten):
+    `f92cb19df1584e16be0bff7286b6f8ec61eb35e2`.
+  - **Mirror backup retained at:**
+    `/home/ubuntu/devassist-pre-phase2-backup.git` (Founder VM). Backup
+    is read-only and will be retained for at least 14 days per backup
+    discipline. Do NOT delete without Founder explicit confirmation.
+
+- **AC-2 (Phase 2 acceptance criteria) — all PASSED on fresh-clone
+  verification post-force-push.**
+
+  - **AC-2-1 (identity list).** `git log --all --format='%aN <%aE>' | sort -u`
+    returns exactly four authors: `OpenClown-bot <bot@openclown-bot.dev>`,
+    `Strategic Orchestrator <strategic-orchestrator@developer-assistant.local>`,
+    `Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>`,
+    `devin-ai-integration[bot] <158243242+devin-ai-integration[bot]@users.noreply.github.com>`.
+    Committer list adds `GitHub <noreply@github.com>` (web-merge committer).
+    Zero personal identifiers.
+  - **AC-2-2 (commit count).** 230 commits across all refs (unchanged
+    from pre-Phase-2 count).
+  - **AC-2-3 (commit message PII scrub).** `grep` against the 15-identifier
+    pattern set returns 0 matches; `grep -E 'devin-[a-f0-9]{8,}'` returns
+    0 matches; 11 `devin-[REDACTED]` placeholders remain (correct);
+    31 `Co-authored-by: Devin AI` trailers preserved (whitelist-only
+    Co-authors retained).
+  - **AC-2-4 (tree-SHA invariance).** `diff <(post-rewrite tree-SHA + subject
+    list, sorted) <(pre-rewrite tree-SHA + subject list, sorted)` on
+    branch-reachable commits returns empty diff. File content is byte-identical
+    pre and post Phase 2; only commit-SHAs and author/committer/message
+    metadata differ.
+  - **AC-2-5 (ref preservation).** All 33 local branches preserved
+    (`origin/main` + 32 feature/chore/rv branches). No refs lost.
+    No tags existed pre-Phase-2; none created.
+
+- **F-CARRY-3 (residual server-side residue, deferred to v1.0 milestone).**
+  Force-push updates `refs/heads/*` to new SHAs but does NOT update
+  `refs/pull/*` (server-managed by GitHub). For the 165 closed/merged
+  PRs, `refs/pull/N/head` and `refs/pull/N/merge` continue to reference
+  the pre-rewrite commit SHAs (which contain PII in author fields and
+  commit message bodies) until GitHub's git garbage collection prunes
+  the dangling objects — typically 14 days, sometimes longer. Anyone
+  with read access can fetch these objects via
+  `git fetch origin refs/pull/<N>/head`. This residue plus the F-CARRY-2
+  GitHub edit-history limitation is the motivation for the v1.0
+  milestone repo migration documented in
+  `docs/architecture/adr/ADR-019-v1.0-repo-migration.md` (this PR).
+
+- **Cleanup PR contents (this PR).** Bundles five categories of
+  post-Phase-2 housekeeping per the dispatching NUDGE (Option `b`):
+  1. **Identity policy enforcement:** `scripts/validate_identities.py`,
+     `.github/workflows/identity-check.yml`, `.pre-commit-config.yaml`,
+     `CONTRIBUTING.md` § Identity policy subsection.
+  2. **Defensive mailmap:** `.mailmap` at repo root (12 email mappings).
+  3. **v1.0 migration plan:** `docs/architecture/adr/ADR-019-v1.0-repo-migration.md`.
+  4. **TKT-034 closure record:** this Closure amendment entry.
+  5. **Session-state version bump:** `SESSION-STATE.md` v0.3.10 →
+     v0.3.11 with F1 closure paragraph.
+
+- **Forward references.** Two retrospective Reviewer audit prompts
+  will be dispatched by Founder post-merge of this cleanup PR:
+  Reviewer Prompt #1 (Phase 1 retrospective audit on PR #165,
+  producing `docs/reviews/RV-CODE-035.md`) and Reviewer Prompt #2
+  (Phase 2 cleanup PR audit, producing `docs/reviews/RV-ARCH-XXX.md`).
+  Both are post-merge audit artifacts and do not gate further
+  development.
+
+- **Identity policy CI dogfooding.** As of this PR, every commit on
+  every branch is authored by `OpenClown-bot <bot@openclown-bot.dev>`
+  except the four preserved bot identities (Devin AI, dependabot,
+  Strategic Orchestrator, GitHub web-merge committer). The
+  `identity-check` CI job introduced in this PR must pass on this PR
+  itself (dogfooding).
+
+- **F1 status:** **closed.** All deliverables landed; no carry-over
+  blockers besides the F-CARRY-2 and F-CARRY-3 limitations explicitly
+  deferred to v1.0 migration per ADR-019.
+
 ## 11. Amendment Delta — v0.2.0 → v0.3.0
 
 Amendment trigger: RV-CODE-033 verdict `fail` on PR #135 (TKT-034 v0.2.0 implementation iter-1) returned 2 HIGH-severity blockers + 1 MEDIUM gap. Independently re-verified by SO pass-2 ratify-ack on PR #137. Founder approved iter-2 dispatch with Architect amendment first (path 4a — add real `shared-skills/<skill>/SKILL.md` source tree).
