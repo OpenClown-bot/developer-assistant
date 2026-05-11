@@ -339,7 +339,7 @@ Each Hermes runtime exposes an HTTP health endpoint on a unique localhost-only p
 | Executor | 8184 |
 | Reviewer | 8185 |
 
-Bind address MUST be `127.0.0.1` (or `::1`). Binding to `0.0.0.0` is forbidden. The VPS firewall rules (`SELF-DEPLOYMENT-CONTRACT.md` § 7) further enforce that ports 8181..8185 are not exposed to the public network.
+Bind address MUST be `127.0.0.1` (or `::1`). Binding to `0.0.0.0` is forbidden. The localhost-only bind is the sole network-exposure gate for ports 8181..8185 — no public listener exists on any interface, and `SELF-DEPLOYMENT-CONTRACT.md` does not specify a network-firewall section (the loopback bind is the contractual gate).
 
 Response body:
 
@@ -392,7 +392,7 @@ Three additional optional fields are added to the `/health` JSON to support the 
 
 **Production-posture gate (default: absent).** Production `/health` responses MUST NOT include `loaded_skills` / `prompt_path` / `prompt_sha256` unless the request is **either** (a) made while the smoke-mode marker file `/srv/devassist/state/smoke-mode.flag` (mode `0400`, owner `devassist:devassist` per `TKT-041` v0.1.1 § 1.4 (1)) is present, **or** (b) authenticated as an internal admin probe via the `?internal=1` query-string parameter on the localhost-only `/health` endpoint. The Executor implementation chooses the exact authentication mechanism for the `?internal=1` path within this constraint (`TKT-041` v0.1.1 § 5 Allowed Files note on `tests/test_observability_manager_smoke.py`).
 
-**Rationale for the gate (per `TKT-041` v0.1.1 § 8 risk bullet 1).** A loaded-skills enumeration on an unrestricted production endpoint would leak architecture details (the per-role skill loadout reveals the project's role-separation topology, which is a defense-in-depth concern even though the contract itself is public). The gate keeps the surface available to the smoke and to internal admin probes while denying it on the default production `/health` posture. Residual risk — a misconfigured firewall combined with a leaked internal-admin token — is mitigated at the VPS firewall layer per `SELF-DEPLOYMENT-CONTRACT.md` § 7.
+**Rationale for the gate (per `TKT-041` v0.1.1 § 8 risk bullet 1).** A loaded-skills enumeration on an unrestricted production endpoint would leak architecture details (the per-role skill loadout reveals the project's role-separation topology, which is a defense-in-depth concern even though the contract itself is public). The gate keeps the surface available to the smoke and to internal admin probes while denying it on the default production `/health` posture. Residual risk — a leaked internal-admin probe reaching the `/health` endpoint via a co-located process — is mitigated by the localhost-only bind posture (per § 11 above: the `/health` listener never accepts a non-loopback connection) plus the smoke-mode marker file's `0400` / `devassist:devassist` permissions per `TKT-041` v0.1.1 § 1.4 (1) (only the `devassist` system user can read the marker, so smoke-mode-gated visibility is bounded by that filesystem ACL).
 
 **Backward compatibility.** Existing `/health` consumers (`dev-assist-cli status` per § 6.1; daily-digest assembly per § 8; the Telegram `/status` command per § 7) ignore unknown fields. Adding three optional fields gated to smoke-mode / internal-admin posture does not change the response shape any existing consumer observes. The on-VPS-only observability shape (`ADR-010-observability-shape.md`) is preserved unchanged — these fields are emitted by the same localhost-only `/health` endpoint and do NOT introduce a new transport, daemon, or surface.
 
@@ -562,7 +562,7 @@ Per RV-SPEC-014 M-002 split, the manager's responsibilities map cleanly to FR-OB
 - `ESCALATION-POLICY.md` § 4.6 (escalation events appear in journald + `escalations` table; daily digest summarizes)
 - `MULTI-HERMES-CONTRACT.md` § 6.2 (`work_items` table; `work_item_id` propagation source), § 7.3 (dequeue path that sets `work_item_id` context), § 9.4 (backoff cadence informs heartbeat thresholds)
 - `OPERATIONAL-STATE-STORE.md` § 3 (schema for `errors`, `llm_calls`)
-- `SELF-DEPLOYMENT-CONTRACT.md` § 5.2 (systemd units), § 5.3 (`dev-assist-cli`), § 6 (verify step), § 7 (firewall rules for 8181..8185)
+- `SELF-DEPLOYMENT-CONTRACT.md` § 5.2 (systemd units), § 5.3 (`dev-assist-cli`), § 6 (verify step)
 - `RESEARCH-001-hermes-and-openclaw-ecosystems.md` § 5.4, § 6.7 (on-VPS observability findings; rejection of paid services)
 - `ADR-010-observability-shape.md` (decision: on-VPS only, paid-service alternatives rejected)
 - `ADR-011-routing-layer.md` (`routing_path` enum source for `llm_calls`)
