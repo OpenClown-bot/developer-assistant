@@ -688,6 +688,172 @@ from both file content and git metadata across the repository.
   blockers besides the F-CARRY-2 and F-CARRY-3 limitations explicitly
   deferred to v1.0 migration per ADR-019.
 
+### Closure ratification — 2026-05-11 — Strategic Orchestrator
+
+This entry is appended after the F1 closure cycle was fully ratified
+across four pull requests. The original `closed` declaration above
+(filed on the PR #166 cleanup branch before merge) understated the
+remediation work that was required between Reviewer audit issuance
+and final ratification. This addendum records that remediation
+explicitly so the audit trail reflects the as-merged state of `main`
+rather than the as-authored state of the cleanup PR.
+
+**Post-merge Reviewer audit cycle.** Founder dispatched two
+retrospective audits after PR #166 was opened (per the forward
+references above):
+
+- **RV-CODE-037** (Reviewer Kimi K2.6, Moonshot, via opencode +
+  OmniRoute) on PR #165 — verdict `fail` HIGH at issue-time. AC-1
+  blocker: one residual personal GitHub handle in
+  `docs/session-log/2026-05-08-session-2.md:26`. That file had not
+  been touched by PR #165's repo-wide scrub because the scrub regex
+  did not recurse into the `docs/session-log/` directory.
+
+- **RV-ARCH-002** (same Reviewer) on PR #166 — verdict `fail` HIGH
+  at issue-time. AC-A / AC-B blockers: five stale `origin/*` remote
+  branches retained pre-rewrite PII history because the Phase 2
+  `git filter-repo --all` operation only rewrote refs reachable from
+  the local clone, which did not include remote-only branches that
+  had not been previously fetched. AC-C (tree-SHA invariance)
+  remained unverifiable in the Reviewer environment because the
+  pre-Phase-2 mirror backup was off-Reviewer-box.
+
+Both v0.1 drafts of these artifacts additionally contained verbatim
+leaked personal information in their finding citations (one GitHub
+handle in RV-CODE-037; five handle-email pairs in RV-ARCH-002's
+"Unexpected identities" enumeration). The redaction-when-citing rule
+that should have prevented this had not yet been codified at the
+time the v0.1 drafts were authored.
+
+**Remediation cycle — three PRs landed 2026-05-11.**
+
+- **PR #167** (`so/...-2026-05-08-session-redaction-and-redact-when-citing-rule`)
+  merged as `112859e`. Three deliverables:
+  1. RV-CODE-037 AC-1 HIGH blocker remediation —
+     `docs/session-log/2026-05-08-session-2.md:26` redacted (residual
+     GitHub handle replaced with `<redacted>` placeholder).
+  2. `CONTRIBUTING.md` § Review Gates § 10 attribution convention
+     extended with the **`Redaction-when-citing rule.`** paragraph
+     defining the canonical placeholder set (`<redacted-handle>`,
+     `<github-handle-A>`, `<email-A>`, `<personal-domain>`,
+     `<redacted-URL>`) and codifying the rule that citing a leak
+     verbatim — even to flag it as a leak — perpetuates the leak in
+     the citing artifact and counts as a fresh violation.
+  3. `docs/session-log/2026-05-11-session-1.md` SO post-mortem
+     documenting the three NUDGE gaps (implicit redaction convention,
+     incomplete AC-1 scrub scope, incomplete Phase 2 force-push
+     scope) with root causes, remediations, and lessons for future SO
+     sessions.
+
+- **PR #168** (`so/...-paste-relay-rv-code-037-rv-arch-002-v0.2`)
+  merged as `e6399f3`. SO paste-relay of Reviewer-confirmed v0.2
+  redacted artifacts to `docs/reviews/`:
+  `docs/reviews/RV-CODE-037.md` and `docs/reviews/RV-ARCH-002.md`.
+  Both artifacts preserve every substantive Reviewer finding,
+  verdict, AC assessment, blocker, residual-risk, and recommendation
+  byte-equivalent to the v0.1 drafts; only the citation form of
+  personal identifiers was rewritten to use the canonical
+  placeholders. Provenance: SO prepared v0.2 drafts, Founder
+  paste-relayed to Reviewer Kimi, Reviewer confirmed substance
+  preserved and re-issued as canonical v0.2.0. Both verdicts remain
+  `fail` (faithful historical record of what Reviewer found at
+  PR-review time, not a statement about the current state of `main`).
+
+- **Stale-branch deletion — out-of-band.** Founder dispatched
+  Option α (delete all 5 stale remote branches identified by
+  RV-ARCH-002 AC-A / AC-B). SO verified all 5 branches' PRs were
+  already merged before deletion. Deletion via
+  `gh api -X DELETE repos/.../git/refs/heads/<branch>` returned HTTP
+  422 ("Reference does not exist") for all 5 — the branches had been
+  pruned in the same operation cycle as Phase 2's `--all` force-push.
+  Post-deletion scan:
+  `git log --remotes=origin --format='%aN <%aE>' | sort -u`
+  returns only the 4 whitelisted identities (Devin AI, OpenClown-bot,
+  Strategic Orchestrator, devin-ai-integration[bot]).
+  RV-ARCH-002 AC-A and AC-B are therefore re-verifiable as `pass` by
+  any subsequent Reviewer pass; this is recorded in the postscript
+  of `docs/reviews/RV-ARCH-002.md`.
+
+- **PR #166 commit-message remediation.** SO discovered during
+  audit that commit `5645607` on the cleanup branch (the PR-Agent
+  feedback fix layered on top of `1336f21`) contained a verbatim
+  personal email in the synthetic-test description of its
+  commit-message body. The body line read:
+  *"Synthetic negative test: commit authored as
+  `'<personal-handle> <bot@openclown-bot.dev>'` is now correctly
+  rejected with 2 violations (author + committer name not paired
+  with email)"* — but the v0.1 form of that line used a verbatim
+  personal handle, which violated the redaction-when-citing rule
+  codified in PR #167. The Founder authorized direct SO history
+  rewrite. SO checked out the cleanup branch, soft-reset the bad
+  commit, re-committed with sanitized message body and preserved
+  `OpenClown-bot <bot@openclown-bot.dev>` author and committer
+  identity, and force-pushed with `--force-with-lease=5645607` to
+  the cleanup branch. New head SHA: `9e0398a`. Tree-SHA invariance
+  vs the old `5645607` was verified (both point to tree
+  `4033d97a...`) so the functional diff was byte-identical; only
+  the commit-message body was changed. The post-rewrite `9e0398a`
+  passed the identity-check CI job introduced by the very same PR
+  (dogfooding confirmed); PR #166 was then merged to `main` as
+  merge commit `cb1c8e5`.
+
+- **Wrapper-injection finding (root cause for the historical
+  `OpenClown-bot <email-A>` mismatch identified by
+  RV-ARCH-002 AC-A; see `docs/reviews/RV-ARCH-002.md` for the
+  Reviewer-issued canonical placeholder mapping).** While performing the PR #166 commit-message
+  remediation, SO discovered that the Devin VM shell wraps `git
+  commit` with a function that `source`s `/opt/.devin/git_author`
+  before invoking the underlying `original_git commit`. That sourced
+  script `export`s `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+  `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` to the Founder's
+  personal-handle / personal-email pair, overriding any
+  command-prefix env vars the agent passes. The wrapper additionally
+  appends a `Co-Authored-By: Devin AI ...` trailer. Net effect on
+  any Devin-session git commit prior to the identity policy: author
+  and committer fields silently become the Founder's personal
+  identity, while the Co-author trailer flags the work as
+  Devin-AI-assisted. This wrapper is the mechanism by which
+  historical commits in this repo were authored as
+  `OpenClown-bot <personal-email>` (the bot name came from
+  `git config user.name`, the email was overridden by the wrapper)
+  and is the structural origin of the `.mailmap`-mapped historical
+  emails. **Going-forward defense:** the `identity-check` CI job
+  introduced by PR #166 now rejects any commit whose
+  `(author-name, author-email)` or `(committer-name, committer-email)`
+  pair is not in the whitelist. The pair
+  `(OpenClown-bot, <personal-email>)` is not whitelisted, so the
+  wrapper's silent injection is now blocked at the PR gate. **Agent
+  workaround for legitimate identity-preserving operations:** use
+  `/usr/bin/git` (or `command git`) to bypass the shell function,
+  combined with `env -i` to isolate the env vars before passing
+  the desired `GIT_AUTHOR_*` / `GIT_COMMITTER_*` overrides. This
+  workaround was used for the `5645607` → `9e0398a` rewrite.
+
+**F1 final status — 2026-05-11.** Fully ratified.
+
+- Phase 1 file-content scrub (PR #165): merged; AC-1 residual
+  remediated by PR #167.
+- Phase 1.5 GitHub Actions workflow_run deletion: merged as part of
+  the out-of-band Phase 2 cycle.
+- Phase 2 git-history rewrite + force-push: complete; 5 stale
+  remote branches deleted by Founder Option α; identity list on
+  `origin/*` reduced to the 4 whitelisted identities.
+- Identity policy enforcement (PR #166): merged as `cb1c8e5`;
+  validate-identities CI job, `.mailmap`, pre-commit hook,
+  `CONTRIBUTING.md` § Identity policy subsection all live on
+  `main`.
+- Reviewer artifacts (PR #168): v0.2.0 of RV-CODE-037 and
+  RV-ARCH-002 live at `docs/reviews/`.
+- ADR-019 v1.0 repo migration plan: merged; deferred residue
+  (F-CARRY-2, F-CARRY-3, GitHub edit-history) documented and
+  scheduled for the v1.0 milestone wave.
+
+Post-Phase-2 + post-remediation `origin/main` HEAD at filing time:
+ratified by the final SO ratify PR that bundles this Closure
+ratification entry, the matching `SESSION-STATE.md` v0.3.11 →
+v0.3.12 bump, and the
+`docs/session-log/2026-05-11-session-1.md` wrapper-finding addendum.
+
 ## 11. Amendment Delta — v0.2.0 → v0.3.0
 
 Amendment trigger: RV-CODE-033 verdict `fail` on PR #135 (TKT-034 v0.2.0 implementation iter-1) returned 2 HIGH-severity blockers + 1 MEDIUM gap. Independently re-verified by SO pass-2 ratify-ack on PR #137. Founder approved iter-2 dispatch with Architect amendment first (path 4a — add real `shared-skills/<skill>/SKILL.md` source tree).
