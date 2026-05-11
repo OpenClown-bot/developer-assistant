@@ -101,12 +101,12 @@ Hard rules for this ticket (governance constraints inherited from ARCH-002 + the
 
 ## 10. Execution Log
 
-### Cycle 1 — 2026-05-10
+### iter-1 — 2026-05-10 — Code Executor
 
 - **Branch:** `exe/tkt-040-skill-loadout-context-budget`
 - **Base:** `main` at `ce62fa1998a0a9d9970e2ff1a3bad14e02e09c53`
-- **Executor:** Devin platform, acct id `devin-d060f47aadf34bbba9807912a35ceb71`. Underlying model not directly introspectable per Devin product identity rules; assigned model per `AGENTS.md` is DeepSeek V4 Pro main / GLM 5.1 fallback.
-- **SO ratify pass-1:** `devin-3babca2c0809445da4d3badb8645e199` at 2026-05-10 (pre-implementation).
+- **Executor:** Devin platform. Underlying model not directly introspectable per Devin product identity rules; assigned model per `AGENTS.md` is DeepSeek V4 Pro main / GLM 5.1 fallback.
+- **SO ratify pass-1:** 2026-05-10 (pre-implementation).
 - **Files created (4):** `scripts/measure_role_context.py`, `docs/architecture/role-context-budgets.md`, `src/developer_assistant/hermes_plugins/dev_assist_work_queue/skill_loader.py`, `tests/test_skill_loader_mcp_exclusion.py`.
 - **Files modified (3):** `docs/architecture/MULTI-HERMES-CONTRACT.md` (§ 5.0.1 NEW + § 5.0.2 renumbered + § 5.1–5.5 footers), `src/developer_assistant/hermes_plugins/dev_assist_work_queue/tools.py` (register hook), this file (§ 10 entry).
 - **Acceptance criteria:**
@@ -129,7 +129,7 @@ Hard rules for this ticket (governance constraints inherited from ARCH-002 + the
   4. `pytest tests/ -q --tb=no` → `60 failed, 1139 passed, 2 skipped, 84 subtests passed`. Failure count identical to pre-existing baseline (`60 failed, 1124 passed, 2 skipped, 84 subtests passed` on `main`); the 15 additional passes are exactly the new AC-5 tests. No regressions. Baseline failures span `tests/test_self_deployment_scripts.py` (~48 unique + subtests), `tests/test_health_endpoint.py` (1), and `tests/test_runtime_check.py` (1) — all unrelated to the skill-loader / work-queue / contract changes.
 - **Path substitution note:** TKT-040 § 5 Allowed Files lists the speculative path `src/work_queue/skill_loader.py`; the actual repo structure places the plugin at `src/developer_assistant/hermes_plugins/dev_assist_work_queue/`. The plugin-package sibling location was chosen for cleaner separation and to match the `dev_assist_escalation_policy` plugin's hook precedent (`hooks["pre_tool_call"]`). The substitution is within the spirit of § 5 (plugin-side enforcement, before skill-content load) and was approved by SO ratify pass-1.
 
-### Cycle 1 — 2026-05-10 — Iter 2
+### iter-2 — 2026-05-10 — Code Executor
 
 - **Trigger:** Reviewer RV-CODE-034 § 5 MEDIUM finding (Kimi K2.6 via opencode + OmniRoute, cross-family witness).
 - **Scope:** Refresh stale context-budget numbers only. No code, test, script, or contract-text edits.
