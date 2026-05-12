@@ -59,7 +59,7 @@ class TestHealthExtendedFieldsAsyncRoundtrip(unittest.IsolatedAsyncioTestCase):
         os.makedirs(prompts_dir, exist_ok=True)
         self.prompt_path_abs = os.path.join(prompts_dir, "planner.md")
         Path(self.prompt_path_abs).write_text(
-            "# Planner role prompt (smoke test fixture)\n", encoding="utf-8",
+            "# Planner role prompt (smoke test fixture)\n", encoding="utf-8", newline="",
         )
         self.expected_sha = hashlib.sha256(
             Path(self.prompt_path_abs).read_bytes(),
@@ -135,7 +135,7 @@ class TestHealthExtendedFieldsAsyncRoundtrip(unittest.IsolatedAsyncioTestCase):
                 None, _http_get, "127.0.0.1", self.port, "/health",
             )
             # Tamper the prompt file after boot.
-            Path(self.prompt_path_abs).write_text("# Tampered\n", encoding="utf-8")
+            Path(self.prompt_path_abs).write_text("# Tampered\n", encoding="utf-8", newline="")
             new_sha = hashlib.sha256(b"# Tampered\n").hexdigest()
             _, body2 = await asyncio.get_event_loop().run_in_executor(
                 None, _http_get, "127.0.0.1", self.port, "/health",
