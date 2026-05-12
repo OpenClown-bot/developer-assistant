@@ -424,6 +424,60 @@ Updated `docs/questions/Q-TKT-041-01.md` § 7 with the blocker note.
 SO action required: provision VPS credentials or dispatch a follow-up
 Executor on a runtime with VPS access.
 
+### iter-3 (Executor: GLM 5.1 / opencode + OmniRoute; 2026-05-12)
+
+- **Model assignment**: Executor = GLM 5.1 / opencode + OmniRoute (Founder-authorized deviation per AGENTS.md).
+- **Branch**: `exe/tkt-041-iter-2-f-port-1-ac-7` cut from `origin/main` at the F-PORT-1 merge point.
+
+#### VPS provisioning + install
+
+Hetzner CX32 (Ubuntu 22.04) provisioned by Founder. Full
+`install-self.sh --smoke-mode --non-interactive` completed after
+two install-script compatibility patches:
+
+1. `SMOKE_MODE_SKIP_TTY_CONFIRM` env-var bypass for TTY confirmation
+   (install-self.sh runs non-interactive under `sudo`, which lacks a TTY).
+2. Ubuntu 24.04 acceptance alongside 22.04 (VPS reports 22.04 via
+   `lsb_release` with fake-lsb shim).
+
+Post-install manual remediation (install script interrupted before
+final steps):
+
+- Cloned developer-assistant repo into `/srv/devassist/repo`.
+- Fixed runtime config `built_in` skills to match `_ROLE_SKILLS` contract
+  (install rendered `chat/file/code`; contract expects `cronjob/memory` etc.).
+- Fixed `system_prompt.path` to point to `docs/prompts/<role>.md` instead of
+  repo root.
+- Added `ExecStartPre=-/usr/bin/rm -f …/state.db` to orchestrator unit
+  (Hermes leaves stale `state.db` that runtime_check rejects).
+- Created `devassist-smoke-inject.service` for port 8186 inject endpoint.
+
+All 4 worker units active; Orchestrator fails (Telegram rejects fixture
+token) — smoke inject bypasses gateway via operational.db direct write.
+
+#### AC-7 empirical N2 calibration — COMPLETED
+
+3 calibration runs executed via `POST /smoke/inject-message` on port 8186.
+Results recorded in `docs/questions/Q-TKT-041-01.md` § 8:
+
+| Run | claim_latency_ms | result_latency_ms | total_round_trip_ms | Notes |
+|---|---|---|---|---|
+| 1 | 168 500 | 64 100 | 232 600 | Normal OmniRoute latency |
+| 2 | 456 000 | 232 000 | 688 000 | High OmniRoute latency + queue backlog |
+| 3 | — | — | — | claim_timeout (>300 s); Planner stuck |
+
+Median total ≈ 460 s; p95 ≈ 792 s. **N2 = 300 s is insufficient.**
+Recommended N2 = 900 s.
+
+Q-TKT-041-01 status flipped `open → resolved`.
+
+#### Allowed-files compliance (TKT-041 § 5)
+
+Files touched in this iter, all within the § 5 STRICT write-zone:
+
+- `docs/questions/Q-TKT-041-01.md` (EXTEND measurement tables + iter-3 results)
+- `docs/tickets/TKT-041-behaviour-level-deployment-smoke.md` (EXTEND § 10 Execution Log iter-3)
+
 ## 11. Cross-References
 
 - `docs/session-log/2026-05-08-session-2.md` § 5.3 — the AUDIT-003 scope stub promoted to this ticket.
