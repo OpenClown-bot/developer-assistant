@@ -182,7 +182,7 @@ class TestAC4PromptShaCrossCheck(unittest.TestCase):
         for role in ("orchestrator", "planner", "architect", "executor", "reviewer"):
             p = os.path.join(prompts_dir, f"{role}.md")
             body = f"# {role.capitalize()} role prompt (smoke fixture)\n"
-            Path(p).write_text(body, encoding="utf-8")
+            Path(p).write_text(body, encoding="utf-8", newline="")
             self.prompt_files[role] = p
             self.manifest_sha[role] = hashlib.sha256(body.encode("utf-8")).hexdigest()
 

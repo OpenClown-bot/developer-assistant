@@ -381,6 +381,49 @@ python3 -m unittest discover -s tests -p "test_*.py" -v
 # baseline issues on main@9482edb; unchanged by this PR.
 ```
 
+### iter-2 (Executor: GLM 5.1 / opencode + OmniRoute; 2026-05-12)
+
+- **Model assignment**: Executor = GLM 5.1 / opencode + OmniRoute (per NUDGE iter-2 dispatch).
+- **Branch**: `exe/tkt-041-iter-2-f-port-1-ac-7` cut from `origin/main@5de9b50` (post-PR #176 merge).
+- **Predecessor review**: RV-CODE-038 (`docs/reviews/RV-CODE-038.md`, verdict `pass_with_changes`).
+
+#### F-PORT-1 closure (RV-CODE-038 § Finding)
+
+Added `newline=""` to exactly three `Path.write_text(..., encoding="utf-8")`
+call sites that are paired with byte-literal SHA-256 expectations:
+
+1. `tests/test_behaviour_smoke.py:185` — `TestAC4PromptShaCrossCheck.setUp` body write.
+2. `tests/test_observability_manager_smoke.py:61` — `TestHealthExtendedFieldsAsyncRoundtrip.setUp` prompt write.
+3. `tests/test_observability_manager_smoke.py:138` — `test_prompt_sha256_recomputed_post_tamper` tamper write.
+
+The other `Path.write_text` calls in these files (marker writes at `:231`,
+`:98`, `:130`, tamper write at `:203`) compare against disk-read SHAs and
+do NOT need the flag. Diff is surgical: 3 lines changed, no other modifications.
+
+#### Verification
+
+```
+python3 -m unittest tests.test_behaviour_smoke tests.test_observability_manager_smoke -v
+# Ran 20 tests in ~1.3s — OK
+```
+
+All 20 new smoke tests pass on Linux. Windows portability confirmed by
+construction: `newline=""` prevents `\n` → `\r\n` translation, making
+on-disk bytes identical to the Python string literals used in SHA-256
+byte-literal comparisons. Windows host verification deferred (noted in PR body).
+
+#### AC-7 empirical N2 calibration — VPS BLOCKED
+
+The iter-2 NUDGE dispatched the Executor to run ≥ 3 smoke calibration
+runs on a Hetzner VPS. No VPS credentials were provisioned to this
+Executor runtime. Per NUDGE: *"if missing, STOP and surface to SO."*
+
+Q-TKT-041-01 status remains `open`; measurement tables remain TBD.
+Updated `docs/questions/Q-TKT-041-01.md` § 7 with the blocker note.
+
+SO action required: provision VPS credentials or dispatch a follow-up
+Executor on a runtime with VPS access.
+
 ## 11. Cross-References
 
 - `docs/session-log/2026-05-08-session-2.md` § 5.3 — the AUDIT-003 scope stub promoted to this ticket.
