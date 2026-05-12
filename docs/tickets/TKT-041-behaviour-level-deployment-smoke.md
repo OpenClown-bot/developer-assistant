@@ -478,6 +478,66 @@ Files touched in this iter, all within the § 5 STRICT write-zone:
 - `docs/questions/Q-TKT-041-01.md` (EXTEND measurement tables + iter-3 results)
 - `docs/tickets/TKT-041-behaviour-level-deployment-smoke.md` (EXTEND § 10 Execution Log iter-3)
 
+#### OmniRoute latency root-cause analysis
+
+Initial attribution of high N2 to "OmniRoute endpoint latency" was
+partially correct but incomplete. Post-calibration targeted benchmarks
+reveal three distinct latency layers:
+
+**Layer 1 — OmniRoute / Qwen 3.6 Plus provider jitter.**
+5-run benchmarks against `accounts/fireworks/models/qwen3p6-plus`
+(non-streaming, max_tokens=100, short system prompt):
+
+| Run | Non-stream latency | Stream latency |
+|---|---|---|
+| 1 | 84.2 s (cold) | 1.6 s |
+| 2 | 6.3 s | 4.0 s |
+| 3 | 7.7 s | 80.3 s (!) |
+| 4 | 1.9 s | 2.1 s |
+| 5 | 2.5 s | 75.2 s (!) |
+
+Both modes exhibit 75–84 s spikes with ~40 % probability per call.
+Kimi K2.6 on the same OmniRoute instance: 1.6–7.2 s, zero spikes.
+Root cause: **Fireworks-side Qwen 3.6 Plus cold-start / queue jitter**
+with reasoning tokens (see Layer 2).
+
+**Layer 2 — Qwen 3.6 Plus reasoning_content token absorption.**
+In non-streaming calls with `max_tokens=200`, Qwen 3.6 Plus produces
+`content: null` and spends all 200 tokens in `reasoning_content`:
+```
+"usage": {"prompt_tokens": 44, "completion_tokens": 200, "total_tokens": 244}
+"message": {"content": null, "reasoning_content": "<thinking>"}
+```
+Hermes sees an empty assistant turn and may re-prompt, creating a
+multi-call loop that amplifies Layer 1 jitter into the observed
+168–688 s round-trips.
+
+**Layer 3 — Worker-runner poll = LLM call (no SQL pre-check).**
+The `devassist-worker-runner` script invokes `hermes chat -q "Check
+work_items table for pending tasks…"` on every 30 s poll cycle, even
+when no pending items exist. Each call triggers a full Hermes agent
+loop (system prompt + skills load + LLM call). A cheap `SELECT EXISTS`
+pre-check would eliminate ~90 % of LLM calls in steady state.
+
+**Mitigation recommendations:**
+
+1. **Worker-runner SQL pre-check** — add `SELECT 1 FROM work_items WHERE
+   target_role=? AND status='pending' LIMIT 1` before `hermes chat`.
+   Eliminates idle-poll LLM calls.
+2. **Hermes `stream=True`** — streaming avoids the full-reasoning-buffer
+   blocking pattern. Even with Layer 1 spikes, streaming TTFB is <5 s
+   for non-spike calls, allowing tool-call dispatch before completion.
+3. **Qwen 3.6 Plus `reasoning_budget` cap** — set a lower
+   `max_completion_tokens` for reasoning or use `thinking` mode control
+   to prevent token absorption.
+4. **Model fallback tuning** — consider routing planner poll calls to
+   Kimi K2.6 (stable, no reasoning jitter) while reserving Qwen 3.6
+   Plus for complex planning tasks.
+5. **`llm_calls` observability gap** — the `llm_calls` table was empty
+   throughout calibration; Hermes does not write to it. This prevents
+   empirical per-call latency analysis and should be addressed in a
+   follow-up ticket.
+
 ## 11. Cross-References
 
 - `docs/session-log/2026-05-08-session-2.md` § 5.3 — the AUDIT-003 scope stub promoted to this ticket.
